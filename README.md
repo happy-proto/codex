@@ -54,6 +54,8 @@ The [fork workflow](.github/workflows/fork.yml) tests installation contracts,
 builds and signs the complete package, tests update behavior, and smoke-tests
 the actual CLI and app-server before publishing. Upstream workflows that require
 OpenAI infrastructure are disabled in this fork's GitHub settings.
+PRs run lightweight script checks; `fork` pushes run the complete build and Rust
+tests once for the integrated stack.
 
 下方保留的上游介绍与安装说明指向 **官方版本**，不用于安装此 fork。
 
