@@ -5,10 +5,12 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
+import selectors
 import subprocess
 import tempfile
+import time
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 REPO = "happy-proto/codex"
@@ -70,25 +72,65 @@ def smoke(package):
             "echo fork-smoke",
             env=env,
         )
-        request = {
-            "id": 1,
-            "method": "initialize",
-            "params": {"clientInfo": {"name": "fork-smoke", "version": "1"}},
-        }
-        server = run(
-            str(cli),
-            "app-server",
-            env=env,
-            input=json.dumps(request) + "\n",
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        responses = [json.loads(line) for line in server.stdout.splitlines() if line]
-        if not any(item.get("id") == 1 and "result" in item for item in responses):
-            raise ValueError(
-                f"app-server initialize failed: {server.stdout} {server.stderr}"
-            )
+        initialize_app_server(cli, env)
+
+
+def initialize_app_server(cli, env):
+    request = {
+        "id": 1,
+        "method": "initialize",
+        "params": {"clientInfo": {"name": "fork-smoke", "version": "1"}},
+    }
+    server = subprocess.Popen(
+        [str(cli), "app-server"],
+        cwd=ROOT,
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        server.stdin.write((json.dumps(request) + "\n").encode())
+        server.stdin.flush()
+        stdout = b""
+        stderr = b""
+        initialized = False
+        deadline = time.monotonic() + 60
+        with selectors.DefaultSelector() as streams:
+            streams.register(server.stdout, selectors.EVENT_READ, "stdout")
+            streams.register(server.stderr, selectors.EVENT_READ, "stderr")
+            while not initialized:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not streams.get_map():
+                    raise ValueError(
+                        f"app-server initialize failed: {stdout!r} {stderr!r}"
+                    )
+                for key, _ in streams.select(remaining):
+                    chunk = os.read(key.fd, 65536)
+                    if not chunk:
+                        streams.unregister(key.fileobj)
+                    elif key.data == "stderr":
+                        stderr += chunk
+                    else:
+                        stdout += chunk
+                        while b"\n" in stdout:
+                            line, stdout = stdout.split(b"\n", 1)
+                            response = json.loads(line)
+                            if response.get("id") == 1 and "result" in response:
+                                initialized = True
+        # EOF starts server shutdown, so send it only after initialization.
+        server.stdin.close()
+        server.stdin = None
+        _, stderr_tail = server.communicate(timeout=60)
+        if server.returncode:
+            raise ValueError(f"app-server shutdown failed: {stderr + stderr_tail!r}")
+    finally:
+        if server.poll() is None:
+            server.kill()
+            server.wait(timeout=5)
+        for stream in (server.stdin, server.stdout, server.stderr):
+            if stream is not None:
+                stream.close()
 
 
 def build():
@@ -160,7 +202,10 @@ def publish():
         return
     tag = metadata["tag"]
     existing = subprocess.run(
-        ["gh", "release", "view", tag, "--repo", REPO], cwd=ROOT, capture_output=True
+        ["gh", "release", "view", tag, "--repo", REPO],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
     )
     if existing.returncode:
         run(
@@ -213,6 +258,7 @@ def publish():
         cwd=ROOT,
         capture_output=True,
         text=True,
+        check=False,
     )
     if reference.returncode == 0:
         api(

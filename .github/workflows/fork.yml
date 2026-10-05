@@ -38,6 +38,7 @@ jobs:
       CARGO_BUILD_JOBS: '3'
       CARGO_PROFILE_RELEASE_DEBUG: '0'
       CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'off'
+      CARGO_PROFILE_RELEASE_LTO: 'false'
       STABLE_GIT_COMMIT: ${{ github.sha }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
