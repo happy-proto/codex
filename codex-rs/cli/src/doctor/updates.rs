@@ -435,14 +435,18 @@ async fn fetch_latest_github_release_version(
         .filter(|info| !info.draft)
         .filter_map(|info| {
             let version = info.tag_name.strip_prefix("fork-v")?;
-            let parsed = codex_build_info::BuildInfo::from_version(version)
+            let upstream_version = version.strip_suffix(".fork")?;
+            let parsed = codex_build_info::BuildInfo::from_version(upstream_version)
                 .version()
                 .clone();
-            (parsed.pre.as_str().starts_with("alpha.") && parsed.pre.as_str().ends_with(".fork"))
-                .then_some(parsed)
+            parsed
+                .pre
+                .as_str()
+                .starts_with("alpha.")
+                .then_some((parsed, version.to_string()))
         })
-        .max()
-        .map(|version| version.to_string())
+        .max_by(|left, right| left.0.cmp(&right.0))
+        .map(|(_, version)| version)
         .ok_or_else(|| "No published fork alpha release".to_string())
 }
 
