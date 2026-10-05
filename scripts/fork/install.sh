@@ -39,6 +39,9 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 # Refuse simultaneous installation rather than replacing a selected package.
 [ ! -e "$ROOT/install.lock.d" ] || { echo 'An official installer is running.' >&2; exit 1; }
+# Share the official macOS installer's advisory lock across both distributions.
+exec 9<>"$ROOT/install.lock"
+lockf -t 0 9 || { echo 'Another installer is running.' >&2; exit 1; }
 mkdir "$ROOT/fork-install.lock" || { echo 'Another fork installer is running.' >&2; exit 1; }
 locked=true
 
