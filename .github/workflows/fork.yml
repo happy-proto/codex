@@ -67,9 +67,9 @@ jobs:
       - name: Test update behavior in the release configuration
         working-directory: codex-rs
         run: |
-          cargo test --release -p codex-tui --lib updates_cache
-          cargo test --release -p codex-tui --lib update_action
-          cargo test --release -p codex-app-server-daemon --lib settings_tests
+          cargo test --release --target aarch64-apple-darwin -p codex-tui --lib updates_cache
+          cargo test --release --target aarch64-apple-darwin -p codex-tui --lib update_action
+          cargo test --release --target aarch64-apple-darwin -p codex-app-server-daemon --lib settings_tests
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: fork-package-${{ github.sha }}
