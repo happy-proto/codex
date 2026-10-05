@@ -30,6 +30,7 @@ jobs:
         run: sh -n scripts/fork/install.sh
 
   build:
+    if: github.event_name != 'pull_request'
     needs: scripts
     runs-on: macos-15
     timeout-minutes: 180
@@ -58,7 +59,9 @@ jobs:
           cache-on-failure: true
           shared-key: fork-macos-arm64
       - name: Install version-management tool
-        run: cargo install cargo-edit --locked --no-default-features --features set-version
+        uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
+        with:
+          tool: cargo-edit
       - name: Validate source and build signed complete package
         run: python3 scripts/fork/release.py build
       - name: Test update behavior in the release configuration

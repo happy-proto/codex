@@ -16,6 +16,7 @@ TARGET = "aarch64-apple-darwin"
 
 
 def run(*args, **kwargs):
+    kwargs.setdefault("env", {**os.environ, "CODEX_REPO_ROOT": str(ROOT)})
     return subprocess.run(args, cwd=ROOT, check=True, **kwargs)
 
 

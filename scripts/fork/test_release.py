@@ -6,11 +6,24 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 import release
 
 
 class VersionTests(unittest.TestCase):
+    def test_package_builder_receives_repository_root_without_compilation(self):
+        with mock.patch.dict(os.environ):
+            os.environ.pop("CODEX_REPO_ROOT", None)
+            result = release.run(
+                "python3",
+                "scripts/build_codex_package.py",
+                "--help",
+                capture_output=True,
+                text=True,
+            )
+        self.assertIn("--package-version", result.stdout)
+
     def test_alpha_version_has_only_fork_marker(self):
         self.assertEqual(
             release.fork_version("rust-v0.162.0-alpha.14"), "0.162.0-alpha.14.fork"
