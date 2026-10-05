@@ -81,6 +81,7 @@ jobs:
         working-directory: codex-rs
         run: |
           cargo test --release --target aarch64-apple-darwin -p codex-tui --lib updates_cache
+          cargo test --release --target aarch64-apple-darwin -p codex-tui --lib updates::tests
           cargo test --release --target aarch64-apple-darwin -p codex-tui --lib update_action
           cargo test --release --target aarch64-apple-darwin -p codex-app-server-daemon --lib settings_tests
       - name: Verify fork update presentation
