@@ -207,15 +207,35 @@ def publish():
     if source != current:
         print("Skipping publication of superseded fork build.")
         return
-    api(
-        f"repos/{REPO}/git/refs/tags/{tag}",
-        "--method",
-        "PATCH",
-        "-f",
-        f"sha={source}",
-        "-F",
-        "force=true",
+    # GitHub does not create a new tag when saving a release as a draft.
+    reference = subprocess.run(
+        ["gh", "api", f"repos/{REPO}/git/ref/tags/{tag}"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
     )
+    if reference.returncode == 0:
+        api(
+            f"repos/{REPO}/git/refs/tags/{tag}",
+            "--method",
+            "PATCH",
+            "-f",
+            f"sha={source}",
+            "-F",
+            "force=true",
+        )
+    elif "(HTTP 404)" in reference.stderr:
+        api(
+            f"repos/{REPO}/git/refs",
+            "--method",
+            "POST",
+            "-f",
+            f"ref=refs/tags/{tag}",
+            "-f",
+            f"sha={source}",
+        )
+    else:
+        reference.check_returncode()
     run(
         "gh",
         "release",
