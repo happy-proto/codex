@@ -439,8 +439,7 @@ impl App {
             );
             if let Err(error) = self
                 .chat_widget
-                .terminal_working_directory
-                .update(self.chat_widget.config.cwd.as_path(), local_workspace)
+                .update_terminal_working_directory(local_workspace)
             {
                 tracing::warn!(%error, "failed to report terminal working directory");
             }
