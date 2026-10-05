@@ -1,3 +1,24 @@
+# Codex personal fork
+
+This is [happy-proto/codex](https://github.com/happy-proto/codex), a personal fork
+of [OpenAI Codex](https://github.com/openai/codex). It follows upstream **alpha**
+releases and maintains custom features as long-lived stacked pull requests.
+It is public for reproducible installation, with no promise of general support.
+
+- `main`: the unmodified selected upstream alpha release commit.
+- `fork`: the complete feature stack and this repository's default branch.
+- Feature PRs remain open and are rebased when adopting a new upstream alpha.
+- This fork does not add localization or distribute the official Desktop app.
+
+Fork installation and release instructions are maintained with the release
+layer. The repository-local [maintenance skill](.agents/skills/codex-fork-maintenance/SKILL.md)
+defines change ownership, alpha synchronization, and stack verification.
+
+The upstream introduction and installation instructions below refer to the
+**official** distribution, not this fork.
+
+---
+
 <p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
 <p align="center">
   <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
