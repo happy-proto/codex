@@ -5,6 +5,15 @@ use super::DaemonSettings;
 use super::MAX_SHUTDOWN_GRACE_SECONDS;
 
 #[tokio::test]
+async fn fork_defaults_to_manual_updates() {
+    let temp = TempDir::new().expect("temp dir");
+    let settings = DaemonSettings::load(&temp.path().join("settings.json"))
+        .await
+        .expect("load defaults");
+    assert_eq!(settings.auto_update_enabled, false);
+}
+
+#[tokio::test]
 async fn remote_control_save_preserves_updater_settings() {
     let temp = TempDir::new().expect("temp dir");
     let path = temp.path().join("settings.json");

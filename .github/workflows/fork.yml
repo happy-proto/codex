@@ -1,0 +1,97 @@
+name: Fork CI and release
+
+on:
+  pull_request:
+  push:
+    branches: [fork]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  scripts:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: '3.12'
+      - name: Test fork installation and publication contracts
+        run: python3 -m unittest discover -s scripts/fork -p 'test_*.py' -v
+      - name: Check shell syntax
+        run: sh -n scripts/fork/install.sh
+
+  build:
+    needs: scripts
+    runs-on: macos-15
+    timeout-minutes: 180
+    env:
+      CARGO_BUILD_JOBS: '3'
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'off'
+      STABLE_GIT_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch selected upstream alpha
+        run: |
+          tag=$(cat scripts/fork/upstream-tag)
+          git fetch https://github.com/openai/codex.git "refs/tags/$tag:refs/tags/$tag"
+          git fetch origin main
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+        with:
+          workspaces: codex-rs
+          cache-on-failure: true
+          shared-key: fork-macos-arm64
+      - name: Install version-management tool
+        run: cargo install cargo-edit --locked --no-default-features --features set-version
+      - name: Validate source and build signed complete package
+        run: python3 scripts/fork/release.py build
+      - name: Test update behavior in the release configuration
+        working-directory: codex-rs
+        run: |
+          cargo test --release -p codex-tui --lib updates_cache
+          cargo test --release -p codex-tui --lib update_action
+          cargo test --release -p codex-app-server-daemon --lib settings_tests
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: fork-package-${{ github.sha }}
+          path: |
+            fork-dist/*.tar.gz
+            fork-dist/fork-release.json
+            fork-dist/install.sh
+          if-no-files-found: error
+
+  publish:
+    if: github.repository == 'happy-proto/codex' && github.ref == 'refs/heads/fork' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: fork-package-${{ github.sha }}
+          path: fork-dist
+      - name: Publish verified build and update channel manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/fork/release.py publish
