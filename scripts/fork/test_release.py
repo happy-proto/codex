@@ -41,6 +41,84 @@ class VersionTests(unittest.TestCase):
                 release.fork_version(tag)
 
 
+class PublicationTests(unittest.TestCase):
+    def test_new_draft_without_tag_can_publish_verified_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dist = root / "fork-dist"
+            dist.mkdir()
+            archive = b"verified package bytes"
+            metadata = {
+                "tag": "fork-v0.162.0-alpha.14.fork",
+                "version": "0.162.0-alpha.14.fork",
+                "source_commit": "a" * 40,
+                "upstream_tag": "rust-v0.162.0-alpha.14",
+                "upstream_commit": "b" * 40,
+                "asset": "package.tar.gz",
+                "sha256": hashlib.sha256(archive).hexdigest(),
+            }
+            (dist / "fork-release.json").write_text(json.dumps(metadata))
+            (dist / metadata["asset"]).write_bytes(archive)
+            tags = {}
+            calls = []
+
+            def api(path, *args):
+                if path.endswith("heads/fork"):
+                    return {"object": {"sha": metadata["source_commit"]}}
+                if "POST" in args and path.endswith("git/refs"):
+                    tags[metadata["tag"]] = metadata["source_commit"]
+                    return {}
+                if "PATCH" in args:
+                    if metadata["tag"] not in tags:
+                        raise ValueError("GitHub cannot update a missing draft tag")
+                    tags[metadata["tag"]] = metadata["source_commit"]
+                    return {}
+                raise AssertionError((path, args))
+
+            def run(*args, **kwargs):
+                calls.append(args)
+                if args[:3] == ("gh", "release", "download"):
+                    destination = Path(args[args.index("--dir") + 1])
+                    (destination / metadata["asset"]).write_bytes(archive)
+
+            def query(args, **kwargs):
+                if args[:3] == ["gh", "release", "view"]:
+                    return subprocess.CompletedProcess(args, 0)
+                return subprocess.CompletedProcess(
+                    args, 1, stderr="gh: Not Found (HTTP 404)"
+                )
+
+            with (
+                mock.patch.object(release, "ROOT", root),
+                mock.patch.object(release, "api", side_effect=api),
+                mock.patch.object(release, "run", side_effect=run),
+                mock.patch.object(release.subprocess, "run", side_effect=query),
+            ):
+                release.publish()
+            self.assertEqual(tags[metadata["tag"]], metadata["source_commit"])
+            self.assertEqual(calls[-1][:3], ("gh", "release", "edit"))
+            self.assertIn("--draft=false", calls[-1])
+
+    def test_superseded_build_does_not_modify_releases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "fork-dist").mkdir()
+            (root / "fork-dist/fork-release.json").write_text(
+                json.dumps({"source_commit": "a" * 40})
+            )
+            with (
+                mock.patch.object(release, "ROOT", root),
+                mock.patch.object(
+                    release, "api", return_value={"object": {"sha": "b" * 40}}
+                ),
+                mock.patch.object(release, "run") as write,
+                mock.patch.object(release.subprocess, "run") as query,
+            ):
+                release.publish()
+            write.assert_not_called()
+            query.assert_not_called()
+
+
 class InstallerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
