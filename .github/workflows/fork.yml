@@ -75,7 +75,12 @@ jobs:
               for key, value in artifacts.items():
                   output.write(f"{key}={value}\n")
           PY
+      - name: Refresh the cached V8 build record
+        # rust-cache removes V8's profile-level gn_out directory. Its cached
+        # Cargo record must not bypass extraction of the pinned static library.
+        run: cargo clean --manifest-path codex-rs/Cargo.toml --target aarch64-apple-darwin --release -p v8
       - name: Validate source and build signed complete package
+        id: package
         run: python3 scripts/fork/release.py build
       - name: Test update behavior in the release configuration
         working-directory: codex-rs
@@ -100,6 +105,7 @@ jobs:
           path: codex-rs/tui/src/**/*.snap.new
           if-no-files-found: ignore
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        if: ${{ always() && steps.package.outcome == 'success' }}
         with:
           name: fork-package-${{ github.sha }}
           path: |
