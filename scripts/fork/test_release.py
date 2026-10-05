@@ -1,18 +1,34 @@
 import hashlib
 import json
 import os
-from pathlib import Path
 import signal
 import subprocess
 import tarfile
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import release
 
 
 class VersionTests(unittest.TestCase):
+    def test_initialization_keeps_input_open_until_the_response(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cli = Path(directory) / "fake-app-server"
+            cli.write_text(
+                """#!/usr/bin/env python3
+import json, select, sys
+request = json.loads(sys.stdin.readline())
+if select.select([sys.stdin], [], [], 0.05)[0] and sys.stdin.read() == "":
+    sys.exit(0)
+print(json.dumps({"id": request["id"], "result": {}}), flush=True)
+sys.stdin.read()
+"""
+            )
+            cli.chmod(0o755)
+            release.initialize_app_server(cli, os.environ.copy())
+
     def test_package_builder_receives_repository_root_without_compilation(self):
         with mock.patch.dict(os.environ):
             os.environ.pop("CODEX_REPO_ROOT", None)
@@ -203,6 +219,7 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
     def install(self, *args, succeeds=True):
         result = subprocess.run(
             ["sh", str(Path(__file__).with_name("install.sh")), *args],
+            check=False,
             env=self.env,
             capture_output=True,
             text=True,
