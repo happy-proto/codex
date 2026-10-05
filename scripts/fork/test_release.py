@@ -258,6 +258,17 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
             + str(old),
         )
 
+    def test_update_invalidates_the_previous_build_notice(self):
+        self.prepare_build("a")
+        self.install()
+        cache = self.home / "fork-version.json"
+        cache.write_text(json.dumps({"latest_commit": "a" * 40}))
+        self.prepare_build("b")
+        self.install()
+        self.assertFalse(
+            cache.exists(), "old commit would look like a different update"
+        )
+
     def test_manifest_version_mismatch_does_not_install(self):
         manifest = self.prepare_build("a")
         manifest["version"] = "0.162.0-alpha.13.fork"
