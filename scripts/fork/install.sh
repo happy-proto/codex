@@ -58,6 +58,8 @@ link() {
 select_package() {
   # Remove the official latest-channel marker: this installation is manually updated.
   rm -f "$ROOT/auto-update-version"
+  # A cached previous commit must not offer a stale update after selecting a new build.
+  rm -f "$CODEX_HOME_DIR/fork-version.json"
   link "$1" "$ROOT/current"
   link "$ROOT/current/bin/codex" "$BIN_DIR/codex"
   link "$ROOT/current/bin/codex-code-mode-host" "$BIN_DIR/codex-code-mode-host"

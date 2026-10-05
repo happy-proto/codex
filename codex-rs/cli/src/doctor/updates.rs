@@ -435,7 +435,9 @@ async fn fetch_latest_github_release_version(
         .filter(|info| !info.draft)
         .filter_map(|info| {
             let version = info.tag_name.strip_prefix("fork-v")?;
-            let parsed = semver::Version::parse(version).ok()?;
+            let parsed = codex_build_info::BuildInfo::from_version(version)
+                .version()
+                .clone();
             (parsed.pre.as_str().starts_with("alpha.") && parsed.pre.as_str().ends_with(".fork"))
                 .then_some(parsed)
         })
