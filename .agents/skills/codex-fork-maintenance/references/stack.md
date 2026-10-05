@@ -5,7 +5,8 @@
 治理文档、构建发布和产品功能按实际维护目的区分，不能根据当前 checkout 猜归属。
 
 使用官方 `github/gh-stack` 扩展；先逐层查看 `gh stack --help` 和目标子命令帮助。
-读命令明确使用 `GH_REPO=happy-proto/codex`，支持 `--remote` 的写命令指定 `origin`。
+所有 `gh stack` 命令明确使用 `GH_REPO=happy-proto/codex`，支持 `--remote` 的写命令同时指定 `origin`。
+仅指定 `--remote origin` 仍可能让 PR 查询落到上游；看到上游 PR URL 或意外的 merged 提示时立即停止并重新核对路由。
 扩展会从 origin 推断仓库身份，不能只信 GH_REPO；检查 `.git/gh-stack` 的 repository、REST URL 和 PR URL 都指向 fork。
 
 修改下层后先级联 rebase 上层，再统一推送，保留 PR 编号和讨论。推送前记录远端旧 SHA；必要的历史改写用明确旧 SHA 的 force-with-lease。
