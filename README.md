@@ -50,6 +50,12 @@ curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork
 `~/.codex/packages/standalone/official-before-fork`。
 需要返回官方版本时，可重新运行下方官方安装器并指定所需版本。
 
+## Fork 功能
+
+- **终端工作目录（OSC 7）**：在启动、会话切换、恢复和 worktree 切换后报告当前本地会话目录，
+  让兼容终端在该目录打开新标签页、面板，并解析相对文件链接。
+  跳过远程工作区和非终端输出，跟踪 [上游 issue #38229](https://github.com/openai/codex/issues/38229)。
+
 ## 维护
 
 通用规则见 [AGENTS.md](AGENTS.md)，具体操作见仓库内的
