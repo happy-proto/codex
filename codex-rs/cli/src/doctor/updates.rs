@@ -32,8 +32,9 @@ use super::network;
 
 const MAX_VERSION_RESPONSE_BYTES: usize = 1024 * 1024;
 
-const VERSION_FILE_NAME: &str = "version.json";
-const GITHUB_LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
+const VERSION_FILE_NAME: &str = "fork-version.json";
+const GITHUB_LATEST_RELEASE_URL: &str =
+    "https://api.github.com/repos/happy-proto/codex/releases?per_page=100";
 const HOMEBREW_CASK_API_URL: &str = "https://formulae.brew.sh/api/cask/codex.json";
 #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
 const DESKTOP_UPDATE_URL: &str = "https://persistent.oaistatic.com/codex-app-prod/appcast-x64.xml";
@@ -403,6 +404,12 @@ async fn fetch_latest_version(
     client: &RouteAwareClientPool,
     context: &InstallContext,
 ) -> Result<String, String> {
+    if context
+        .package_manifest()
+        .is_some_and(|manifest| manifest.version.pre.as_str().ends_with(".fork"))
+    {
+        return fetch_latest_github_release_version(client).await;
+    }
     match &context.method {
         InstallMethod::Brew => fetch_homebrew_cask_version(client).await,
         InstallMethod::Npm
@@ -420,13 +427,21 @@ async fn fetch_latest_github_release_version(
     #[derive(Deserialize)]
     struct ReleaseInfo {
         tag_name: String,
+        draft: bool,
     }
-
-    let info = http_get_json::<ReleaseInfo>(client, GITHUB_LATEST_RELEASE_URL).await?;
-    info.tag_name
-        .strip_prefix("rust-v")
-        .map(str::to_string)
-        .ok_or_else(|| format!("failed to parse latest tag {}", info.tag_name))
+    let releases = http_get_json::<Vec<ReleaseInfo>>(client, GITHUB_LATEST_RELEASE_URL).await?;
+    releases
+        .into_iter()
+        .filter(|info| !info.draft)
+        .filter_map(|info| {
+            let version = info.tag_name.strip_prefix("fork-v")?;
+            let parsed = semver::Version::parse(version).ok()?;
+            (parsed.pre.as_str().starts_with("alpha.") && parsed.pre.as_str().ends_with(".fork"))
+                .then_some(parsed)
+        })
+        .max()
+        .map(|version| version.to_string())
+        .ok_or_else(|| "No published fork alpha release".to_string())
 }
 
 async fn fetch_homebrew_cask_version(client: &RouteAwareClientPool) -> Result<String, String> {

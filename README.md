@@ -9,9 +9,51 @@
 - 功能 PR 长期开启，升级上游 alpha 时重放各层修改。
 - 不新增 i18n，也不分发官方 Desktop 应用。
 
-安装与发布说明由发布层维护。仓库内的
-[维护 skill](.agents/skills/codex-fork-maintenance/SKILL.md) 定义操作入口，
-修改归属等通用规则见 [AGENTS.md](AGENTS.md)。
+## Install this fork
+
+Only macOS Apple Silicon is supported initially. The complete package includes
+the code-mode host, ripgrep, and patched zsh. It is ad-hoc signed, not Apple
+notarized; macOS may require explicit approval on first use.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork/install.sh | sh
+codex --version
+```
+
+The installer selects a published fork alpha Release, verifies the package
+SHA-256, preserves the previous package, and replaces `codex` in
+`~/.local/bin`. `CODEX_HOME` and `CODEX_INSTALL_DIR` override these paths.
+Configuration, credentials, and sessions continue using the existing Codex home.
+Add `~/.local/bin` to PATH if needed; remove a competing npm/Homebrew installation
+only if you want to stop managing that installation separately.
+
+```sh
+codex update            # update explicitly; background upgrades are disabled
+# Select the previous locally installed package:
+curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork/install.sh | sh -s -- --rollback
+```
+
+Versions use the upstream alpha plus `.fork`, for example
+`0.162.0-alpha.14.fork`. Each verified `fork` update automatically publishes.
+Within the same alpha, the same Release and tag are updated; version strings
+alone do **not** identify a build. `fork-release.json` records source and upstream
+commits and the package digest. Package asset names include their digest and
+older packages remain available. Fork updates never select the official
+distribution; upstream alpha synchronization is initiated by the maintainer.
+
+The first switch from an official standalone package also preserves it under
+`~/.codex/packages/standalone/official-before-fork`. You can return to the
+official distribution by rerunning its installer below with the desired version.
+
+## Maintenance
+
+The repository-local [maintenance skill](.agents/skills/codex-fork-maintenance/SKILL.md)
+defines change ownership, alpha synchronization, and stack verification.
+Keep local work lightweight: compilation and heavy tests run in GitHub Actions.
+The [fork workflow](.github/workflows/fork.yml) tests installation contracts,
+builds and signs the complete package, tests update behavior, and smoke-tests
+the actual CLI and app-server before publishing. Upstream workflows that require
+OpenAI infrastructure are disabled in this fork's GitHub settings.
 
 下方保留的上游介绍与安装说明指向 **官方版本**，不用于安装此 fork。
 
