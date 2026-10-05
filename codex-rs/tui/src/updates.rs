@@ -30,6 +30,12 @@ struct ForkRelease {
     source_commit: String,
 }
 
+fn upstream_alpha_version(tag: &str) -> Option<semver::Version> {
+    let version = tag.strip_prefix("fork-v")?.strip_suffix(".fork")?;
+    let parsed = semver::Version::parse(version).ok()?;
+    parsed.pre.as_str().starts_with("alpha.").then_some(parsed)
+}
+
 pub fn get_upgrade_version(config: &Config) -> Option<String> {
     if !config.check_for_update_on_startup || BuildInfo::get().is_source_build() {
         return None;
@@ -67,10 +73,8 @@ async fn check_for_update(version_file: &Path, factory: HttpClientFactory) -> an
         .into_iter()
         .filter(|release| !release.draft)
         .filter_map(|release| {
-            let version = release.tag_name.strip_prefix("fork-v")?;
-            let parsed = semver::Version::parse(version).ok()?;
-            (parsed.pre.as_str().starts_with("alpha.") && parsed.pre.as_str().ends_with(".fork"))
-                .then_some((parsed, release.tag_name))
+            let parsed = upstream_alpha_version(&release.tag_name)?;
+            Some((parsed, release.tag_name))
         })
         .max_by(|left, right| left.0.cmp(&right.0))
         .map(|(_, tag)| tag)
@@ -120,4 +124,27 @@ pub fn get_upgrade_version_for_popup(config: &Config) -> Option<String> {
         return None;
     }
     Some(latest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::upstream_alpha_version;
+
+    #[test]
+    fn alpha_hotfix_sorts_after_the_base_alpha_without_fork_marker() {
+        let base = upstream_alpha_version("fork-v0.162.0-alpha.14.fork").unwrap();
+        let hotfix = upstream_alpha_version("fork-v0.162.0-alpha.14.2.fork").unwrap();
+        assert!(hotfix > base);
+    }
+
+    #[test]
+    fn only_fork_alpha_tags_participate_in_update_selection() {
+        for tag in [
+            "rust-v0.162.0-alpha.14",
+            "fork-v0.162.0.fork",
+            "fork-v0.162.0-alpha.14",
+        ] {
+            assert!(upstream_alpha_version(tag).is_none());
+        }
+    }
 }
