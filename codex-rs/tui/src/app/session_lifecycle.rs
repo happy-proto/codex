@@ -501,6 +501,8 @@ impl App {
         // new widget would redundantly clear and rewrite the same title, causing
         // a visible flicker in some terminals.
         let previous_terminal_title = self.chat_widget.last_terminal_title.take();
+        chat_widget.terminal_working_directory =
+            std::mem::take(&mut self.chat_widget.terminal_working_directory);
         if chat_widget.last_terminal_title.is_none() {
             chat_widget.last_terminal_title = previous_terminal_title;
         }
