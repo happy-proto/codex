@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import tarfile
 import tempfile
@@ -190,6 +191,33 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
         self.prepare_build("a")
         self.install("--release", self.version)
         self.assertTrue((self.bin / "codex").exists())
+
+    def test_official_installer_lock_prevents_fork_selection(self):
+        self.prepare_build("a")
+        root = self.home / "packages/standalone"
+        root.mkdir(parents=True)
+        owner = subprocess.Popen(
+            [
+                "/usr/bin/lockf",
+                "-t",
+                "0",
+                str(root / "install.lock"),
+                "python3",
+                "-c",
+                "import time; print('locked', flush=True); time.sleep(30)",
+            ],
+            stdout=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            self.assertEqual(owner.stdout.readline().strip(), "locked")
+            self.install(succeeds=False)
+            self.assertFalse((root / "current").exists())
+        finally:
+            os.killpg(owner.pid, signal.SIGTERM)
+            owner.wait()
+            owner.stdout.close()
 
 
 if __name__ == "__main__":
