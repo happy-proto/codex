@@ -430,6 +430,21 @@ impl App {
         tui: &mut tui::Tui,
         size: ratatui::layout::Size,
     ) -> Result<()> {
+        // Announce only the attached widget's cwd, never a candidate checkout
+        // while a resume/worktree transition is still pending or has failed.
+        if self.current_displayed_thread_id().is_some() {
+            let local_workspace = !crate::uses_remote_workspace_or_environment(
+                &self.app_server_target,
+                self.environment_manager.as_ref(),
+            );
+            if let Err(error) = self
+                .chat_widget
+                .terminal_working_directory
+                .update(self.chat_widget.config.cwd.as_path(), local_workspace)
+            {
+                tracing::warn!(%error, "failed to report terminal working directory");
+            }
+        }
         self.flush_native_history(tui);
         if tui.is_owned_screen() {
             let width = self.transcript_reflow.note_width(size.width);
