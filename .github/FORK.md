@@ -1,23 +1,15 @@
-# Integration branch
+# 集成分支
 
-`fork` is the default branch and the top of the long-lived PR stack. It contains
-repository maintenance, alpha release/update support, and all active feature
-layers. Its push workflow builds the complete product and publishes only after
-verification succeeds.
+`fork` 是长期 PR stack 的集成顶部及默认分支，包含仓库维护、alpha 发布与更新支持，
+以及所有启用的功能层。推送后构建完整产品，验证通过才发布。
 
-New features are inserted below this integration layer. The feature branches
-and their PRs retain individual maintenance boundaries; this aggregate PR is
-not merged into `main`.
+新功能插入在集成层下方，各功能分支和 PR 保留独立的维护边界；集成 PR 不合并进 `main`。
+当前 stack 和上游 alpha 基线通过仓库内的维护 skill 核对，不从 PR 编号或上游最新开发提交推断。
 
-Use the repository-local maintenance skill for the current stack and selected
-alpha baseline. Do not infer them from PR numbers or from upstream's latest
-development commit.
+## 后续功能
 
-## Planned features
-
-- [CJK Markdown emphasis boundaries](https://github.com/openai/codex/issues/37531):
-  prevent assistant-generated bold text from exposing literal `**` around CJK
-  punctuation. Reproduce in the CLI and identify the generation or rendering
-  layer before choosing a fix. The upstream report concerns the official App;
-  client coverage must be established without assuming this fork distributes
-  that App. Implement as a separate feature layer after the first OSC 7 release.
+- [中文 Markdown 加粗边界](https://github.com/openai/codex/issues/37531)：
+  避免助手生成的加粗文本在中文标点边界处显示原始 `**`。
+  先在 CLI 复现并确认生成层或渲染层的修复位置，再选择实现方式。
+  上游报告涉及官方 App，需确认客户端覆盖范围，不能假设本 fork 会分发该 App。
+  在首个 OSC 7 版本之后，作为独立功能层实现。
