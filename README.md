@@ -1,21 +1,19 @@
-# Codex personal fork
+# Codex 个人 fork
 
-This is [happy-proto/codex](https://github.com/happy-proto/codex), a personal fork
-of [OpenAI Codex](https://github.com/openai/codex). It follows upstream **alpha**
-releases and maintains custom features as long-lived stacked pull requests.
-It is public for reproducible installation, with no promise of general support.
+这是 [happy-proto/codex](https://github.com/happy-proto/codex)，基于
+[OpenAI Codex](https://github.com/openai/codex) 的个人 fork。跟进上游 **alpha**
+版本，用长期 PR stack 维护自定义功能。公开提供可复现的安装方式，暂不承诺大众支持。
 
-- `main`: the unmodified selected upstream alpha release commit.
-- `fork`: the complete feature stack and this repository's default branch.
-- Feature PRs remain open and are rebased when adopting a new upstream alpha.
-- This fork does not add localization or distribute the official Desktop app.
+- `main`：选定上游 alpha Release 的原始提交。
+- `fork`：完整功能 stack 的顶部，也是默认分支。
+- 功能 PR 长期开启，升级上游 alpha 时重放各层修改。
+- 不新增 i18n，也不分发官方 Desktop 应用。
 
-Fork installation and release instructions are maintained with the release
-layer. The repository-local [maintenance skill](.agents/skills/codex-fork-maintenance/SKILL.md)
-defines change ownership, alpha synchronization, and stack verification.
+安装与发布说明由发布层维护。仓库内的
+[维护 skill](.agents/skills/codex-fork-maintenance/SKILL.md) 定义操作入口，
+修改归属等通用规则见 [AGENTS.md](AGENTS.md)。
 
-The upstream introduction and installation instructions below refer to the
-**official** distribution, not this fork.
+下方保留的上游介绍与安装说明指向 **官方版本**，不用于安装此 fork。
 
 ---
 
