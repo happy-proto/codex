@@ -5,6 +5,15 @@ on:
   push:
     branches: [fork]
   workflow_dispatch:
+    inputs:
+      use_sccache:
+        description: 使用 sccache；关闭后可做相同源码的对照构建
+        type: boolean
+        default: true
+      publish:
+        description: 发布已验证的 fork 构建；耗时实验默认不发布
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -61,6 +70,21 @@ jobs:
           workspaces: codex-rs
           cache-on-failure: true
           shared-key: fork-macos-arm64
+      - name: 配置共享编译缓存
+        id: sccache
+        if: github.event_name != 'workflow_dispatch' || inputs.use_sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+        env:
+          SCCACHE_GHA_ENABLED: 'true'
+          SCCACHE_BASEDIRS: ${{ github.workspace }}
+        with:
+          version: v0.18.0
+      - name: 启用编译缓存
+        if: steps.sccache.outcome == 'success'
+        run: |
+          echo 'SCCACHE_GHA_ENABLED=true' >> "$GITHUB_ENV"
+          echo "SCCACHE_BASEDIRS=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
       - name: Install version-management tool
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
@@ -92,6 +116,18 @@ jobs:
           name: fork-build-timings-${{ github.sha }}
           path: codex-rs/target/cargo-timings/
           if-no-files-found: ignore
+      - name: 保存产物编译缓存统计
+        if: always() && steps.sccache.outcome == 'success'
+        run: |
+          mkdir -p fork-sccache
+          sccache --show-stats | tee fork-sccache/build.txt >> "$GITHUB_STEP_SUMMARY"
+          sccache --show-stats --stats-format json > fork-sccache/build.json
+      - name: 上传产物编译缓存统计
+        if: always() && steps.sccache.outcome == 'success'
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: fork-build-sccache-${{ github.sha }}
+          path: fork-sccache/
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: ${{ always() && steps.package.outcome == 'success' }}
         with:
@@ -138,6 +174,21 @@ jobs:
           workspaces: codex-rs
           cache-on-failure: true
           shared-key: fork-tests-macos-arm64
+      - name: 配置共享编译缓存
+        id: sccache
+        if: github.event_name != 'workflow_dispatch' || inputs.use_sccache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+        env:
+          SCCACHE_GHA_ENABLED: 'true'
+          SCCACHE_BASEDIRS: ${{ github.workspace }}
+        with:
+          version: v0.18.0
+      - name: 启用编译缓存
+        if: steps.sccache.outcome == 'success'
+        run: |
+          echo 'SCCACHE_GHA_ENABLED=true' >> "$GITHUB_ENV"
+          echo "SCCACHE_BASEDIRS=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
       - name: Install version-management tool
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
@@ -171,6 +222,18 @@ jobs:
           name: fork-test-timings-${{ github.sha }}
           path: codex-rs/target/cargo-timings/
           if-no-files-found: ignore
+      - name: 保存测试编译缓存统计
+        if: always() && steps.sccache.outcome == 'success'
+        run: |
+          mkdir -p fork-sccache
+          sccache --show-stats | tee fork-sccache/tests.txt >> "$GITHUB_STEP_SUMMARY"
+          sccache --show-stats --stats-format json > fork-sccache/tests.json
+      - name: 上传测试编译缓存统计
+        if: always() && steps.sccache.outcome == 'success'
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: fork-test-sccache-${{ github.sha }}
+          path: fork-sccache/
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: failure()
         with:
@@ -179,7 +242,7 @@ jobs:
           if-no-files-found: ignore
 
   publish:
-    if: github.repository == 'happy-proto/codex' && github.ref == 'refs/heads/fork' && github.event_name != 'pull_request'
+    if: github.repository == 'happy-proto/codex' && github.ref == 'refs/heads/fork' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     needs: [build, tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
