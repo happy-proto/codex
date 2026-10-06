@@ -11,6 +11,15 @@ async fn fork_defaults_to_manual_updates() {
         .await
         .expect("load defaults");
     assert_eq!(settings.auto_update_enabled, false);
+
+    let path = temp.path().join("settings.json");
+    tokio::fs::write(&path, r#"{"updater":{"autoUpdateEnabled":true}}"#)
+        .await
+        .expect("write explicit updater setting");
+    let settings = DaemonSettings::load(&path)
+        .await
+        .expect("load explicit updater setting");
+    assert_eq!(settings.auto_update_enabled, true);
 }
 
 #[tokio::test]
