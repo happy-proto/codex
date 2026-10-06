@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       use_sccache:
-        description: 使用 sccache；关闭后可做相同源码的对照构建
+        description: 手动构建使用 sccache；关闭可对照（自动构建仅测试启用）
         type: boolean
         default: true
       publish:
@@ -19,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: fork-${{ github.event.pull_request.number || github.ref }}
+  group: fork-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -72,7 +72,9 @@ jobs:
           shared-key: fork-macos-arm64
       - name: 配置共享编译缓存
         id: sccache
-        if: github.event_name != 'workflow_dispatch' || inputs.use_sccache
+        # 0.18.0 buffers metadata on cache misses, delaying Cargo pipelining.
+        # Keep package caching opt-in until the upstream fix is released.
+        if: github.event_name == 'workflow_dispatch' && inputs.use_sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
         env:
           SCCACHE_GHA_ENABLED: 'true'
