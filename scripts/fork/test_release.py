@@ -13,6 +13,30 @@ import release
 
 
 class VersionTests(unittest.TestCase):
+    def test_timed_cargo_preserves_arguments_and_failure_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cargo = Path(directory) / "cargo"
+            cargo.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, sys\nprint(json.dumps(sys.argv[1:]))\nsys.exit(7)\n"
+            )
+            cargo.chmod(0o755)
+            result = subprocess.run(
+                [
+                    str(release.ROOT / "scripts/fork/cargo-timed.sh"),
+                    "build",
+                    "--release",
+                ],
+                env={**os.environ, "PATH": f"{directory}:{os.environ['PATH']}"},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(
+                json.loads(result.stdout), ["build", "--release", "--timings"]
+            )
+            self.assertEqual(result.returncode, 7)
+
     def test_initialization_keeps_input_open_until_the_response(self):
         with tempfile.TemporaryDirectory() as directory:
             cli = Path(directory) / "fake-app-server"
