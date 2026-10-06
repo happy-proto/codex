@@ -82,9 +82,11 @@ jobs:
       - name: 启用编译缓存
         if: steps.sccache.outcome == 'success'
         run: |
-          echo 'SCCACHE_GHA_ENABLED=true' >> "$GITHUB_ENV"
-          echo "SCCACHE_BASEDIRS=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          {
+            echo 'SCCACHE_GHA_ENABLED=true'
+            echo "SCCACHE_BASEDIRS=$GITHUB_WORKSPACE"
+            echo "RUSTC_WRAPPER=$SCCACHE_PATH"
+          } >> "$GITHUB_ENV"
       - name: Install version-management tool
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
@@ -186,9 +188,11 @@ jobs:
       - name: 启用编译缓存
         if: steps.sccache.outcome == 'success'
         run: |
-          echo 'SCCACHE_GHA_ENABLED=true' >> "$GITHUB_ENV"
-          echo "SCCACHE_BASEDIRS=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-          echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
+          {
+            echo 'SCCACHE_GHA_ENABLED=true'
+            echo "SCCACHE_BASEDIRS=$GITHUB_WORKSPACE"
+            echo "RUSTC_WRAPPER=$SCCACHE_PATH"
+          } >> "$GITHUB_ENV"
       - name: Install version-management tool
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
