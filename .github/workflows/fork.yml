@@ -163,7 +163,7 @@ jobs:
           exit "$result"
       - name: Test daemon update defaults
         working-directory: codex-rs
-        run: cargo test --release --timings --target aarch64-apple-darwin -p codex-app-server-daemon --lib settings_tests
+        run: cargo test --release --timings --target aarch64-apple-darwin -p codex-app-server-daemon --lib settings::tests
       - name: 上传测试构建耗时报告
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: always()
