@@ -14,5 +14,6 @@ upstream alpha synchronization, releases, or installation.
   formatting, static checks, focused script tests, and downloaded-artifact smoke
   tests. Run full suites, compilation, and release builds in GitHub Actions;
   do not start expensive local work without explicit authorization.
-- PRs and commits use English. Repository-local maintenance guidance may use
-  Chinese. Do not change upstream APIs merely to simplify fork maintenance.
+- Fork PR titles and descriptions use Chinese; commit messages use English.
+  Repository-local maintenance guidance may use Chinese. Do not change upstream
+  APIs merely to simplify fork maintenance.

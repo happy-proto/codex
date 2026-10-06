@@ -1,6 +1,7 @@
 # Stack 和修改归属
 
 先核对 remote URL、`gh repo view happy-proto/codex`、远端 refs 和每层 PR 的标题、正文及相对直接 base 的净变化。
+本 fork 的 PR 标题和正文用中文，commit message 用英文；文案描述相对直接 base 的最终净变化。
 修复已有功能、补齐测试或文档留在拥有该目的的层；新的可独立撤销的需求另建功能层。
 治理文档、构建发布和产品功能按实际维护目的区分，不能根据当前 checkout 猜归属。
 
