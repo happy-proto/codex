@@ -72,8 +72,8 @@ jobs:
           shared-key: fork-macos-arm64
       - name: 配置共享编译缓存
         id: sccache
-        # 0.18.0 buffers metadata on cache misses, delaying Cargo pipelining.
-        # Keep package caching opt-in until the upstream fix is released.
+        # 0.18.0 在未命中时延迟 metadata 通知，削弱 Cargo 流水线。
+        # 上游修复发布稳定版之前，产物缓存只用于手动实验。
         if: github.event_name == 'workflow_dispatch' && inputs.use_sccache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
         env:
