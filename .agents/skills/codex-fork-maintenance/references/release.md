@@ -6,7 +6,7 @@
 
 构建复用上游完整 package builder，包含 CLI、code-mode host、rg 和 zsh 等必要资源。
 macOS 使用 ad-hoc 签名并保留上游 entitlements；不配置官方 Azure、R2、npm、WinGet 或网站发布设施。
-构建和重型测试在 GitHub Actions 执行，本地不编译。下载 CI/Release 产物做隔离安装与轻量运行验收。
+下载 CI/Release 产物做隔离安装与轻量运行验收。
 
 修改发布流程时检查：版本与选定 alpha 一致、源码属于完整 fork 分支、签名后的资源摘要正确、
 产物先上传验证再更新清单、同版本更新可被识别、下载损坏不会切换 current、并发发布不会让旧构建覆盖新构建。
