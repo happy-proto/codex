@@ -9,56 +9,48 @@
 - 功能 PR 长期开启，升级上游 alpha 时重放各层修改。
 - 不新增 i18n，也不分发官方 Desktop 应用。
 
-## Install this fork
+## 安装此 fork
 
-Only macOS Apple Silicon is supported initially. The complete package includes
-the code-mode host, ripgrep, and patched zsh. It is ad-hoc signed, not Apple
-notarized; macOS may require explicit approval on first use.
+首期仅支持 macOS Apple Silicon。完整包包含 code-mode host、ripgrep 和带补丁的 zsh。
+采用 ad-hoc 签名，未经 Apple 公证；macOS 首次运行时可能需要手动批准。
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork/install.sh | sh
 codex --version
 ```
 
-The installer selects a published fork alpha Release, verifies the package
-SHA-256, preserves the previous package, and replaces `codex` in
-`~/.local/bin`. `CODEX_HOME` and `CODEX_INSTALL_DIR` override these paths.
-Configuration, credentials, and sessions continue using the existing Codex home.
-Add `~/.local/bin` to PATH if needed; remove a competing npm/Homebrew installation
-only if you want to stop managing that installation separately.
+安装器选择已发布的 fork alpha Release，验证安装包 SHA-256，保留上一个安装包，
+并替换 `~/.local/bin` 中的 `codex`。可用 `CODEX_HOME` 和 `CODEX_INSTALL_DIR` 指定路径。
+继续使用现有 Codex 目录中的配置、凭据和会话。按需将 `~/.local/bin` 加入 PATH；
+如果同时安装了 npm/Homebrew 版本，可以保留独立管理，或在确定不用后移除。
 
 ```sh
-codex update            # update explicitly; background upgrades are disabled
-# Select the previous locally installed package:
+codex update            # 手动更新，默认关闭后台升级
+# 回退到此前安装的包：
 curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork/install.sh | sh -s -- --rollback
 ```
 
-Versions use the upstream alpha plus `.fork`, for example
-`0.162.0-alpha.14.fork`. Each verified `fork` update automatically publishes.
-Within the same alpha, the same Release and tag are updated; version strings
-alone do **not** identify a build. `fork-release.json` records source and upstream
-commits and the package digest. Package asset names include their digest and
-older packages remain available. Fork updates never select the official
-distribution; upstream alpha synchronization is initiated by the maintainer.
+版本沿用上游 alpha 并添加 `.fork`，例如 `0.162.0-alpha.14.fork`。
+每次 `fork` 更新验证通过后自动发布；同一 alpha 下更新同名 Release 和标签，
+因此版本字符串不能唯一标识构建。`fork-release.json` 记录源提交、上游提交和包摘要，
+安装包文件名包含摘要，旧包保持可下载。Fork 的更新渠道只选择 fork 发行版，
+上游 alpha 同步由维护者发起。
 
-The first switch from an official standalone package also preserves it under
-`~/.codex/packages/standalone/official-before-fork`. You can return to the
-official distribution by rerunning its installer below with the desired version.
+首次从官方独立安装包切换时，还会将其保留在
+`~/.codex/packages/standalone/official-before-fork`。
+需要返回官方版本时，可重新运行下方官方安装器并指定所需版本。
 
-## Maintenance
+## 维护
 
-The repository-local [maintenance skill](.agents/skills/codex-fork-maintenance/SKILL.md)
-defines change ownership, alpha synchronization, and stack verification.
-Keep local work lightweight: compilation and heavy tests run in GitHub Actions.
-The [fork workflow](.github/workflows/fork.yml) tests installation contracts,
-builds and signs the complete package, tests update behavior, and smoke-tests
-the actual CLI and app-server before publishing. Upstream workflows that require
-OpenAI infrastructure are disabled in this fork's GitHub settings.
-PRs run lightweight script checks; `fork` pushes run the complete build and Rust
-tests once for the integrated stack.
-CI keeps release optimization and disables LTO for the standard macOS runner.
-Rust tests run in parallel with packaging, using release conditional compilation
-and disabled debug assertions with optimization disabled for the test harness.
+通用规则见 [AGENTS.md](AGENTS.md)，具体操作见仓库内的
+[维护 skill](.agents/skills/codex-fork-maintenance/SKILL.md)。
+本地只做轻量验证，编译和重型测试交给 GitHub Actions。
+[Fork 工作流](.github/workflows/fork.yml) 验证安装契约、构建并签名完整包、
+测试更新行为，并在发布前验收实际 CLI 和 app-server。
+依赖 OpenAI 基础设施的上游工作流已在此 fork 的 GitHub 设置中禁用。
+PR 运行轻量脚本检查；推送 `fork` 后对完整集成 stack 执行一次构建和 Rust 测试。
+标准 macOS runner 上保留产物的 release 优化，关闭 LTO。
+Rust 测试与构建并行，保留 release 条件编译及关闭 debug assertions，禁用测试优化以控制成本。
 
 下方保留的上游介绍与安装说明指向 **官方版本**，不用于安装此 fork。
 
