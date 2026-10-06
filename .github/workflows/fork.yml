@@ -79,6 +79,7 @@ jobs:
         env:
           SCCACHE_GHA_ENABLED: 'true'
           SCCACHE_BASEDIRS: ${{ github.workspace }}
+          SCCACHE_IDLE_TIMEOUT: '0'
         with:
           version: v0.18.0
       - name: 启用编译缓存
@@ -86,6 +87,7 @@ jobs:
         run: |
           {
             echo 'SCCACHE_GHA_ENABLED=true'
+            echo 'SCCACHE_IDLE_TIMEOUT=0'
             echo "SCCACHE_BASEDIRS=$GITHUB_WORKSPACE"
             echo "RUSTC_WRAPPER=$SCCACHE_PATH"
           } >> "$GITHUB_ENV"
@@ -185,6 +187,7 @@ jobs:
         env:
           SCCACHE_GHA_ENABLED: 'true'
           SCCACHE_BASEDIRS: ${{ github.workspace }}
+          SCCACHE_IDLE_TIMEOUT: '0'
         with:
           version: v0.18.0
       - name: 启用编译缓存
@@ -192,6 +195,7 @@ jobs:
         run: |
           {
             echo 'SCCACHE_GHA_ENABLED=true'
+            echo 'SCCACHE_IDLE_TIMEOUT=0'
             echo "SCCACHE_BASEDIRS=$GITHUB_WORKSPACE"
             echo "RUSTC_WRAPPER=$SCCACHE_PATH"
           } >> "$GITHUB_ENV"
