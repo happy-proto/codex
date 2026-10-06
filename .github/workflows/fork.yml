@@ -27,7 +27,9 @@ jobs:
       - name: Test fork installation and publication contracts
         run: python3 -m unittest discover -s scripts/fork -p 'test_*.py' -v
       - name: Check shell syntax
-        run: sh -n scripts/fork/install.sh
+        run: |
+          sh -n scripts/fork/install.sh
+          sh -n scripts/fork/cargo-timed.sh
 
   build:
     if: github.event_name != 'pull_request'
@@ -83,6 +85,13 @@ jobs:
       - name: Validate source and build signed complete package
         id: package
         run: python3 scripts/fork/release.py build
+      - name: 上传产物构建耗时报告
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        if: always()
+        with:
+          name: fork-build-timings-${{ github.sha }}
+          path: codex-rs/target/cargo-timings/
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: ${{ always() && steps.package.outcome == 'success' }}
         with:
@@ -137,39 +146,31 @@ jobs:
         run: |
           version=$(python3 scripts/fork/release.py plan | python3 -c 'import json, sys; print(json.load(sys.stdin)["version"])')
           cargo set-version --manifest-path codex-rs/Cargo.toml -p codex-cli "$version"
-      - name: Share the pinned V8 artifacts between tests
-        env:
-          CODEX_REPO_ROOT: ${{ github.workspace }}
-        run: |
-          python3 - <<'PY'
-          import os
-          from scripts.codex_package.targets import TARGET_SPECS
-          from scripts.codex_package.v8 import resolve_codex_v8_cargo_env
-          artifacts = resolve_codex_v8_cargo_env(TARGET_SPECS["aarch64-apple-darwin"])
-          with open(os.environ["GITHUB_ENV"], "a") as output:
-              for key, value in artifacts.items():
-                  output.write(f"{key}={value}\n")
-          PY
-      - name: Refresh the cached V8 build record
-        run: cargo clean --manifest-path codex-rs/Cargo.toml --target aarch64-apple-darwin --release -p v8
       - name: Test update behavior in the release configuration
         working-directory: codex-rs
         run: |
-          cargo test --release --target aarch64-apple-darwin -p codex-tui --lib updates_cache::tests
-          cargo test --release --target aarch64-apple-darwin -p codex-tui --lib updates::tests
-          cargo test --release --target aarch64-apple-darwin -p codex-tui --lib update_action::tests
+          cargo test --release --timings --target aarch64-apple-darwin -p codex-tui --lib updates_cache::tests
+          cargo test --release --timings --target aarch64-apple-darwin -p codex-tui --lib updates::tests
+          cargo test --release --timings --target aarch64-apple-darwin -p codex-tui --lib update_action::tests
       - name: Verify fork update presentation
         working-directory: codex-rs
         env:
           INSTA_UPDATE: new
         run: |
           result=0
-          cargo test --release --target aarch64-apple-darwin -p codex-tui --lib update_prompt::tests || result=1
-          cargo test --release --target aarch64-apple-darwin -p codex-tui --lib update_available_history_cell_snapshot || result=1
+          cargo test --release --timings --target aarch64-apple-darwin -p codex-tui --lib update_prompt::tests || result=1
+          cargo test --release --timings --target aarch64-apple-darwin -p codex-tui --lib update_available_history_cell_snapshot || result=1
           exit "$result"
       - name: Test daemon update defaults
         working-directory: codex-rs
-        run: cargo test --release --target aarch64-apple-darwin -p codex-app-server-daemon --lib settings_tests
+        run: cargo test --release --timings --target aarch64-apple-darwin -p codex-app-server-daemon --lib settings_tests
+      - name: 上传测试构建耗时报告
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        if: always()
+        with:
+          name: fork-test-timings-${{ github.sha }}
+          path: codex-rs/target/cargo-timings/
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: failure()
         with:

@@ -154,6 +154,8 @@ def build():
         "scripts/build_codex_package.py",
         "--target",
         TARGET,
+        "--cargo",
+        str(ROOT / "scripts/fork/cargo-timed.sh"),
         "--cargo-profile",
         "release",
         "--package-version",
