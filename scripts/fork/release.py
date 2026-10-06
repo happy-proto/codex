@@ -304,13 +304,13 @@ def publish():
     )
     notes = dist / "notes.md"
     notes.write_text(
-        f"Personal fork of upstream `{metadata['upstream_tag']}`. macOS Apple Silicon only.\n\n"
-        f"- Upstream: openai/codex@{metadata['upstream_commit']}\n"
-        f"- Fork source: {source}\n"
-        f"- Package SHA-256: `{metadata['sha256']}`\n\n"
-        "Version numbers are reused within an upstream alpha. The manifest identifies the actual build; "
-        "older content-addressed packages remain available. Ad-hoc signed; not Apple notarized. "
-        "Updates are manual via `codex update`.\n"
+        f"基于上游 `{metadata['upstream_tag']}` 的个人 fork，仅支持 macOS Apple Silicon。\n\n"
+        f"- 上游提交：openai/codex@{metadata['upstream_commit']}\n"
+        f"- Fork 源提交：{source}\n"
+        f"- 安装包 SHA-256：`{metadata['sha256']}`\n\n"
+        "同一上游 alpha 下复用版本号，通过清单识别实际构建；"
+        "旧的摘要命名安装包保持可下载。采用 ad-hoc 签名，未经 Apple 公证。"
+        "通过 `codex update` 手动更新。\n"
     )
     run(
         "gh",
