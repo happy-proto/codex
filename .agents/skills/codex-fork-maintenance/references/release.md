@@ -17,6 +17,7 @@ macOS 使用 ad-hoc 签名并保留上游 entitlements；不配置官方 Azure�
 等包含 [上游修复](https://github.com/mozilla/sccache/pull/2875) 的稳定版发布后再验证产物默认启用的收益。
 在 rust-cache 恢复后才启用 wrapper，
 避免改变已有依赖缓存的环境指纹。sccache 按源码和编译参数区分条目，不按 stack 分支拆分。
+使用 `SCCACHE_IDLE_TIMEOUT=0`，避免长编译期间没有新请求时 daemon 退出、回退本地编译并丢失统计。
 先在默认分支 `fork` 预热；其它分支可读取默认分支缓存，默认分支不能反向读取功能分支的私有缓存。
 因此维持各功能 PR 的轻量检查，只在集成顶部自动执行重型构建；用 workflow_dispatch 按需验证指定层。
 手动实验默认不发布，`use_sccache=false` 可做相同源码的对照，`publish=true` 才请求发布 fork。
