@@ -7,8 +7,10 @@
 构建复用上游完整 package builder，包含 CLI、code-mode host、rg 和 zsh 等必要资源。
 macOS 使用 ad-hoc 签名并保留上游 entitlements；不配置官方 Azure、R2、npm、WinGet 或网站发布设施。
 下载 CI/Release 产物做隔离安装与轻量运行验收。
-标准 macOS runner 使用 release 优化、关闭 Thin LTO；首期验证中仅最终链接优化就耗时约 29 分钟。
+标准 macOS runner 使用 release 优化、关闭跨 crate Thin LTO；`lto=false` 仍可能包含单 crate 优化。
 测试与产物构建并行；测试保留 release 条件编译及关闭 debug assertions，禁用测试优化以控制编译成本。
+分析耗时时读取各 job 的日志和 `fork-build-timings-*`、`fork-test-timings-*` artifact，
+用 Cargo 报告区分 crate 编译和并发等待，不把日志末尾的整段耗时直接归为链接。
 
 修改发布流程时检查：版本与选定 alpha 一致、源码属于完整 fork 分支、签名后的资源摘要正确、
 产物先上传验证再更新清单、同版本更新可被识别、下载损坏不会切换 current、并发发布不会让旧构建覆盖新构建。
