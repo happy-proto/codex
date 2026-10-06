@@ -321,6 +321,8 @@ def publish():
         REPO,
         "--draft=false",
         "--prerelease",
+        "--target",
+        source,
         "--notes-file",
         str(notes),
     )
