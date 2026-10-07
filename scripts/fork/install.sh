@@ -48,6 +48,24 @@ locked=true
 download() {
   curl -fSL --retry 3 --connect-timeout 15 --max-time 600 "$1" -o "$2"
 }
+download_api() {
+  # 优先复用 gh 的 GitHub.com 登录；未安装或未登录时允许匿名安装。
+  token=''
+  if command -v gh >/dev/null 2>&1; then
+    token="$(gh auth token --hostname github.com 2>/dev/null)" || token=''
+  fi
+  if [ -n "$token" ]; then
+    # 凭据写入私有临时文件，不出现在 curl 参数或输出中。
+    (umask 077; printf 'Authorization: Bearer %s\n' "$token" > "$tmp/github-api.headers")
+    unset token
+    # API 请求不跟随重定向，认证不会传给 Release 下载地址。
+    curl -fS --retry 3 --connect-timeout 15 --max-time 600 \
+      --header "@$tmp/github-api.headers" "$1" -o "$2"
+  else
+    unset token
+    curl -fS --retry 3 --connect-timeout 15 --max-time 600 "$1" -o "$2"
+  fi
+}
 extract() {
   plutil -extract "$1" raw -o - "$2"
 }
@@ -74,7 +92,7 @@ if [ "$rollback" = true ]; then
 fi
 
 if [ "$release" = latest ]; then
-  download "$API/releases?per_page=100" "$tmp/releases.json"
+  download_api "$API/releases?per_page=100" "$tmp/releases.json"
   i=0
   tag=''
   while candidate="$(extract "$i.tag_name" "$tmp/releases.json" 2>/dev/null)"; do

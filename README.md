@@ -36,6 +36,9 @@ curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork
 安装包文件名包含摘要，旧包保持可下载。Fork 的更新渠道只选择 fork 发行版，
 上游 alpha 同步由维护者发起。
 
+安装器查询 GitHub API 时优先使用已安装且登录 GitHub.com 的 `gh` 凭据，
+认证仅用于 API 查询；未安装或未登录 `gh` 时使用匿名请求，可能受出口 IP 的限流影响。
+
 首次从官方独立安装包切换时，还会将其保留在
 `~/.codex/packages/standalone/official-before-fork`。
 需要返回官方版本时，可重新运行下方官方安装器并指定所需版本。
