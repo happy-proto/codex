@@ -30,7 +30,7 @@ concurrency:
 
 jobs:
   scripts:
-    runs-on: macos-15
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -39,7 +39,7 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: '3.12'
-      - name: Test fork installation and publication contracts
+      - name: Test portable fork version and publication contracts
         run: python3 -m unittest discover -s scripts/fork -p 'test_*.py' -v
       - name: Check shell syntax
         run: |
@@ -70,6 +70,9 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: '3.12'
+      - name: Test macOS installer contracts
+        working-directory: scripts/fork
+        run: python3 -m unittest test_release.InstallerTests -v
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
         with:
@@ -153,7 +156,7 @@ jobs:
   tests:
     if: github.event_name != 'pull_request'
     needs: scripts
-    runs-on: macos-15
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
       CARGO_BUILD_JOBS: '3'
@@ -180,12 +183,16 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: '3.12'
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libcap-dev libasound2-dev
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
         with:
           workspaces: codex-rs
           cache-on-failure: true
-          shared-key: fork-tests-macos-arm64
+          shared-key: fork-tests-linux-x64
       - name: 配置共享编译缓存
         id: sccache
         if: github.event_name != 'workflow_dispatch' || inputs.use_sccache
@@ -219,13 +226,13 @@ jobs:
           TUI_TEST_FILTER: ${{ inputs.tui_test_filter }}
         run: |
           if [ -n "$TUI_TEST_FILTER" ]; then
-            cargo test --release --timings --target aarch64-apple-darwin -p codex-tui --lib "$TUI_TEST_FILTER"
+            cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib "$TUI_TEST_FILTER"
             exit 0
           fi
-          cargo test --release --timings --target aarch64-apple-darwin -p codex-tui --lib updates_cache::tests
-          cargo test --release --timings --target aarch64-apple-darwin -p codex-tui --lib updates::tests
-          cargo test --release --timings --target aarch64-apple-darwin -p codex-tui --lib update_action::tests
-          cargo test --release --timings --target aarch64-apple-darwin -p codex-tui --lib working_directory
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates_cache::tests
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates::tests
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_action::tests
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib working_directory
       - name: Verify fork update presentation
         if: ${{ !inputs.tui_test_filter }}
         working-directory: codex-rs
@@ -233,13 +240,13 @@ jobs:
           INSTA_UPDATE: new
         run: |
           result=0
-          cargo test --release --timings --target aarch64-apple-darwin -p codex-tui --lib update_prompt::tests || result=1
-          cargo test --release --timings --target aarch64-apple-darwin -p codex-tui --lib update_available_history_cell_snapshot || result=1
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_prompt::tests || result=1
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_available_history_cell_snapshot || result=1
           exit "$result"
       - name: Test daemon update defaults
         if: ${{ !inputs.tui_test_filter }}
         working-directory: codex-rs
-        run: cargo test --release --timings --target aarch64-apple-darwin -p codex-app-server-daemon --lib settings::tests
+        run: cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-app-server-daemon --lib settings::tests
       - name: 上传测试构建耗时报告
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: always()

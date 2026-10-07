@@ -9,6 +9,8 @@ macOS 使用 ad-hoc 签名并保留上游 entitlements；不配置官方 Azure�
 下载 CI/Release 产物做隔离安装与轻量运行验收。
 标准 macOS runner 使用 release 优化、关闭跨 crate Thin LTO；`lto=false` 仍可能包含单 crate 优化。
 测试与产物构建并行；测试保留 release 条件编译及关闭 debug assertions，禁用测试优化以控制编译成本。
+通用脚本检查和 Rust 测试使用 Linux x64 runner；只有 Apple Silicon 完整包的构建、签名、
+macOS 安装契约和真实 CLI 验收使用 ARM macOS runner，避免通用测试受其容量队列影响。
 分析耗时时读取各 job 的日志和 `fork-build-timings-*`、`fork-test-timings-*` artifact，
 用 Cargo 报告区分 crate 编译和并发等待，不把日志末尾的整段耗时直接归为链接。
 

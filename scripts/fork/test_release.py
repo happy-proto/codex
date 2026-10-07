@@ -4,6 +4,7 @@ import os
 import pty
 import signal
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -160,6 +161,7 @@ class PublicationTests(unittest.TestCase):
             query.assert_not_called()
 
 
+@unittest.skipUnless(sys.platform == "darwin", "安装契约由 macOS 产物构建 job 验证")
 class InstallerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
