@@ -50,6 +50,9 @@ curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork
 
 ## Fork 功能
 
+- **中文 Markdown 加粗**：CLI 兼容中文与全角标点旁的双星号加粗，例如 `**加粗内容。**后续中文`。
+  流式输出与完整回复使用相同规则，保留代码、转义文本和原始消息。
+  此功能仅覆盖 fork CLI 的渲染器，跟踪 [上游 issue #37531](https://github.com/openai/codex/issues/37531)。
 - **终端工作目录（OSC 7）**：在启动、会话切换、恢复和 worktree 切换后报告当前本地会话目录，
   让兼容终端在该目录打开新标签页、面板，并解析相对文件链接。
   跳过远程工作区和非终端输出，跟踪 [上游 issue #38229](https://github.com/openai/codex/issues/38229)。
