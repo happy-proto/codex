@@ -885,7 +885,23 @@ fn cjk_strong_selection_copy_preserves_bold_and_plain_text() {
         plain
     );
     let (copied, _) = crate::markdown_copy::selection(&selected, plain);
-    assert_eq!(copied, "**加粗内容。**后续中文内容");
+    // 选择复制沿用上游的边界实体转义，使其它 CommonMark 客户端也能识别加粗。
+    assert_eq!(copied, "**加粗内容。**&#21518;续中文内容");
+    let parsed = pulldown_cmark::Parser::new(&copied).collect::<Vec<_>>();
+    assert!(parsed.iter().any(|event| matches!(
+        event,
+        pulldown_cmark::Event::Start(pulldown_cmark::Tag::Strong)
+    )));
+    assert_eq!(
+        parsed
+            .iter()
+            .filter_map(|event| match event {
+                pulldown_cmark::Event::Text(text) => Some(text.as_ref()),
+                _ => None,
+            })
+            .collect::<String>(),
+        plain
+    );
 }
 
 #[test]
