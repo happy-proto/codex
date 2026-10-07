@@ -21,6 +21,8 @@ macOS 使用 ad-hoc 签名并保留上游 entitlements；不配置官方 Azure�
 先在默认分支 `fork` 预热；其它分支可读取默认分支缓存，默认分支不能反向读取功能分支的私有缓存。
 因此维持各功能 PR 的轻量检查，只在集成顶部自动执行重型构建；用 workflow_dispatch 按需验证指定层。
 手动实验默认不发布，`use_sccache=false` 可做相同源码的对照，`publish=true` 才请求发布 fork。
+只需验证 TUI 回归时，手动指定 `tui_test_filter`；该模式只运行匹配的 TUI 库测试，
+跳过产物构建、其它 Rust 测试及发布，不受 `publish` 输入影响。
 手动实验和自动发布使用不同并发组，避免耗时实验占用自动发布队列。
 比较同一提交的预热、热缓存及无 sccache 运行；同时读取 `fork-*-sccache-*` 统计与 Cargo 耗时报告，
 区分缓存命中、不可缓存的最终 binary/test harness 和 runner 波动，不能仅凭总时长判断收益。
