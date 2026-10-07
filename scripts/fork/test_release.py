@@ -170,6 +170,15 @@ class InstallerTests(unittest.TestCase):
         self.network.mkdir()
         tools = self.root / "tools"
         tools.mkdir()
+        self.tools = tools
+        self.executable(
+            tools / "gh",
+            """#!/bin/sh
+[ "$*" = 'auth token --hostname github.com' ] || exit 2
+[ -n "${FAKE_GH_TOKEN:-}" ] || exit 1
+printf '%s\\n' "$FAKE_GH_TOKEN"
+""",
+        )
         self.executable(
             tools / "uname",
             '#!/bin/sh\ncase "$1" in -s) echo Darwin;; -m) echo arm64;; esac\n',
@@ -180,6 +189,18 @@ class InstallerTests(unittest.TestCase):
 import os, pathlib, shutil, sys
 args = sys.argv[1:]
 url = next(arg for arg in args if arg.startswith("https://"))
+headers = []
+for i, arg in enumerate(args):
+    if arg in ("-H", "--header"):
+        value = args[i + 1]
+        headers.extend(pathlib.Path(value[1:]).read_text().splitlines() if value.startswith("@") else [value])
+with (pathlib.Path(os.environ["FAKE_NETWORK"]) / "requests.jsonl").open("a") as log:
+    import json
+    log.write(json.dumps({"url": url, "headers": headers}) + "\\n")
+if "/releases?" in url and os.environ.get("REQUIRE_GH_AUTH") == "1":
+    if headers != ["Authorization: Bearer " + os.environ["FAKE_GH_TOKEN"]]:
+        print("curl: (22) The requested URL returned error: 403", file=sys.stderr)
+        sys.exit(22)
 filename = "releases.json" if "/releases?" in url else url.rsplit("/", 1)[1]
 shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.index("-o") + 1])
 """,
@@ -321,6 +342,35 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
         self.prepare_build("a")
         self.install("--release", self.version)
         self.assertTrue((self.bin / "codex").exists())
+
+    def test_logged_in_gh_authenticates_api_without_leaking_to_downloads(self):
+        self.prepare_build("a")
+        self.env["FAKE_GH_TOKEN"] = "test-only-gh-token"
+        self.env["REQUIRE_GH_AUTH"] = "1"
+        result = self.install()
+        requests = [
+            json.loads(line)
+            for line in (self.network / "requests.jsonl").read_text().splitlines()
+        ]
+        self.assertEqual(
+            requests[0]["headers"], ["Authorization: Bearer test-only-gh-token"]
+        )
+        self.assertTrue(all(not request["headers"] for request in requests[1:]))
+        self.assertNotIn(self.env["FAKE_GH_TOKEN"], result.stdout + result.stderr)
+
+    def test_installer_without_gh_can_use_public_api(self):
+        self.prepare_build("a")
+        (self.tools / "gh").unlink()
+        self.env["PATH"] = str(self.tools) + ":/usr/bin:/bin:/usr/sbin:/sbin"
+        self.install()
+        requests = (self.network / "requests.jsonl").read_text().splitlines()
+        self.assertTrue(all(not json.loads(line)["headers"] for line in requests))
+
+    def test_logged_out_gh_can_use_public_api(self):
+        self.prepare_build("a")
+        self.install()
+        requests = (self.network / "requests.jsonl").read_text().splitlines()
+        self.assertTrue(all(not json.loads(line)["headers"] for line in requests))
 
     def test_official_installer_lock_prevents_fork_selection(self):
         self.prepare_build("a")
