@@ -59,8 +59,16 @@ pub(crate) async fn run_update_prompt_if_needed(
         return Ok(UpdatePromptOutcome::Continue);
     };
 
-    let mut screen =
-        UpdatePromptScreen::new(tui.frame_requester(), latest_version.clone(), update_action);
+    let current_version = current_build_label(
+        crate::version::CODEX_CLI_VERSION,
+        codex_build_info::BuildInfo::get().build_commit(),
+    );
+    let mut screen = UpdatePromptScreen::new(
+        tui.frame_requester(),
+        current_version,
+        latest_version.clone(),
+        update_action,
+    );
     tui.draw(u16::MAX, |frame| {
         frame.render_widget_ref(&screen, frame.area());
     })?;
@@ -108,6 +116,15 @@ enum UpdateSelection {
     DontRemind,
 }
 
+// Fork 同版本构建通过源提交区分，两端使用相同的短 SHA 格式。
+fn current_build_label(version: &str, commit: &str) -> String {
+    if commit.len() == 40 && commit.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        format!("{version} ({})", &commit[..8])
+    } else {
+        version.to_string()
+    }
+}
+
 struct UpdatePromptScreen {
     request_frame: FrameRequester,
     latest_version: String,
@@ -120,13 +137,14 @@ struct UpdatePromptScreen {
 impl UpdatePromptScreen {
     fn new(
         request_frame: FrameRequester,
+        current_version: String,
         latest_version: String,
         update_action: UpdateAction,
     ) -> Self {
         Self {
             request_frame,
             latest_version,
-            current_version: crate::version::CODEX_CLI_VERSION.to_string(),
+            current_version,
             update_action,
             highlighted: UpdateSelection::UpdateNow,
             selection: None,
@@ -285,9 +303,40 @@ mod tests {
     fn new_prompt() -> UpdatePromptScreen {
         UpdatePromptScreen::new(
             FrameRequester::test_dummy(),
+            crate::version::CODEX_CLI_VERSION.to_string(),
             "9.9.9".into(),
             UpdateAction::NpmGlobalLatest,
         )
+    }
+
+    #[test]
+    fn fork_update_prompt_distinguishes_both_builds() {
+        for latest in ["0.162.0-alpha.14.fork", "0.162.0-alpha.17.fork"] {
+            let current = current_build_label(
+                "0.162.0-alpha.14.fork",
+                "272e8094811582d21a4f18967c87f604a182de6a",
+            );
+            let screen = UpdatePromptScreen::new(
+                FrameRequester::test_dummy(),
+                current,
+                format!("{latest} (6bf95418)"),
+                UpdateAction::NpmGlobalLatest,
+            );
+            let mut terminal = Terminal::new(VT100Backend::new(120, 12)).expect("terminal");
+            terminal
+                .draw(|frame| frame.render_widget_ref(&screen, frame.area()))
+                .expect("render fork update prompt");
+            assert!(terminal.backend().to_string().contains(&format!(
+                "0.162.0-alpha.14.fork (272e8094) → {latest} (6bf95418)"
+            )));
+        }
+    }
+
+    #[test]
+    fn current_build_label_omits_unavailable_or_invalid_commits() {
+        for commit in ["dev", "unknown", "", &"é".repeat(20), &"z".repeat(40)] {
+            assert_eq!(current_build_label("1.2.3.fork", commit), "1.2.3.fork");
+        }
     }
 
     #[test]
