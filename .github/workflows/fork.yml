@@ -231,6 +231,10 @@ jobs:
           result=0
           mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_available_history_cell_snapshot || result=1
           exit "$result"
+      - name: 验证 Markdown 渲染、流式输出及选择复制
+        if: ${{ !inputs.tui_test_filter }}
+        working-directory: codex-rs
+        run: cargo test --release --timings --target aarch64-apple-darwin -p codex-tui --lib markdown_render
       - name: Test daemon update defaults
         if: ${{ !inputs.tui_test_filter }}
         working-directory: codex-rs
