@@ -24,7 +24,9 @@ permissions:
 
 concurrency:
   group: fork-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # fork 新推送自动取消旧构建，优先验证和发布最新提交。
+  # 手动耗时实验使用独立队列，不自动取消正在运行的实验。
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   scripts:
