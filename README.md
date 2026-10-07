@@ -30,7 +30,7 @@ codex update            # 手动更新，默认关闭后台升级
 curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork/install.sh | sh -s -- --rollback
 ```
 
-版本沿用上游 alpha 并添加 `.fork`，例如 `0.162.0-alpha.14.fork`。
+版本沿用上游 alpha 并添加 `.fork`，例如 `0.162.0-alpha.17.fork`。
 每次 `fork` 更新验证通过后自动发布；同一 alpha 下更新同名 Release 和标签，
 因此版本字符串不能唯一标识构建。`fork-release.json` 记录源提交、上游提交和包摘要，
 安装包文件名包含摘要，旧包保持可下载。Fork 的更新渠道只选择 fork 发行版，
