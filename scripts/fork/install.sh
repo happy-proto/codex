@@ -46,7 +46,10 @@ mkdir "$ROOT/fork-install.lock" || { echo 'Another fork installer is running.' >
 locked=true
 
 download() {
-  curl -fSL --retry 3 --connect-timeout 15 --max-time 600 "$1" -o "$2"
+  progress=-s
+  # 仅安装包在交互终端显示单行进度；元数据及日志输出保持简洁。
+  if [ "${3:-}" = package ] && [ -t 2 ]; then progress=--progress-bar; fi
+  curl -fSL "$progress" --retry 3 --connect-timeout 15 --max-time 600 "$1" -o "$2"
 }
 download_api() {
   # 优先复用 gh 的 GitHub.com 登录；未安装或未登录时允许匿名安装。
@@ -59,11 +62,11 @@ download_api() {
     (umask 077; printf 'Authorization: Bearer %s\n' "$token" > "$tmp/github-api.headers")
     unset token
     # API 请求不跟随重定向，认证不会传给 Release 下载地址。
-    curl -fS --retry 3 --connect-timeout 15 --max-time 600 \
+    curl -fsS --retry 3 --connect-timeout 15 --max-time 600 \
       --header "@$tmp/github-api.headers" "$1" -o "$2"
   else
     unset token
-    curl -fS --retry 3 --connect-timeout 15 --max-time 600 "$1" -o "$2"
+    curl -fsS --retry 3 --connect-timeout 15 --max-time 600 "$1" -o "$2"
   fi
 }
 extract() {
@@ -82,6 +85,12 @@ select_package() {
   link "$ROOT/current/bin/codex" "$BIN_DIR/codex"
   link "$ROOT/current/bin/codex-code-mode-host" "$BIN_DIR/codex-code-mode-host"
 }
+check_path() {
+  case ":$PATH:" in
+    *":$BIN_DIR:"*) ;;
+    *) printf 'Add %s to PATH to use codex.\n' "$BIN_DIR" ;;
+  esac
+}
 
 if [ "$rollback" = true ]; then
   previous="$(cd -P "$ROOT/fork-previous" && pwd)"
@@ -91,6 +100,7 @@ if [ "$rollback" = true ]; then
   exit 0
 fi
 
+echo '  Checking release…'
 if [ "$release" = latest ]; then
   download_api "$API/releases?per_page=100" "$tmp/releases.json"
   i=0
@@ -125,9 +135,24 @@ case "$commit$digest" in *[!0-9a-f]*) exit 1 ;; esac
 [ "$asset" = "codex-package-aarch64-apple-darwin-$digest.tar.gz" ] || exit 1
 name="$version-$commit-$digest-aarch64-apple-darwin"
 destination="$ROOT/releases/$name"
+short_commit="$(printf '%.8s' "$commit")"
+
+# 完整构建标识相同才算最新；仍验证已安装的 CLI 并修复入口链接。
+if [ -L "$ROOT/current" ] && [ -f "$destination/fork-release.json" ] &&
+  [ "$(cd -P "$ROOT/current" && pwd)" = "$destination" ]; then
+  [ "$("$destination/bin/codex" --version)" = "codex-cli $version" ]
+  select_package "$destination"
+  printf '\nAlready up to date: %s (%s).\n' "$version" "$short_commit"
+  check_path
+  exit 0
+fi
 
 if [ ! -f "$destination/fork-release.json" ]; then
-  download "$DOWNLOAD/$tag/$asset" "$tmp/package.tar.gz"
+  printf '  Downloading %s…\n' "$version"
+  download "$DOWNLOAD/$tag/$asset" "$tmp/package.tar.gz" package || {
+    echo 'Package download failed; current CLI unchanged.' >&2; exit 1;
+  }
+  echo '  Verifying and installing…'
   actual="$(shasum -a 256 "$tmp/package.tar.gz" | awk '{print $1}')"
   [ "$actual" = "$digest" ] || { echo 'Package checksum mismatch; current CLI unchanged.' >&2; exit 1; }
   # Only the repository's canonical relative-path package layout is accepted.
@@ -163,8 +188,6 @@ if [ -L "$ROOT/current" ]; then
   fi
 fi
 select_package "$destination"
-printf 'Installed Codex %s (%s). Background upgrades are disabled.\n' "$version" "$commit"
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *) printf 'Add %s to PATH to use codex.\n' "$BIN_DIR" ;;
-esac
+printf '\n✓ Installed %s (%s)\n' "$version" "$short_commit"
+echo '  Restart Codex to use the new version.'
+check_path
