@@ -136,6 +136,10 @@ jobs:
       - name: Validate source and build complete native package
         id: package
         run: python3 scripts/fork/release.py build --target ${{ matrix.target }}
+      - name: 验证真实 CLI 启动与 resume 的终端目录
+        env:
+          CODEX_FORK_TEST_BINARY: ${{ github.workspace }}/fork-dist/package/bin/codex
+        run: python3 -m unittest discover -s scripts/fork -p test_terminal_cwd.py -v
       - name: 上传产物构建耗时报告
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: always()
