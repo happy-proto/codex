@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import pty
 import signal
 import subprocess
 import tarfile
@@ -196,7 +197,10 @@ for i, arg in enumerate(args):
         headers.extend(pathlib.Path(value[1:]).read_text().splitlines() if value.startswith("@") else [value])
 with (pathlib.Path(os.environ["FAKE_NETWORK"]) / "requests.jsonl").open("a") as log:
     import json
-    log.write(json.dumps({"url": url, "headers": headers}) + "\\n")
+    log.write(json.dumps({"url": url, "headers": headers, "args": args}) + "\\n")
+if url.endswith(".tar.gz") and os.environ.get("FAIL_PACKAGE_DOWNLOAD") == "1":
+    print("curl: (22) The requested URL returned error: 503", file=sys.stderr)
+    sys.exit(22)
 if "/releases?" in url and os.environ.get("REQUIRE_GH_AUTH") == "1":
     if headers != ["Authorization: Bearer " + os.environ["FAKE_GH_TOKEN"]]:
         print("curl: (22) The requested URL returned error: 403", file=sys.stderr)
@@ -278,6 +282,77 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
 
     def selected(self):
         return (self.home / "packages/standalone/current").resolve()
+
+    def test_noninteractive_install_has_compact_output_and_silent_downloads(self):
+        self.prepare_build("a")
+        result = self.install()
+        self.assertIn(f"✓ Installed {self.version} (aaaaaaaa)", result.stdout)
+        self.assertIn("Restart Codex to use the new version.", result.stdout)
+        self.assertNotIn("a" * 40, result.stdout)
+        self.assertNotIn("Background upgrades", result.stdout)
+        self.assertEqual(result.stderr, "")
+        requests = [
+            json.loads(line)
+            for line in (self.network / "requests.jsonl").read_text().splitlines()
+        ]
+        for request in requests:
+            self.assertTrue(
+                "-s" in request["args"] or "-fsS" in request["args"], request
+            )
+
+    def test_current_build_skips_download_and_restart_message(self):
+        self.prepare_build("a")
+        self.install()
+        old = self.selected()
+        (self.network / "requests.jsonl").unlink()
+        result = self.install()
+        self.assertIn(f"Already up to date: {self.version} (aaaaaaaa)", result.stdout)
+        self.assertNotIn("Restart", result.stdout)
+        self.assertNotIn("Installed", result.stdout)
+        self.assertEqual(self.selected(), old)
+        requests = (self.network / "requests.jsonl").read_text().splitlines()
+        self.assertFalse(
+            any(json.loads(line)["url"].endswith(".tar.gz") for line in requests)
+        )
+
+    def test_interactive_download_only_shows_progress_for_package(self):
+        self.prepare_build("a")
+        master, slave = pty.openpty()
+        try:
+            result = subprocess.run(
+                ["sh", str(Path(__file__).with_name("install.sh"))],
+                env=self.env,
+                stdout=subprocess.PIPE,
+                stderr=slave,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+        finally:
+            os.close(slave)
+            os.close(master)
+        requests = [
+            json.loads(line)
+            for line in (self.network / "requests.jsonl").read_text().splitlines()
+        ]
+        for request in requests:
+            self.assertEqual(
+                "--progress-bar" in request["args"],
+                request["url"].endswith(".tar.gz"),
+            )
+
+    def test_download_failure_preserves_diagnostics_and_selected_package(self):
+        self.prepare_build("a")
+        self.install()
+        old = self.selected()
+        self.prepare_build("b")
+        self.env["FAIL_PACKAGE_DOWNLOAD"] = "1"
+        result = self.install(succeeds=False)
+        self.assertIn("curl: (22)", result.stderr)
+        self.assertIn("Package download failed; current CLI unchanged.", result.stderr)
+        self.assertNotIn("✓ Installed", result.stdout)
+        self.assertEqual(self.selected(), old)
 
     def test_same_version_update_selects_new_build_and_preserves_old_package(self):
         first = self.prepare_build("a")
