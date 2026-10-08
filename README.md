@@ -56,7 +56,9 @@ PR 在 Linux 上运行轻量脚本检查；推送 `fork` 后对完整集成 stac
 macOS 安装契约和真实 CLI 验收使用 ARM macOS runner。
 标准 macOS runner 上保留产物的 release 优化，关闭跨 crate Thin LTO。
 Rust 测试与构建并行，保留 release 条件编译及关闭 debug assertions，禁用测试优化以控制成本。
-CI 上传 Cargo 耗时报告，分别观察产物和测试构建；构建失败时也尽量保留报告。
+Rust 编译通过 mbx 的 objects 模式缓存本次构建使用的对象，Cargo 下载目录单独缓存，
+不重复归档整个 target。构建和测试分别维护缓存，手动完整实验可预热但默认不发布。
+CI 上传 mbx 缓存统计和 Cargo 耗时报告，分别观察产物和测试构建；构建失败时也尽量保留报告。
 
 下方保留的上游介绍与安装说明指向 **官方版本**，不用于安装此 fork。
 

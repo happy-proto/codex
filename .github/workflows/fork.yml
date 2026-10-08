@@ -10,10 +10,6 @@ on:
         description: 仅运行匹配的 TUI 库测试，跳过产物和发布；留空执行完整验证
         type: string
         default: ''
-      use_sccache:
-        description: 手动构建使用 sccache；关闭可对照（自动构建仅测试启用）
-        type: boolean
-        default: true
       publish:
         description: 发布已验证的 fork 构建；耗时实验默认不发布
         type: boolean
@@ -53,6 +49,9 @@ jobs:
     timeout-minutes: 180
     env:
       CARGO_BUILD_JOBS: '3'
+      # 保留上游 package builder 和 Cargo 耗时报告约定的 target 路径。
+      MBX_TARGET_VIEWS: '0'
+      CODEX_FORK_CARGO: mbx
       CARGO_PROFILE_RELEASE_DEBUG: '0'
       CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'off'
       CARGO_PROFILE_RELEASE_LTO: 'false'
@@ -74,32 +73,23 @@ jobs:
         working-directory: scripts/fork
         run: python3 -m unittest test_release.InstallerTests -v
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+      - name: 恢复 Cargo 下载缓存
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
         with:
           workspaces: codex-rs
-          cache-on-failure: true
-          shared-key: fork-macos-arm64
-      - name: 配置共享编译缓存
-        id: sccache
-        # 0.18.0 在未命中时延迟 metadata 通知，削弱 Cargo 流水线。
-        # 上游修复发布稳定版之前，产物缓存只用于手动实验。
-        if: github.event_name == 'workflow_dispatch' && inputs.use_sccache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
-        env:
-          SCCACHE_GHA_ENABLED: 'true'
-          SCCACHE_BASEDIRS: ${{ github.workspace }}
-          SCCACHE_IDLE_TIMEOUT: '0'
+          cache-targets: false
+          cache-bin: false
+          shared-key: fork-build-v1-downloads
+          save-if: ${{ github.ref == 'refs/heads/fork' || github.event_name == 'workflow_dispatch' }}
+      - name: 配置 mbx 编译缓存
+        id: mbx
+        uses: jdx/mr-boxington-action@d0825fbaf3cc36ca2609aa38e71046265a1f1e37 # v1
         with:
-          version: v0.18.0
-      - name: 启用编译缓存
-        if: steps.sccache.outcome == 'success'
-        run: |
-          {
-            echo 'SCCACHE_GHA_ENABLED=true'
-            echo 'SCCACHE_IDLE_TIMEOUT=0'
-            echo "SCCACHE_BASEDIRS=$GITHUB_WORKSPACE"
-            echo "RUSTC_WRAPPER=$SCCACHE_PATH"
-          } >> "$GITHUB_ENV"
+          version: '1.22.0'
+          working-directory: codex-rs
+          github-cache-mode: objects
+          cache-generation: fork-build-v1
+          save-on-workflow-dispatch: true
       - name: Install version-management tool
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
@@ -118,8 +108,7 @@ jobs:
                   output.write(f"{key}={value}\n")
           PY
       - name: Refresh the cached V8 build record
-        # rust-cache removes V8's profile-level gn_out directory. Its cached
-        # Cargo record must not bypass extraction of the pinned static library.
+        # 重新执行 V8 build script，确保恢复缓存后固定的静态库已正确解压。
         run: cargo clean --manifest-path codex-rs/Cargo.toml --target aarch64-apple-darwin --release -p v8
       - name: Validate source and build signed complete package
         id: package
@@ -132,17 +121,17 @@ jobs:
           path: codex-rs/target/cargo-timings/
           if-no-files-found: ignore
       - name: 保存产物编译缓存统计
-        if: always() && steps.sccache.outcome == 'success'
+        if: always() && steps.mbx.outcome == 'success'
         run: |
-          mkdir -p fork-sccache
-          sccache --show-stats | tee fork-sccache/build.txt >> "$GITHUB_STEP_SUMMARY"
-          sccache --show-stats --stats-format json > fork-sccache/build.json
+          mkdir -p fork-mbx
+          mbx stats --json > fork-mbx/build-savings.json
+          mbx cache stats --json > fork-mbx/build-cache.json
       - name: 上传产物编译缓存统计
-        if: always() && steps.sccache.outcome == 'success'
+        if: always() && steps.mbx.outcome == 'success'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
-          name: fork-build-sccache-${{ github.sha }}
-          path: fork-sccache/
+          name: fork-build-mbx-${{ github.sha }}
+          path: fork-mbx/
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: ${{ always() && steps.package.outcome == 'success' }}
         with:
@@ -160,6 +149,9 @@ jobs:
     timeout-minutes: 180
     env:
       CARGO_BUILD_JOBS: '3'
+      # 保留上游 package builder 和 Cargo 耗时报告约定的 target 路径。
+      MBX_TARGET_VIEWS: '0'
+      CODEX_FORK_CARGO: mbx
       # Preserve release-only code and disabled debug assertions without
       # spending release-package optimization time on the test harness.
       CARGO_PROFILE_RELEASE_OPT_LEVEL: '0'
@@ -188,30 +180,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config libcap-dev libasound2-dev
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
-      - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+      - name: 恢复 Cargo 下载缓存
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
         with:
           workspaces: codex-rs
-          cache-on-failure: true
-          shared-key: fork-tests-linux-x64
-      - name: 配置共享编译缓存
-        id: sccache
-        if: github.event_name != 'workflow_dispatch' || inputs.use_sccache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
-        env:
-          SCCACHE_GHA_ENABLED: 'true'
-          SCCACHE_BASEDIRS: ${{ github.workspace }}
-          SCCACHE_IDLE_TIMEOUT: '0'
+          cache-targets: false
+          cache-bin: false
+          shared-key: fork-tests-v1-downloads
+          save-if: ${{ github.ref == 'refs/heads/fork' || github.event_name == 'workflow_dispatch' }}
+      - name: 配置 mbx 编译缓存
+        id: mbx
+        uses: jdx/mr-boxington-action@d0825fbaf3cc36ca2609aa38e71046265a1f1e37 # v1
         with:
-          version: v0.18.0
-      - name: 启用编译缓存
-        if: steps.sccache.outcome == 'success'
-        run: |
-          {
-            echo 'SCCACHE_GHA_ENABLED=true'
-            echo 'SCCACHE_IDLE_TIMEOUT=0'
-            echo "SCCACHE_BASEDIRS=$GITHUB_WORKSPACE"
-            echo "RUSTC_WRAPPER=$SCCACHE_PATH"
-          } >> "$GITHUB_ENV"
+          version: '1.22.0'
+          working-directory: codex-rs
+          github-cache-mode: objects
+          cache-generation: fork-tests-v1
+          save-on-workflow-dispatch: true
       - name: Install version-management tool
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
@@ -226,13 +211,13 @@ jobs:
           TUI_TEST_FILTER: ${{ inputs.tui_test_filter }}
         run: |
           if [ -n "$TUI_TEST_FILTER" ]; then
-            cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib "$TUI_TEST_FILTER"
+            mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib "$TUI_TEST_FILTER"
             exit 0
           fi
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates_cache::tests
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates::tests
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_action::tests
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib working_directory
+          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates_cache::tests
+          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates::tests
+          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_action::tests
+          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib working_directory
       - name: Verify fork update presentation
         if: ${{ !inputs.tui_test_filter }}
         working-directory: codex-rs
@@ -240,13 +225,13 @@ jobs:
           INSTA_UPDATE: new
         run: |
           result=0
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_prompt::tests || result=1
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_available_history_cell_snapshot || result=1
+          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_prompt::tests || result=1
+          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_available_history_cell_snapshot || result=1
           exit "$result"
       - name: Test daemon update defaults
         if: ${{ !inputs.tui_test_filter }}
         working-directory: codex-rs
-        run: cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-app-server-daemon --lib settings::tests
+        run: mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-app-server-daemon --lib settings::tests
       - name: 上传测试构建耗时报告
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: always()
@@ -255,17 +240,17 @@ jobs:
           path: codex-rs/target/cargo-timings/
           if-no-files-found: ignore
       - name: 保存测试编译缓存统计
-        if: always() && steps.sccache.outcome == 'success'
+        if: always() && steps.mbx.outcome == 'success'
         run: |
-          mkdir -p fork-sccache
-          sccache --show-stats | tee fork-sccache/tests.txt >> "$GITHUB_STEP_SUMMARY"
-          sccache --show-stats --stats-format json > fork-sccache/tests.json
+          mkdir -p fork-mbx
+          mbx stats --json > fork-mbx/test-savings.json
+          mbx cache stats --json > fork-mbx/test-cache.json
       - name: 上传测试编译缓存统计
-        if: always() && steps.sccache.outcome == 'success'
+        if: always() && steps.mbx.outcome == 'success'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
-          name: fork-test-sccache-${{ github.sha }}
-          path: fork-sccache/
+          name: fork-test-mbx-${{ github.sha }}
+          path: fork-mbx/
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: failure()
         with:
