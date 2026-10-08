@@ -50,6 +50,12 @@ curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork
 
 ## Fork 功能
 
+- **功能列表输出格式**：`codex features list` 默认显示带表头的表格，
+  可通过 `--format plain|table|markdown|json` 选择纯文本、表格、Markdown 或 JSON。
+  JSON 使用 `features` 数组，每项包含 `name`、`stage` 和布尔值 `enabled`；
+  所有格式按名称排序，并使用加载配置后的实际开关状态。
+  **Breaking change**：默认输出从对齐纯文本改为表格；解析旧输出的脚本需添加 `--format plain`。
+  跟踪 [上游 issue #8397](https://github.com/openai/codex/issues/8397)。
 - **中文 Markdown 加粗**：CLI 兼容中文与全角标点旁的双星号加粗，例如 `**加粗内容。**后续中文`。
   流式输出与完整回复使用相同规则，保留代码、转义文本和原始消息。
   此功能仅覆盖 fork CLI 的渲染器，跟踪 [上游 issue #37531](https://github.com/openai/codex/issues/37531)。
