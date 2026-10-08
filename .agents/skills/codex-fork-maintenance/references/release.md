@@ -14,20 +14,24 @@ macOS 安装契约和真实 CLI 验收使用 ARM macOS runner，避免通用测�
 分析耗时时读取各 job 的日志和 `fork-build-timings-*`、`fork-test-timings-*` artifact，
 用 Cargo 报告区分 crate 编译和并发等待，不把日志末尾的整段耗时直接归为链接。
 
-测试编译默认使用 sccache 的 GitHub Actions 后端；产物编译只在手动实验中启用。
-稳定版 0.18.0 在未命中时延迟 metadata 通知，削弱 Cargo 流水线；
-等包含 [上游修复](https://github.com/mozilla/sccache/pull/2875) 的稳定版发布后再验证产物默认启用的收益。
-在 rust-cache 恢复后才启用 wrapper，
-避免改变已有依赖缓存的环境指纹。sccache 按源码和编译参数区分条目，不按 stack 分支拆分。
-使用 `SCCACHE_IDLE_TIMEOUT=0`，避免长编译期间没有新请求时 daemon 退出、回退本地编译并丢失统计。
+Rust 编译由 mbx 1.22.0 包装 Cargo，使用 GitHub Actions 的 `objects` 缓存模式。
+只导出本次构建使用或生成的对象；Cargo registry 和 Git 依赖下载由独立 rust-cache 保存，
+该下载缓存关闭 target 和 bin 缓存，不与 mbx 重复保存编译产物。
+构建与测试按平台和 profile 使用独立 cache generation，避免并行 job 争用同一条目。
+设置 `MBX_TARGET_VIEWS=0` 保留上游 package builder 和耗时报告使用的 workspace target 路径。
+V8、rg、zsh 继续由上游下载器校验和获取，不额外缓存下载资源。
+使用 mbx Action 默认的对象库布局，避免隔离模式清理只读 build-script 输出时的权限错误。
+每次导出只包含该 job 的构建闭包，不归档整个历史对象库；runner 在 job 结束后销毁。
+
 先在默认分支 `fork` 预热；其它分支可读取默认分支缓存，默认分支不能反向读取功能分支的私有缓存。
 因此维持各功能 PR 的轻量检查，只在集成顶部自动执行重型构建；用 workflow_dispatch 按需验证指定层。
-手动实验默认不发布，`use_sccache=false` 可做相同源码的对照，`publish=true` 才请求发布 fork。
+手动实验默认不发布，`publish=true` 才请求发布 fork；受信任的手动完整验证允许保存缓存。
 只需验证 TUI 回归时，手动指定 `tui_test_filter`；该模式只运行匹配的 TUI 库测试，
 跳过产物构建、其它 Rust 测试及发布，不受 `publish` 输入影响。
 手动实验和自动发布使用不同并发组，避免耗时实验占用自动发布队列。
-比较同一提交的预热、热缓存及无 sccache 运行；同时读取 `fork-*-sccache-*` 统计与 Cargo 耗时报告，
-区分缓存命中、不可缓存的最终 binary/test harness 和 runner 波动，不能仅凭总时长判断收益。
+比较迁移前完整版本、首次预热和热缓存完整版本，分别记录构建、测试 job 的执行时间、
+缓存恢复/保存时间和排队时间；读取 `fork-*-mbx-*` 统计及 Cargo 耗时报告。
+不能用冷缓存一次运行或单独的编译加速数字判断最终收益；持续超过 10% 的耗时增长应复查再接入。
 
 修改发布流程时检查：版本与选定 alpha 一致、源码属于完整 fork 分支、签名后的资源摘要正确、
 产物先上传验证再更新清单、同版本更新可被识别、下载损坏不会切换 current、并发发布不会让旧构建覆盖新构建。
