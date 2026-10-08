@@ -67,6 +67,7 @@ mod exec_server_args_tests;
 mod exec_server_auth;
 mod exec_server_command;
 mod exec_server_telemetry;
+mod features_list;
 mod marketplace_cmd;
 mod mcp_cmd;
 mod mcp_login;
@@ -1011,7 +1012,7 @@ struct FeaturesCli {
 #[derive(Debug, Parser)]
 enum FeaturesSubcommand {
     /// List known features with their stage and effective state.
-    List,
+    List(features_list::FeaturesListArgs),
     /// Enable a feature in config.toml.
     Enable(FeatureSetArgs),
     /// Disable a feature in config.toml.
@@ -1834,7 +1835,7 @@ async fn cli_main(
             cmd.run(&arg0_paths, &root_config_overrides).await?;
         }
         Some(Subcommand::Features(FeaturesCli { sub })) => match sub {
-            FeaturesSubcommand::List => {
+            FeaturesSubcommand::List(args) => {
                 reject_remote_mode_for_subcommand(
                     root_remote.as_deref(),
                     root_remote_auth_token_env.as_deref(),
@@ -1851,21 +1852,16 @@ async fn cli_main(
                     cloud_config::load_config(&root_config_overrides, LoaderOverrides::default())
                         .await?;
                 let mut rows = Vec::with_capacity(FEATURES.len());
-                let mut name_width = 0;
-                let mut stage_width = 0;
                 for def in FEATURES {
-                    let name = def.key;
-                    let stage = stage_str(def.stage);
-                    let enabled = config.features.enabled(def.id);
-                    name_width = name_width.max(name.len());
-                    stage_width = stage_width.max(stage.len());
-                    rows.push((name, stage, enabled));
+                    rows.push(features_list::FeaturesListRow {
+                        name: def.key,
+                        stage: stage_str(def.stage),
+                        enabled: config.features.enabled(def.id),
+                    });
                 }
-                rows.sort_unstable_by_key(|(name, _, _)| *name);
+                rows.sort_unstable_by_key(|row| row.name);
 
-                for (name, stage, enabled) in rows {
-                    println!("{name:<name_width$}  {stage:<stage_width$}  {enabled}");
-                }
+                features_list::write_features_list(std::io::stdout().lock(), &rows, args.format)?;
             }
             FeaturesSubcommand::Enable(FeatureSetArgs { feature }) => {
                 reject_remote_mode_for_subcommand(
