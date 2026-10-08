@@ -30,6 +30,10 @@ codex update            # 手动更新，默认关闭后台升级
 curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork/install.sh | sh -s -- --rollback
 ```
 
+启动后在后台异步检查 fork Release，优先使用 `GH_TOKEN`、`GITHUB_TOKEN` 或已登录的 `gh`。
+发现新构建只显示一次 warning，不等待网络、不弹更新选择框，也不自动安装；使用 `codex update`
+主动更新。设置 `check_for_update_on_startup = false` 可同时关闭后台检查与提示。
+
 版本沿用上游 alpha 并添加 `.fork`，例如 `0.162.0-alpha.18.fork`。
 每次 `fork` 更新验证通过后自动发布；同一 alpha 下更新同名 Release 和标签，
 因此版本字符串不能唯一标识构建。`fork-release.json` 记录源提交、上游提交和包摘要，

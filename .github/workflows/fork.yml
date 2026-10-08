@@ -225,7 +225,6 @@ jobs:
           INSTA_UPDATE: new
         run: |
           result=0
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_prompt::tests || result=1
           mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_available_history_cell_snapshot || result=1
           exit "$result"
       - name: Test daemon update defaults

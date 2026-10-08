@@ -1,10 +1,12 @@
 #![cfg(not(debug_assertions))]
 
+use crate::app_event::AppEvent;
+use crate::app_event_sender::AppEventSender;
+use crate::history_cell::UpdateAvailableHistoryCell;
 use crate::legacy_core::config::Config;
 use crate::updates_cache::VersionInfo;
-use crate::updates_cache::read_version_info;
 use crate::updates_cache::version_filepath;
-use chrono::Duration;
+use chrono::Duration as ChronoDuration;
 use chrono::Utc;
 use codex_build_info::BuildInfo;
 use codex_http_client::ClientRouteClass;
@@ -12,11 +14,16 @@ use codex_http_client::HttpClientFactory;
 use codex_http_client::RouteAwareClientPool;
 use codex_login::default_client::default_headers;
 use serde::Deserialize;
+use std::future::Future;
 use std::path::Path;
-
-pub(crate) use crate::updates_cache::dismiss_version;
+use std::path::PathBuf;
+use std::time::Duration;
+use tokio::process::Command;
 
 const RELEASES_URL: &str = "https://api.github.com/repos/happy-proto/codex/releases?per_page=100";
+const DOWNLOADS_URL: &str = "https://github.com/happy-proto/codex/releases/download";
+const UPDATE_CHECK_TIMEOUT: Duration = Duration::from_secs(10);
+const TOKEN_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Deserialize)]
 struct ReleaseInfo {
@@ -36,34 +43,121 @@ fn upstream_alpha_version(tag: &str) -> Option<semver::Version> {
     parsed.pre.as_str().starts_with("alpha.").then_some(parsed)
 }
 
-pub fn get_upgrade_version(config: &Config) -> Option<String> {
+pub(crate) fn start_update_check(config: &Config, events: AppEventSender) {
     if !config.check_for_update_on_startup || BuildInfo::get().is_source_build() {
-        return None;
+        return;
     }
     let version_file = version_filepath(config);
-    let info = read_version_info(&version_file).ok();
-    if info
-        .as_ref()
-        .is_none_or(|info| info.last_checked_at < Utc::now() - Duration::minutes(30))
-    {
-        let factory = config.http_client_factory();
-        tokio::spawn(async move {
-            if let Err(error) = check_for_update(&version_file, factory).await {
-                tracing::error!("Failed to check fork update: {error}");
-            }
-        });
-    }
-    info.and_then(|info| info.upgrade_label(BuildInfo::get().build_commit()))
+    let refresh_file = version_file.clone();
+    let factory = config.http_client_factory();
+    spawn_update_check(
+        version_file,
+        BuildInfo::get().build_commit().to_string(),
+        events,
+        async move { check_for_update(&refresh_file, factory).await },
+    );
 }
 
-async fn check_for_update(version_file: &Path, factory: HttpClientFactory) -> anyhow::Result<()> {
-    let client =
-        RouteAwareClientPool::with_chatgpt_cloudflare_cookies(factory, ClientRouteClass::Other)
-            .with_legacy_custom_ca_fallback();
+fn spawn_update_check(
+    version_file: PathBuf,
+    current_commit: String,
+    events: AppEventSender,
+    refresh: impl Future<Output = anyhow::Result<VersionInfo>> + Send + 'static,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut info = tokio::fs::read(&version_file)
+            .await
+            .ok()
+            .and_then(|contents| serde_json::from_slice::<VersionInfo>(&contents).ok());
+        if info
+            .as_ref()
+            .is_none_or(|info| info.last_checked_at < Utc::now() - ChronoDuration::minutes(30))
+        {
+            match tokio::time::timeout(UPDATE_CHECK_TIMEOUT, refresh).await {
+                Ok(Ok(latest)) => info = Some(latest),
+                Ok(Err(error)) => tracing::debug!("Failed to check fork update: {error}"),
+                Err(_) => tracing::debug!("Fork update check timed out"),
+            }
+        }
+        if let Some(latest) = info.and_then(|info| info.upgrade_label(&current_commit)) {
+            events.send(AppEvent::InsertHistoryCell(Box::new(
+                UpdateAvailableHistoryCell::new(latest),
+            )));
+        }
+    })
+}
+
+async fn check_for_update(
+    version_file: &Path,
+    factory: HttpClientFactory,
+) -> anyhow::Result<VersionInfo> {
+    let token = github_token().await;
+    let latest =
+        fetch_latest_release(factory, RELEASES_URL, DOWNLOADS_URL, token.as_deref()).await?;
+    let info = VersionInfo {
+        latest_version: latest.version,
+        latest_commit: Some(latest.source_commit),
+        last_checked_at: Utc::now(),
+    };
+    if let Some(parent) = version_file.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::write(version_file, serde_json::to_vec(&info)?).await?;
+    Ok(info)
+}
+
+fn token_from_environment(
+    gh_token: Option<String>,
+    github_token: Option<String>,
+) -> Option<String> {
+    gh_token
+        .into_iter()
+        .chain(github_token)
+        .map(|token| token.trim().to_string())
+        .find(|token| !token.is_empty())
+}
+
+async fn github_token() -> Option<String> {
+    if let Some(token) = token_from_environment(
+        std::env::var("GH_TOKEN").ok(),
+        std::env::var("GITHUB_TOKEN").ok(),
+    ) {
+        return Some(token);
+    }
+    let output = tokio::time::timeout(
+        TOKEN_TIMEOUT,
+        Command::new("gh")
+            .args(["auth", "token", "--hostname", "github.com"])
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .ok()?
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    token_from_environment(String::from_utf8(output.stdout).ok(), None)
+}
+
+async fn fetch_latest_release(
+    factory: HttpClientFactory,
+    releases_url: &str,
+    downloads_url: &str,
+    token: Option<&str>,
+) -> anyhow::Result<ForkRelease> {
+    // Keep API credentials on the original host and out of request diagnostics.
+    let api = RouteAwareClientPool::new_without_redirects_or_request_logging(
+        factory.clone(),
+        ClientRouteClass::Other,
+    )
+    .with_legacy_custom_ca_fallback();
+    let mut request = api.get(releases_url).headers(default_headers());
+    if let Some(token) = token {
+        request = request.bearer_auth(token);
+    }
     // GitHub's /releases/latest excludes prereleases, so query the alpha list.
-    let releases = client
-        .get(RELEASES_URL)
-        .headers(default_headers())
+    let releases = request
         .send()
         .await?
         .error_for_status()?
@@ -79,8 +173,9 @@ async fn check_for_update(version_file: &Path, factory: HttpClientFactory) -> an
         .max_by(|left, right| left.0.cmp(&right.0))
         .map(|(_, tag)| tag)
         .ok_or_else(|| anyhow::anyhow!("No published fork alpha release"))?;
-    let url =
-        format!("https://github.com/happy-proto/codex/releases/download/{tag}/fork-release.json");
+    let client = RouteAwareClientPool::new(factory, ClientRouteClass::Other)
+        .with_legacy_custom_ca_fallback();
+    let url = format!("{downloads_url}/{tag}/fork-release.json");
     let latest = client
         .get(&url)
         .headers(default_headers())
@@ -101,50 +196,9 @@ async fn check_for_update(version_file: &Path, factory: HttpClientFactory) -> an
                 .all(|byte| byte.is_ascii_hexdigit()),
         "Invalid fork source commit"
     );
-    let previous = read_version_info(version_file).ok();
-    let info = VersionInfo {
-        latest_version: latest.version,
-        latest_commit: Some(latest.source_commit),
-        last_checked_at: Utc::now(),
-        dismissed_version: previous.and_then(|info| info.dismissed_version),
-    };
-    if let Some(parent) = version_file.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    tokio::fs::write(version_file, serde_json::to_vec(&info)?).await?;
-    Ok(())
-}
-
-pub fn get_upgrade_version_for_popup(config: &Config) -> Option<String> {
-    let latest = get_upgrade_version(config)?;
-    if read_version_info(&version_filepath(config))
-        .ok()
-        .is_some_and(|info| info.dismissed_version.as_deref() == Some(latest.as_str()))
-    {
-        return None;
-    }
-    Some(latest)
+    Ok(latest)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::upstream_alpha_version;
-
-    #[test]
-    fn alpha_hotfix_sorts_after_the_base_alpha_without_fork_marker() {
-        let base = upstream_alpha_version("fork-v0.162.0-alpha.14.fork").unwrap();
-        let hotfix = upstream_alpha_version("fork-v0.162.0-alpha.14.2.fork").unwrap();
-        assert!(hotfix > base);
-    }
-
-    #[test]
-    fn only_fork_alpha_tags_participate_in_update_selection() {
-        for tag in [
-            "rust-v0.162.0-alpha.14",
-            "fork-v0.162.0.fork",
-            "fork-v0.162.0-alpha.14",
-        ] {
-            assert!(upstream_alpha_version(tag).is_none());
-        }
-    }
-}
+#[path = "updates_tests.rs"]
+mod tests;

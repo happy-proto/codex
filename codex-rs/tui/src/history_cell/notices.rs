@@ -13,76 +13,29 @@ const RECAP_HEADING: &str = "Conversation recap";
 #[derive(Debug)]
 pub(crate) struct UpdateAvailableHistoryCell {
     latest_version: String,
-    update_action: Option<UpdateAction>,
 }
 
 #[cfg_attr(debug_assertions, allow(dead_code))]
 impl UpdateAvailableHistoryCell {
-    pub(crate) fn new(latest_version: String, update_action: Option<UpdateAction>) -> Self {
-        Self {
-            latest_version,
-            update_action,
-        }
+    pub(crate) fn new(latest_version: String) -> Self {
+        Self { latest_version }
+    }
+
+    fn warning(&self) -> WarningHistoryCell {
+        new_warning_event(format!(
+            "A new fork build is available: {}. Run codex update to install it.",
+            self.latest_version
+        ))
     }
 }
 
 impl HistoryCell for UpdateAvailableHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        use ratatui_macros::line;
-        use ratatui_macros::text;
-        let update_instruction = if let Some(update_action) = self.update_action {
-            line![
-                "Run ",
-                update_action.command_str().fg(accent_color()),
-                " to update."
-            ]
-        } else {
-            line![
-                "See ",
-                "https://github.com/happy-proto/codex"
-                    .fg(accent_color())
-                    .underlined(),
-                " for installation options."
-            ]
-        };
-
-        let content = text![
-            line![
-                "✨\u{200A}".bold().fg(accent_color()),
-                "Update available!".bold().fg(accent_color()),
-                " ",
-                format!("{CODEX_CLI_VERSION} -> {}", self.latest_version).bold(),
-            ],
-            update_instruction,
-            "",
-            "See full release notes:",
-            "https://github.com/happy-proto/codex/releases"
-                .fg(accent_color())
-                .underlined(),
-        ];
-
-        let inner_width = content
-            .width()
-            .min(usize::from(width.saturating_sub(4)))
-            .max(1);
-        let lines = adaptive_wrap_lines(content.lines, RtOptions::new(inner_width));
-        with_border_with_inner_width(lines, inner_width)
+        self.warning().transcript_lines(width)
     }
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
-        let update_instruction = if let Some(update_action) = self.update_action {
-            format!("Run {} to update.", update_action.command_str())
-        } else {
-            "See https://github.com/happy-proto/codex for installation options.".to_string()
-        };
-        vec![
-            Line::from("Update available!"),
-            Line::from(format!("{CODEX_CLI_VERSION} -> {}", self.latest_version)),
-            Line::from(update_instruction),
-            Line::from(""),
-            Line::from("See full release notes:"),
-            Line::from("https://github.com/happy-proto/codex/releases"),
-        ]
+        self.warning().raw_lines()
     }
 
     fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
