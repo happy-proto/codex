@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -54,6 +55,9 @@ use crate::plugin_cmd::load_cli_auth_manager;
 #[path = "mcp_cmd_tests.rs"]
 mod tests;
 
+#[path = "mcp_list_output.rs"]
+mod mcp_list_output;
+
 /// Subcommands:
 /// - `list`   — list configured servers (with `--json`)
 /// - `get`    — show a single server (with `--json`)
@@ -83,8 +87,18 @@ pub enum McpSubcommand {
 #[derive(Debug, clap::Parser)]
 pub struct ListArgs {
     /// Output the configured servers as JSON.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "format")]
     pub json: bool,
+
+    /// Human-readable layout, or the original aligned tables.
+    #[arg(long, value_enum, default_value_t = ListFormat::Human)]
+    pub format: ListFormat,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum ListFormat {
+    Human,
+    Plain,
 }
 
 #[derive(Debug, clap::Parser)]
@@ -779,6 +793,35 @@ async fn run_list(config: &Config, list_args: ListArgs) -> Result<()> {
 
     if entries.is_empty() {
         println!("No MCP servers configured yet. Try `codex mcp add my-tool -- my-command`.");
+        return Ok(());
+    }
+
+    if matches!(list_args.format, ListFormat::Human) {
+        let rows: Vec<_> = entries
+            .iter()
+            .map(|(name, config)| mcp_list_output::McpListEntry {
+                name,
+                config,
+                auth_status: auth_statuses
+                    .get(name.as_str())
+                    .map(|entry| McpAuthStatus::from(entry.auth_state))
+                    .unwrap_or(McpAuthStatus::Unsupported),
+            })
+            .collect();
+        let stdout = std::io::stdout();
+        let tty = stdout.is_terminal();
+        let color = tty
+            && std::env::var_os("NO_COLOR").is_none()
+            && std::env::var("TERM").as_deref() != Ok("dumb")
+            && supports_color::on(supports_color::Stream::Stdout).is_some();
+        let width = if tty {
+            crossterm::terminal::size()
+                .map(|(width, _)| usize::from(width))
+                .unwrap_or(80)
+        } else {
+            80
+        };
+        mcp_list_output::write_human_list(stdout.lock(), &rows, width, color)?;
         return Ok(());
     }
 

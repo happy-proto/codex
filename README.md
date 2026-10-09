@@ -64,6 +64,11 @@ Fork 的更新渠道只选择 fork 发行版，上游 alpha 同步由维护者�
 
 ## Fork 功能
 
+- **MCP 列表展示**：`codex mcp list` 默认按服务器显示紧凑信息块，将名称、启用状态和
+  传输类型与命令、参数、URL、认证状态分层展示；长字段换行，环境变量值继续脱敏。
+  终端输出使用少量状态颜色，重定向、`NO_COLOR` 和 `TERM=dumb` 时关闭配色。
+  **Breaking change**：默认文本布局改变；解析旧输出的脚本需添加 `--format plain`，
+  结构化读取继续使用原有 `--json`。启用状态只反映配置，不表示服务器连接正常。
 - **功能列表输出格式**：`codex features list` 默认显示带表头的表格，
   可通过 `--format plain|table|markdown|json` 选择纯文本、表格、Markdown 或 JSON。
   JSON 使用 `features` 数组，每项包含 `name`、`stage` 和布尔值 `enabled`；
