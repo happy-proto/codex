@@ -21,20 +21,26 @@ PACKAGES = {
 
 def main():
     units = int(os.environ["EXPERIMENT_CODEGEN_UNITS"])
+    phase = os.environ["EXPERIMENT_PHASE"]
     RESULTS.mkdir(exist_ok=True)
-    config = ROOT / "codex-rs/.cargo/config.toml"
-    with config.open("a") as output:
-        for name in PACKAGES:
-            output.write(
-                f'\n[profile.release.package."{name}"]\ncodegen-units = {units}\n'
-            )
+    if phase == "prime":
+        config = ROOT / "codex-rs/.cargo/config.toml"
+        with config.open("a") as output:
+            for name in PACKAGES:
+                output.write(
+                    f'\n[profile.release.package."{name}"]\ncodegen-units = {units}\n'
+                )
     hardware = {
         key: subprocess.check_output(["sysctl", "-n", key], text=True).strip()
         for key in ["hw.ncpu", "hw.memsize", "machdep.cpu.brand_string"]
     }
-    metrics = {"codegen_units": units, "hardware": hardware, "phases": []}
+    metrics = (
+        {"codegen_units": units, "hardware": hardware, "phases": []}
+        if phase == "prime"
+        else json.loads((RESULTS / "metadata.json").read_text())
+    )
     (RESULTS / "metadata.json").write_text(json.dumps(metrics, indent=2))
-    for phase in ["prime", "changed"]:
+    for phase in [phase]:
         # 改动相同的无运行副作用常量，避免完全相同源码的缓存命中掩盖重编译成本。
         value = 0 if phase == "prime" else 1
         for folder in PACKAGES.values():

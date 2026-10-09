@@ -89,7 +89,13 @@ jobs:
       - name: Refresh the cached V8 build record
         # 重新执行 V8 build script，确保恢复缓存后固定的静态库已正确解压。
         run: cargo clean --manifest-path codex-rs/Cargo.toml --target aarch64-apple-darwin --release -p v8
-      - name: 对照构建与源码变化后的完整包验收
+      - name: 完整包预热构建与验收
+        env:
+          EXPERIMENT_PHASE: prime
+        run: python3 -u scripts/fork/experiment_build.py
+      - name: 源码变化后的完整包重编译与验收
+        env:
+          EXPERIMENT_PHASE: changed
         run: python3 -u scripts/fork/experiment_build.py
       - name: 上传实验数据
         if: always()
