@@ -2,6 +2,7 @@ name: Fork build timing experiment
 
 # 临时验证专用：仅 PR 触发，缓存只读，不发布安装包或更新频道。
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - .github/workflows/fork-build-experiment.yml
@@ -11,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: fork-build-experiment-${{ github.event.pull_request.number }}
+  group: fork-build-experiment-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -31,12 +32,12 @@ jobs:
       CARGO_PROFILE_RELEASE_DEBUG: '0'
       CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'off'
       CARGO_PROFILE_RELEASE_LTO: 'false'
-      STABLE_GIT_COMMIT: ${{ github.event.pull_request.head.sha }}
+      STABLE_GIT_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
       EXPERIMENT_CODEGEN_UNITS: ${{ matrix.codegen_units }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Fetch selected upstream alpha
@@ -101,6 +102,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
-          name: build-experiment-cgu-${{ matrix.codegen_units }}-${{ github.event.pull_request.head.sha }}
+          name: build-experiment-cgu-${{ matrix.codegen_units }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: experiment-results/
           if-no-files-found: warn
