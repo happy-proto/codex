@@ -56,7 +56,9 @@ curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork
 [Fork 工作流](.github/workflows/fork.yml) 验证安装契约、构建并签名完整包、
 测试更新行为，并在发布前验收实际 CLI 和 app-server。
 依赖 OpenAI 基础设施的上游工作流已在此 fork 的 GitHub 设置中禁用。
-PR 在 Linux 上运行轻量脚本检查；推送 `fork` 后对完整集成 stack 执行一次构建和 Rust 测试。
+[PR 工作流](.github/workflows/fork-pr.yml) 只在 Linux 上运行轻量脚本检查，
+不创建构建、Rust 测试和发布 Job；同一 PR 更新后取消旧检查。
+推送 `fork` 后由 Fork 工作流对完整集成 stack 执行一次构建和 Rust 测试。
 通用 Rust 测试在 Linux x64 上运行；只有完整 Apple Silicon 包的构建、签名、
 macOS 安装契约和真实 CLI 验收使用 ARM macOS runner。
 标准 macOS runner 上保留产物的 release 优化，关闭跨 crate Thin LTO。

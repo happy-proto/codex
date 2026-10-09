@@ -1,7 +1,6 @@
 name: Fork CI and release
 
 on:
-  pull_request:
   push:
     branches: [fork]
   workflow_dispatch:
@@ -19,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: fork-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  group: fork-${{ github.ref }}-${{ github.event_name }}
   # fork 新推送自动取消旧构建，优先验证和发布最新提交。
   # 手动耗时实验使用独立队列，不自动取消正在运行的实验。
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
@@ -43,7 +42,7 @@ jobs:
           sh -n scripts/fork/cargo-timed.sh
 
   build:
-    if: github.event_name != 'pull_request' && !inputs.tui_test_filter
+    if: ${{ !inputs.tui_test_filter }}
     needs: scripts
     runs-on: macos-15
     timeout-minutes: 180
@@ -143,7 +142,6 @@ jobs:
           if-no-files-found: error
 
   tests:
-    if: github.event_name != 'pull_request'
     needs: scripts
     runs-on: ubuntu-24.04
     timeout-minutes: 180
