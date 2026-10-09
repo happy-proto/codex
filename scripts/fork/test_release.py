@@ -247,7 +247,6 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
         for binary in [
             "bin/codex-code-mode-host",
             "codex-path/rg",
-            "codex-resources/zsh/bin/zsh",
         ]:
             self.executable(package / binary, "#!/bin/sh\nexit 0\n")
         # Changing source without changing the software version changes the actual package.
