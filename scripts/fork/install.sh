@@ -167,7 +167,6 @@ if [ ! -f "$destination/fork-release.json" ]; then
   [ "$(extract target "$stage/codex-package.json")" = aarch64-apple-darwin ]
   [ -x "$stage/bin/codex-code-mode-host" ]
   [ -x "$stage/codex-path/rg" ]
-  [ -x "$stage/codex-resources/zsh/bin/zsh" ]
   [ "$("$stage/bin/codex" --version)" = "codex-cli $version" ]
   cp "$tmp/manifest.json" "$stage/fork-release.json"
   ln -s bin/codex "$stage/codex"

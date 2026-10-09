@@ -4,7 +4,8 @@
 版本沿用选定上游 alpha 加 `.fork`，无 fork 序号。同一 alpha 下重发更新同名 Release。
 软件版本不能唯一标识构建：用源 SHA、包摘要和发布清单识别实际构建。
 
-构建复用上游完整 package builder，包含 CLI、code-mode host、rg 和 zsh 等必要资源。
+构建复用上游完整 package builder，包含 CLI、code-mode host 和 rg 等必要资源。
+从上游 `0.163.0-alpha.1` 起不再附带补丁 zsh，签名、验收和安装检查遵循当前上游布局。
 macOS 使用 ad-hoc 签名并保留上游 entitlements；不配置官方 Azure、R2、npm、WinGet 或网站发布设施。
 下载 CI/Release 产物做隔离安装与轻量运行验收。
 标准 macOS runner 使用 release 优化、关闭跨 crate Thin LTO；`lto=false` 仍可能包含单 crate 优化。
@@ -19,7 +20,7 @@ Rust 编译由 mbx 1.22.0 包装 Cargo，使用 GitHub Actions 的 `objects` 缓
 该下载缓存关闭 target 和 bin 缓存，不与 mbx 重复保存编译产物。
 构建与测试按平台和 profile 使用独立 cache generation，避免并行 job 争用同一条目。
 设置 `MBX_TARGET_VIEWS=0` 保留上游 package builder 和耗时报告使用的 workspace target 路径。
-V8、rg、zsh 继续由上游下载器校验和获取，不额外缓存下载资源。
+V8、rg 继续由上游下载器校验和获取，不额外缓存下载资源。
 使用 mbx Action 默认的对象库布局，避免隔离模式清理只读 build-script 输出时的权限错误。
 每次导出只包含该 job 的构建闭包，不归档整个历史对象库；runner 在 job 结束后销毁。
 

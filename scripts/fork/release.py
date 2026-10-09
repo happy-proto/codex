@@ -66,12 +66,6 @@ def smoke(package):
             raise ValueError(f"CLI version mismatch: {actual.stdout}")
         run(str(package / "bin/codex-code-mode-host"), "--help", env=env)
         run(str(package / "codex-path/rg"), "--version", env=env)
-        run(
-            str(package / "codex-resources/zsh/bin/zsh"),
-            "-fc",
-            "echo fork-smoke",
-            env=env,
-        )
         initialize_app_server(cli, env)
 
 
@@ -168,7 +162,6 @@ def build():
         "bin/codex",
         "bin/codex-code-mode-host",
         "codex-path/rg",
-        "codex-resources/zsh/bin/zsh",
     ]:
         binary = package / relative
         args = ["codesign", "--force", "--sign", "-", "--options", "runtime"]

@@ -11,7 +11,8 @@
 
 ## 安装此 fork
 
-首期仅支持 macOS Apple Silicon。完整包包含 code-mode host、ripgrep 和带补丁的 zsh。
+首期仅支持 macOS Apple Silicon。完整包包含 code-mode host 和 ripgrep；从上游
+`0.163.0-alpha.1` 起不再附带补丁 zsh，执行命令沿用上游的系统 shell 路径。
 采用 ad-hoc 签名，未经 Apple 公证；macOS 首次运行时可能需要手动批准。
 
 ```sh
