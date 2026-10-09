@@ -1,0 +1,100 @@
+name: Fork build timing experiment
+
+# 临时验证专用：仅 PR 触发，缓存只读，不发布安装包或更新频道。
+on:
+  pull_request:
+    paths:
+      - .github/workflows/fork-build-experiment.yml
+      - scripts/fork/experiment_build.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-build-experiment-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        codegen_units: [4, 16]
+    name: Build with large-crate CGU ${{ matrix.codegen_units }}
+    runs-on: macos-15
+    timeout-minutes: 240
+    env:
+      CARGO_BUILD_JOBS: '3'
+      # 保留上游 package builder 和 Cargo 耗时报告约定的 target 路径。
+      MBX_TARGET_VIEWS: '0'
+      CODEX_FORK_CARGO: mbx
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'off'
+      CARGO_PROFILE_RELEASE_LTO: 'false'
+      STABLE_GIT_COMMIT: ${{ github.event.pull_request.head.sha }}
+      EXPERIMENT_CODEGEN_UNITS: ${{ matrix.codegen_units }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch selected upstream alpha
+        run: |
+          tag=$(cat scripts/fork/upstream-tag)
+          git fetch https://github.com/openai/codex.git "refs/tags/$tag:refs/tags/$tag"
+          git fetch origin main
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: '3.12'
+      - name: Test macOS installer contracts
+        working-directory: scripts/fork
+        run: python3 -m unittest test_release.InstallerTests -v
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+      - name: 恢复 Cargo 下载缓存
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
+        with:
+          workspaces: codex-rs
+          cache-targets: false
+          cache-bin: false
+          shared-key: fork-build-v1-downloads
+          save-if: false
+      - name: 配置 mbx 编译缓存
+        id: mbx
+        uses: jdx/mr-boxington-action@d0825fbaf3cc36ca2609aa38e71046265a1f1e37 # v1
+        with:
+          version: '1.22.0'
+          working-directory: codex-rs
+          github-cache-mode: objects
+          cache-generation: fork-build-v1
+          save-on-workflow-dispatch: false
+          save-on-pull-request: false
+      - name: Install version-management tool
+        uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
+        with:
+          tool: cargo-edit
+      - name: Share the pinned V8 artifacts between package and tests
+        env:
+          CODEX_REPO_ROOT: ${{ github.workspace }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from scripts.codex_package.targets import TARGET_SPECS
+          from scripts.codex_package.v8 import resolve_codex_v8_cargo_env
+          artifacts = resolve_codex_v8_cargo_env(TARGET_SPECS["aarch64-apple-darwin"])
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              for key, value in artifacts.items():
+                  output.write(f"{key}={value}\n")
+          PY
+      - name: Refresh the cached V8 build record
+        # 重新执行 V8 build script，确保恢复缓存后固定的静态库已正确解压。
+        run: cargo clean --manifest-path codex-rs/Cargo.toml --target aarch64-apple-darwin --release -p v8
+      - name: 对照构建与源码变化后的完整包验收
+        run: python3 -u scripts/fork/experiment_build.py
+      - name: 上传实验数据
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: build-experiment-cgu-${{ matrix.codegen_units }}-${{ github.event.pull_request.head.sha }}
+          path: experiment-results/
+          if-no-files-found: warn
