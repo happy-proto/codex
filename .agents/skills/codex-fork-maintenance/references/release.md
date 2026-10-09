@@ -15,7 +15,7 @@ macOS 安装契约和真实 CLI 验收使用 ARM macOS runner，避免通用测�
 分析耗时时读取各 job 的日志和 `fork-build-timings-*`、`fork-test-timings-*` artifact，
 用 Cargo 报告区分 crate 编译和并发等待，不把日志末尾的整段耗时直接归为链接。
 
-Rust 编译由 mbx 1.22.0 包装 Cargo，使用 GitHub Actions 的 `objects` 缓存模式。
+Rust 编译由 mbx 1.23.0 包装 Cargo，使用 GitHub Actions 的 `objects` 缓存模式。
 只导出本次构建使用或生成的对象；Cargo registry 和 Git 依赖下载由独立 rust-cache 保存，
 该下载缓存关闭 target 和 bin 缓存，不与 mbx 重复保存编译产物。
 构建与测试按平台和 profile 使用独立 cache generation，避免并行 job 争用同一条目。
