@@ -689,6 +689,22 @@ fn markdown_accents_follow_bundled_themes() {
 }
 
 #[test]
+fn markdown_accents_preserve_ansi_theme_palette() {
+    let theme =
+        crate::render::highlight::resolve_theme_by_name("ansi", None).expect("bundled ANSI theme");
+    let styles = MarkdownStyles::for_theme(&theme);
+    assert!(!matches!(
+        styles.link.fg,
+        Some(ratatui::style::Color::Rgb(..))
+    ));
+    assert!(!matches!(
+        styles.ordered_list_marker.fg,
+        Some(ratatui::style::Color::Rgb(..))
+    ));
+    assert!(styles.link.add_modifier.contains(Modifier::UNDERLINED));
+}
+
+#[test]
 fn markdown_accents_preserve_fallbacks_without_theme_scopes() {
     let styles = MarkdownStyles::for_theme(&syntect::highlighting::Theme::default());
     assert_eq!(
@@ -1077,9 +1093,9 @@ fn strong_emphasis() {
 fn link() {
     let text = render_markdown_text("[Link](https://example.com)");
     let expected = Text::from(Line::from_iter([
-        "Link".style(MarkdownStyles::default().link),
+        Span::styled("Link", MarkdownStyles::default().link),
         " (".into(),
-        "https://example.com".style(MarkdownStyles::default().link),
+        Span::styled("https://example.com", MarkdownStyles::default().link),
         ")".into(),
     ]));
     assert_eq!(text, expected);
@@ -1088,15 +1104,21 @@ fn link() {
 #[test]
 fn web_link_labels_use_link_style_and_preserve_inline_formatting() {
     for (label, expected_label) in [
-        ("plain", "plain".style(MarkdownStyles::default().link)),
-        ("`code`", "code".style(MarkdownStyles::default().link)),
+        (
+            "plain",
+            Span::styled("plain", MarkdownStyles::default().link),
+        ),
+        (
+            "`code`",
+            Span::styled("code", MarkdownStyles::default().link),
+        ),
         (
             "**bold**",
-            "bold".style(MarkdownStyles::default().link).bold(),
+            Span::styled("bold", MarkdownStyles::default().link).bold(),
         ),
         (
             "*italic*",
-            "italic".style(MarkdownStyles::default().link).italic(),
+            Span::styled("italic", MarkdownStyles::default().link).italic(),
         ),
     ] {
         let text = render_markdown_text(&format!(
@@ -1106,7 +1128,7 @@ fn web_link_labels_use_link_style_and_preserve_inline_formatting() {
             "before ".into(),
             expected_label,
             " (".into(),
-            "https://example.com".style(MarkdownStyles::default().link),
+            Span::styled("https://example.com", MarkdownStyles::default().link),
             ")".into(),
             " after ".into(),
             Span::styled("code", MarkdownStyles::default().code),
@@ -1135,9 +1157,9 @@ fn web_link_labels_keep_link_style_in_wrapped_prose_and_tables() {
             assert_eq!(
                 labels,
                 vec![
-                    "plain".style(MarkdownStyles::default().link),
-                    "code".style(MarkdownStyles::default().link),
-                    "<b>".style(MarkdownStyles::default().link)
+                    Span::styled("plain", MarkdownStyles::default().link),
+                    Span::styled("code", MarkdownStyles::default().link),
+                    Span::styled("<b>", MarkdownStyles::default().link)
                 ]
             );
         }
@@ -1494,9 +1516,9 @@ fn file_link_uses_target_path_for_hash_range() {
 fn url_link_shows_destination() {
     let text = render_markdown_text("[docs](https://example.com/docs)");
     let expected = Text::from(Line::from_iter([
-        "docs".style(MarkdownStyles::default().link),
+        Span::styled("docs", MarkdownStyles::default().link),
         " (".into(),
-        "https://example.com/docs".style(MarkdownStyles::default().link),
+        Span::styled("https://example.com/docs", MarkdownStyles::default().link),
         ")".into(),
     ]));
     assert_eq!(text, expected);

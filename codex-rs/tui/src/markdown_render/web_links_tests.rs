@@ -12,6 +12,7 @@ use insta::assert_debug_snapshot;
 use pretty_assertions::assert_eq;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
+use ratatui::text::Span;
 use ratatui::text::Text;
 use std::collections::BTreeSet;
 
@@ -26,13 +27,11 @@ fn bare_urls_are_styled_without_coloring_surrounding_prose() {
         text,
         Text::from(Line::from(vec![
             "界 (".into(),
-            "https://example.com/a".style(MarkdownStyles::default().link),
+            Span::styled("https://example.com/a", MarkdownStyles::default().link),
             "); ".into(),
-            "https://example.com/b".style(MarkdownStyles::default().link),
+            Span::styled("https://example.com/b", MarkdownStyles::default().link),
             "! ".into(),
-            "https://example.com/c"
-                .style(MarkdownStyles::default().link)
-                .bold(),
+            Span::styled("https://example.com/c", MarkdownStyles::default().link).bold(),
         ])),
     );
     assert_debug_snapshot!(text);
@@ -48,9 +47,7 @@ fn bare_url_styling_preserves_tabs_and_unicode() {
         line.line,
         Line::from(vec![
             "界\t(".bold(),
-            "https://example.com"
-                .style(MarkdownStyles::default().link)
-                .bold(),
+            Span::styled("https://example.com", MarkdownStyles::default().link).bold(),
             ").".bold(),
         ]),
     );
@@ -103,27 +100,27 @@ fn supporting_terminals_render_only_the_styled_label_and_keep_its_target() {
         for (markdown, label) in [
             (
                 "[label](https://example.com)",
-                "label".style(MarkdownStyles::default().link),
+                Span::styled("label", MarkdownStyles::default().link),
             ),
             (
                 "[`label`](https://example.com)",
-                "label".style(MarkdownStyles::default().link),
+                Span::styled("label", MarkdownStyles::default().link),
             ),
             (
                 "[**label**](https://example.com)",
-                "label".style(MarkdownStyles::default().link).bold(),
+                Span::styled("label", MarkdownStyles::default().link).bold(),
             ),
             (
                 "[*label*](https://example.com)",
-                "label".style(MarkdownStyles::default().link).italic(),
+                Span::styled("label", MarkdownStyles::default().link).italic(),
             ),
             (
                 "[<b>](https://example.com)",
-                "<b>".style(MarkdownStyles::default().link),
+                Span::styled("<b>", MarkdownStyles::default().link),
             ),
             (
                 "[https://example.com](https://example.com)",
-                "https://example.com".style(MarkdownStyles::default().link),
+                Span::styled("https://example.com", MarkdownStyles::default().link),
             ),
         ] {
             let label_width = label.width();
