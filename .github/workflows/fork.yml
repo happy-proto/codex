@@ -9,6 +9,10 @@ on:
         description: 仅运行匹配的 TUI 库测试，跳过产物和发布；留空执行完整验证
         type: string
         default: ''
+      core_test_filter:
+        description: 仅运行匹配的 core 集成测试，跳过产物和发布；留空执行完整验证
+        type: string
+        default: ''
       publish:
         description: 发布已验证的 fork 构建；耗时实验默认不发布
         type: boolean
@@ -49,7 +53,7 @@ jobs:
           sh -n scripts/fork/cargo-timed.sh
 
   build:
-    if: ${{ !inputs.tui_test_filter }}
+    if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
     needs: scripts
     strategy:
       fail-fast: false
@@ -235,7 +239,12 @@ jobs:
         working-directory: codex-rs
         env:
           TUI_TEST_FILTER: ${{ inputs.tui_test_filter }}
+          CORE_TEST_FILTER: ${{ inputs.core_test_filter }}
         run: |
+          if [ -n "$CORE_TEST_FILTER" ]; then
+            mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-core --test all "$CORE_TEST_FILTER"
+            exit 0
+          fi
           if [ -n "$TUI_TEST_FILTER" ]; then
             mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib "$TUI_TEST_FILTER"
             exit 0
@@ -245,7 +254,7 @@ jobs:
           mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_action::tests
           mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib working_directory
       - name: Verify fork update presentation
-        if: ${{ !inputs.tui_test_filter }}
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         env:
           INSTA_UPDATE: new
@@ -254,25 +263,29 @@ jobs:
           mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_available_history_cell_snapshot || result=1
           exit "$result"
       - name: 验证 Markdown 渲染、流式输出及选择复制
-        if: ${{ !inputs.tui_test_filter }}
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib markdown_render
       - name: Test daemon update defaults
-        if: ${{ !inputs.tui_test_filter }}
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-app-server-daemon --lib settings::tests
       - name: 验证功能列表的输出格式与配置状态
-        if: ${{ !inputs.tui_test_filter }}
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --bin codex features_list::tests
           mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test features features_list_
       - name: 验证 MCP 列表展示与旧格式兼容
-        if: ${{ !inputs.tui_test_filter }}
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --bin codex mcp_list_output
           mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test mcp_list
+      - name: 验证显式 skill 的初始调用与 steer 注入
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::skills::
       - name: 上传测试构建耗时报告
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: always()
@@ -304,7 +317,7 @@ jobs:
     concurrency:
       group: fork-publication
       cancel-in-progress: false
-    if: github.repository == 'happy-proto/codex' && github.ref == 'refs/heads/fork' && !inputs.tui_test_filter && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    if: github.repository == 'happy-proto/codex' && github.ref == 'refs/heads/fork' && !inputs.tui_test_filter && !inputs.core_test_filter && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     needs: [build, tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
