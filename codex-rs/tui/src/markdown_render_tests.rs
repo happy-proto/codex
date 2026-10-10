@@ -608,6 +608,67 @@ fn list_nested() {
 }
 
 #[test]
+fn markdown_accents_follow_theme_scopes() {
+    use syntect::highlighting::Color;
+    use syntect::highlighting::StyleModifier;
+    use syntect::highlighting::Theme;
+    use syntect::highlighting::ThemeItem;
+
+    let theme = Theme {
+        scopes: [
+            ("markup.underline.link", (189, 147, 249)),
+            ("markup.list.numbered", (255, 184, 108)),
+        ]
+        .into_iter()
+        .map(|(scope, (r, g, b))| ThemeItem {
+            scope: scope.parse().unwrap(),
+            style: StyleModifier {
+                foreground: Some(Color { r, g, b, a: 255 }),
+                ..StyleModifier::default()
+            },
+        })
+        .collect(),
+        ..Theme::default()
+    };
+    let styles = MarkdownStyles::for_theme(&theme);
+    let link = ratatui::style::Style::new()
+        .fg(crate::terminal_palette::rgb_color((189, 147, 249)))
+        .underlined();
+    let marker =
+        ratatui::style::Style::new().fg(crate::terminal_palette::rgb_color((255, 184, 108)));
+    assert_eq!(styles.link, link);
+    assert_eq!(styles.ordered_list_marker, marker);
+
+    let markdown = "3. [**docs**](https://example.com)\n4. <https://example.org>";
+    let mut writer = super::Writer::new(markdown, Some(80), None, &|_| false);
+    writer.styles = styles;
+    writer.run(&mut pulldown_cmark::Parser::new(markdown).into_offset_iter());
+    let lines = crate::terminal_hyperlinks::visible_lines(writer.text);
+    let spans = lines
+        .iter()
+        .flat_map(|line| &line.spans)
+        .collect::<Vec<_>>();
+    assert!(spans.contains(&&Span::styled("3. ", marker)));
+    assert!(spans.contains(&&Span::styled("4. ", marker)));
+    assert!(spans.contains(&&Span::styled("docs", link.bold())));
+    assert!(spans.contains(&&Span::styled("https://example.org", link)));
+}
+
+#[test]
+fn markdown_accents_preserve_fallbacks_without_theme_scopes() {
+    let styles = MarkdownStyles::for_theme(&syntect::highlighting::Theme::default());
+    assert_eq!(
+        styles.link,
+        ratatui::style::Style::new().fg(accent_color()).underlined()
+    );
+    assert_eq!(
+        styles.ordered_list_marker,
+        ratatui::style::Style::new().light_blue()
+    );
+    assert_eq!(styles.unordered_list_marker, ratatui::style::Style::new());
+}
+
+#[test]
 fn ordered_list_markers_use_terminal_palette_snapshot() {
     let text = render_markdown_text(
         "1. plain [plain](https://example.com) `code` [`code`](https://example.com)",
