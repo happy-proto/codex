@@ -1,8 +1,15 @@
 # 同步上游 alpha
 
-由用户发起同步，Actions 不自行 rebase 或强推 stack。
+维护 fork 的改动默认包含同步最新已发布的上游 alpha，无需用户另行提出同步。
+只读调查不改变基线；用户明确要求保留基线、暂不同步或指定版本时，遵循该要求。
+仅限本地修改的任务也只在本地准备同步；提交、推送、发布和安装仍遵循当前任务的授权范围。
+Actions 不自行 rebase 或强推 stack。
 
-1. 确認工作树、授权和 live stack；fetch origin、upstream 及候选 alpha tag，记录旧 main、每层 head 和远端期望 SHA。
+本轮开始时确定已发布的候选；当前 main 已对应该候选时，报告已是最新并跳过同步。
+将本轮改动与上游同步都准备、验证完毕后，再统一推送 main 与整个 stack，
+避免先推功能、再推同步而重复触发完整 CI。本轮确定候选后不反复追逐新发行版。
+
+1. 确认工作树、授权和 live stack；fetch origin、upstream 及候选 alpha tag，记录旧 main、每层 head 和远端期望 SHA。
 2. 从 `openai/codex` 的已发布、非 draft alpha Releases 中选择版本最高的候选，解析 annotated tag 到真实 commit。
    不用 `/releases/latest`（它不包含 alpha），不直接以 upstream/main 作为同步目标。
 3. 核对旧 main 是之前选定 alpha 的原始提交。记录新旧 tag、SHA、祖先关系、提交主题和高影响 diff。
