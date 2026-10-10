@@ -76,6 +76,10 @@ jobs:
       CARGO_PROFILE_RELEASE_DEBUG: '0'
       CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'off'
       CARGO_PROFILE_RELEASE_LTO: 'false'
+      # core 的测试辅助程序需要 debug assertions 才能在临时目录创建调度别名。
+      CARGO_PROFILE_CI_TEST_DEBUG: '0'
+      CARGO_PROFILE_CI_TEST_SPLIT_DEBUGINFO: 'off'
+      CARGO_PROFILE_CI_TEST_CODEGEN_UNITS: '256'
       STABLE_GIT_COMMIT: ${{ github.sha }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -235,14 +239,14 @@ jobs:
       - name: Set the tested fork version
         run: |
           cargo set-version --manifest-path codex-rs/Cargo.toml -p codex-cli "$CODEX_FORK_VERSION"
-      - name: Test update behavior in the release configuration
+      - name: 执行定向测试或 release 更新验证
         working-directory: codex-rs
         env:
           TUI_TEST_FILTER: ${{ inputs.tui_test_filter }}
           CORE_TEST_FILTER: ${{ inputs.core_test_filter }}
         run: |
           if [ -n "$CORE_TEST_FILTER" ]; then
-            mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-core --test all "$CORE_TEST_FILTER"
+            mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all "$CORE_TEST_FILTER" -- --test-threads=1
             exit 0
           fi
           if [ -n "$TUI_TEST_FILTER" ]; then
@@ -286,8 +290,10 @@ jobs:
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::skills::
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-core --test all steered_explicit_only_skill_respects_blocked_queued_prompt
+          # The history-injection test captures thread-local tracing; keep its
+          # subscriber isolated from the other skill tests.
+          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::skills:: -- --test-threads=1
+          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all steered_explicit_only_skill_respects_blocked_queued_prompt
       - name: 上传测试构建耗时报告
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: always()
