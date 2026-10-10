@@ -285,7 +285,8 @@ jobs:
       - name: 验证显式 skill 的初始调用与 steer 注入
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
-        run: mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::skills::
+        run: |
+          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::skills::
       - name: 上传测试构建耗时报告
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: always()
