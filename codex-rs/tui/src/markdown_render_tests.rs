@@ -809,6 +809,102 @@ fn strong() {
 }
 
 #[test]
+fn cjk_strong_punctuation_boundary() {
+    assert_eq!(
+        render_markdown_text("**加粗内容。**后续中文内容"),
+        Text::from(Line::from_iter([
+            "加粗内容。".bold(),
+            "后续中文内容".into(),
+        ]))
+    );
+}
+
+#[test]
+fn cjk_strong_streaming_matches_completed_render_at_every_character_boundary() {
+    let source = "**加粗内容。**后续中文\n\n另一段**（检查结果）**完成";
+    for end in source
+        .char_indices()
+        .map(|(offset, _)| offset)
+        .chain([source.len()])
+    {
+        let prefix = &source[..end];
+        let streaming = super::render_streaming_markdown_lines_with_width_and_cwd(
+            prefix,
+            None,
+            None,
+            &super::never_hide_link_destination,
+            super::ListSpacing::Compact,
+        );
+        let completed = render_markdown_text(prefix);
+        assert_eq!(
+            streaming
+                .lines
+                .iter()
+                .map(|line| &line.line)
+                .collect::<Vec<_>>(),
+            completed.lines.iter().collect::<Vec<_>>(),
+            "{prefix}"
+        );
+        if let Some(start) = streaming.last_top_level_block_start {
+            assert_eq!(&prefix[start..], &prefix[source.find("另一段").unwrap()..]);
+        }
+    }
+}
+
+#[test]
+fn cjk_strong_multiple_spans_keep_their_intended_boundaries() {
+    assert_eq!(
+        render_markdown_text("**第一。**后续**第二。**结束"),
+        Text::from(Line::from_iter([
+            "第一。".bold(),
+            "后续".into(),
+            "第二。".bold(),
+            "结束".into(),
+        ]))
+    );
+}
+
+#[test]
+fn cjk_strong_selection_copy_preserves_bold_and_plain_text() {
+    let rendered = super::render_streaming_markdown_lines_with_width_and_cwd(
+        "**加粗内容。**后续中文内容",
+        None,
+        None,
+        &super::never_hide_link_destination,
+        super::ListSpacing::Compact,
+    );
+    let mut selected = Vec::new();
+    for line in rendered.lines {
+        let source = line.source.expect("渲染行应保留选择复制信息");
+        let range = 0..source.text.len();
+        crate::markdown_copy::SelectedLine::append(&mut selected, source, range, "");
+    }
+    let plain = "加粗内容。后续中文内容";
+    assert_eq!(
+        crate::markdown_copy::literal_selection(&selected, plain),
+        plain
+    );
+    let (copied, _) = crate::markdown_copy::selection(&selected, plain);
+    // 选择复制沿用上游的边界实体转义，使其它 CommonMark 客户端也能识别加粗。
+    assert_eq!(copied, "**加粗内容。**&#21518;续中文内容");
+    let parsed = pulldown_cmark::Parser::new(&copied).collect::<Vec<_>>();
+    assert!(parsed.iter().any(|event| matches!(
+        event,
+        pulldown_cmark::Event::Start(pulldown_cmark::Tag::Strong)
+    )));
+    assert_eq!(
+        parsed
+            .iter()
+            .filter_map(|event| match event {
+                pulldown_cmark::Event::Text(text) => Some(text.as_ref()),
+                _ => None,
+            })
+            .collect::<String>(),
+        plain
+    );
+}
+
+#[test]
 fn emphasis() {
     assert_eq!(
         render_markdown_text("*Emphasis*"),
