@@ -27,6 +27,8 @@ jobs:
   scripts:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
@@ -36,6 +38,11 @@ jobs:
           python-version: '3.12'
       - name: Test portable fork version and publication contracts
         run: python3 -m unittest discover -s scripts/fork -p 'test_*.py' -v
+      - name: Choose one fork revision for both platforms and tests
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "version=$(python3 scripts/fork/release.py version)" >> "$GITHUB_OUTPUT"
       - name: Check shell syntax
         run: |
           sh -n scripts/fork/install.sh
@@ -44,9 +51,20 @@ jobs:
   build:
     if: ${{ !inputs.tui_test_filter }}
     needs: scripts
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            cache: fork-build-v1
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            cache: fork-build-linux-v1
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     env:
+      CODEX_FORK_VERSION: ${{ needs.scripts.outputs.version }}
       CARGO_BUILD_JOBS: '3'
       # 保留上游 package builder 和 Cargo 耗时报告约定的 target 路径。
       MBX_TARGET_VIEWS: '0'
@@ -68,9 +86,14 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: '3.12'
-      - name: Test macOS installer contracts
+      - name: Test native installer contracts
         working-directory: scripts/fork
         run: python3 -m unittest test_release.InstallerTests -v
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libcap-dev libasound2-dev
       - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
       - name: 恢复 Cargo 下载缓存
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (Node 24)
@@ -78,7 +101,7 @@ jobs:
           workspaces: codex-rs
           cache-targets: false
           cache-bin: false
-          shared-key: fork-build-v1-downloads
+          shared-key: ${{ matrix.cache }}-downloads
           save-if: ${{ github.ref == 'refs/heads/fork' || github.event_name == 'workflow_dispatch' }}
       - name: 配置 mbx 编译缓存
         id: mbx
@@ -87,7 +110,7 @@ jobs:
           version: '1.23.0'
           working-directory: codex-rs
           github-cache-mode: objects
-          cache-generation: fork-build-v1
+          cache-generation: ${{ matrix.cache }}
           save-on-workflow-dispatch: true
       - name: Install version-management tool
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
@@ -96,27 +119,28 @@ jobs:
       - name: Share the pinned V8 artifacts between package and tests
         env:
           CODEX_REPO_ROOT: ${{ github.workspace }}
+          PACKAGE_TARGET: ${{ matrix.target }}
         run: |
           python3 - <<'PY'
           import os
           from scripts.codex_package.targets import TARGET_SPECS
           from scripts.codex_package.v8 import resolve_codex_v8_cargo_env
-          artifacts = resolve_codex_v8_cargo_env(TARGET_SPECS["aarch64-apple-darwin"])
+          artifacts = resolve_codex_v8_cargo_env(TARGET_SPECS[os.environ["PACKAGE_TARGET"]])
           with open(os.environ["GITHUB_ENV"], "a") as output:
               for key, value in artifacts.items():
                   output.write(f"{key}={value}\n")
           PY
       - name: Refresh the cached V8 build record
         # 重新执行 V8 build script，确保恢复缓存后固定的静态库已正确解压。
-        run: cargo clean --manifest-path codex-rs/Cargo.toml --target aarch64-apple-darwin --release -p v8
-      - name: Validate source and build signed complete package
+        run: cargo clean --manifest-path codex-rs/Cargo.toml --target ${{ matrix.target }} --release -p v8
+      - name: Validate source and build complete native package
         id: package
-        run: python3 scripts/fork/release.py build
+        run: python3 scripts/fork/release.py build --target ${{ matrix.target }}
       - name: 上传产物构建耗时报告
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: always()
         with:
-          name: fork-build-timings-${{ github.sha }}
+          name: fork-build-timings-${{ matrix.target }}-${{ github.sha }}
           path: codex-rs/target/cargo-timings/
           if-no-files-found: ignore
       - name: 保存产物编译缓存统计
@@ -129,12 +153,12 @@ jobs:
         if: always() && steps.mbx.outcome == 'success'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
-          name: fork-build-mbx-${{ github.sha }}
+          name: fork-build-mbx-${{ matrix.target }}-${{ github.sha }}
           path: fork-mbx/
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: ${{ always() && steps.package.outcome == 'success' }}
         with:
-          name: fork-package-${{ github.sha }}
+          name: fork-package-${{ matrix.target }}-${{ github.sha }}
           path: |
             fork-dist/*.tar.xz
             fork-dist/fork-release.json
@@ -146,6 +170,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
+      CODEX_FORK_VERSION: ${{ needs.scripts.outputs.version }}
       CARGO_BUILD_JOBS: '3'
       # 保留上游 package builder 和 Cargo 耗时报告约定的 target 路径。
       MBX_TARGET_VIEWS: '0'
@@ -201,8 +226,7 @@ jobs:
           tool: cargo-edit
       - name: Set the tested fork version
         run: |
-          version=$(python3 scripts/fork/release.py plan | python3 -c 'import json, sys; print(json.load(sys.stdin)["version"])')
-          cargo set-version --manifest-path codex-rs/Cargo.toml -p codex-cli "$version"
+          cargo set-version --manifest-path codex-rs/Cargo.toml -p codex-cli "$CODEX_FORK_VERSION"
       - name: Test update behavior in the release configuration
         working-directory: codex-rs
         env:
@@ -256,6 +280,10 @@ jobs:
           if-no-files-found: ignore
 
   publish:
+    # 手动发布与自动发布共用锁，防止同一序号的并发构建交错上传。
+    concurrency:
+      group: fork-publication
+      cancel-in-progress: false
     if: github.repository == 'happy-proto/codex' && github.ref == 'refs/heads/fork' && !inputs.tui_test_filter && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     needs: [build, tests]
     runs-on: ubuntu-24.04
@@ -268,9 +296,19 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: fork-package-${{ github.sha }}
-          path: fork-dist
+          pattern: fork-package-*-${{ github.sha }}
+          path: fork-downloads
+      - name: Assemble both platform packages
+        run: |
+          mkdir -p fork-dist
+          for target in aarch64-apple-darwin x86_64-unknown-linux-gnu; do
+            mv "fork-downloads/fork-package-$target-${{ github.sha }}" "fork-dist/$target"
+          done
       - name: Publish verified build and update channel manifest
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/fork/release.py publish
+      - name: Prune fork releases and tags older than seven days, keeping the latest three
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/fork/release.py prune --apply

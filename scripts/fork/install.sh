@@ -19,13 +19,17 @@ case "${1:-}" in
     exit 0 ;;
 esac
 [ "$#" = 0 ] || { echo 'Unexpected installer argument.' >&2; exit 1; }
-[ "$(uname -s)" = Darwin ] || { echo 'This fork supports macOS only.' >&2; exit 1; }
-case "$(uname -m)" in
-  arm64|aarch64) ;;
-  x86_64) [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ] ;;
-  *) exit 1 ;;
+platform="$(uname -s)"
+case "$platform:$(uname -m)" in
+  Darwin:arm64|Darwin:aarch64) target=aarch64-apple-darwin ;;
+  Darwin:x86_64)
+    [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" = 1 ] || exit 1
+    target=aarch64-apple-darwin ;;
+  Linux:x86_64|Linux:amd64) target=x86_64-unknown-linux-gnu ;;
+  *) echo 'Supported platforms: macOS Apple Silicon and Linux AMD64 (glibc).' >&2; exit 1 ;;
 esac
-command -v plutil >/dev/null
+if [ "$platform" = Darwin ]; then command -v plutil >/dev/null
+else command -v python3 >/dev/null; command -v flock >/dev/null; fi
 mkdir -p "$ROOT/releases" "$BIN_DIR"
 ROOT="$(cd -P "$ROOT" && pwd)"
 tmp="$(mktemp -d)"
@@ -41,7 +45,11 @@ trap 'exit 143' TERM
 [ ! -e "$ROOT/install.lock.d" ] || { echo 'An official installer is running.' >&2; exit 1; }
 # Share the official macOS installer's advisory lock across both distributions.
 exec 9<>"$ROOT/install.lock"
-lockf -t 0 9 || { echo 'Another installer is running.' >&2; exit 1; }
+if [ "$platform" = Darwin ]; then
+  lockf -t 0 9 || { echo 'Another installer is running.' >&2; exit 1; }
+else
+  flock -n 9 || { echo 'Another installer is running.' >&2; exit 1; }
+fi
 mkdir "$ROOT/fork-install.lock" || { echo 'Another fork installer is running.' >&2; exit 1; }
 locked=true
 
@@ -81,11 +89,22 @@ download_api() {
   fi
 }
 extract() {
-  plutil -extract "$1" raw -o - "$2"
+  if [ "$platform" = Darwin ]; then
+    plutil -extract "$1" raw -o - "$2"
+  else
+    python3 - "$1" "$2" <<'PYJSON'
+import json, sys
+value = json.load(open(sys.argv[2]))
+for key in sys.argv[1].split("."):
+    value = value[int(key)] if isinstance(value, list) else value[key]
+print(str(value).lower() if isinstance(value, bool) else value)
+PYJSON
+  fi
 }
 link() {
   ln -s "$1" "$2.tmp.$$"
-  mv -fh "$2.tmp.$$" "$2"
+  if [ "$platform" = Darwin ]; then mv -fh "$2.tmp.$$" "$2"
+  else mv -fT "$2.tmp.$$" "$2"; fi
 }
 select_package() {
   # Remove the official latest-channel marker: this installation is manually updated.
@@ -118,7 +137,7 @@ if [ "$release" = latest ]; then
   tag=''
   while candidate="$(extract "$i.tag_name" "$tmp/releases.json" 2>/dev/null)"; do
     case "$candidate" in
-      fork-v*-alpha.*.fork)
+      fork-v*-alpha.*.fork|fork-v*-alpha.*.fork.[0-9]*)
         if [ "$(extract "$i.draft" "$tmp/releases.json")" = false ]; then
           tag="$candidate"
           break
@@ -131,23 +150,29 @@ else
   tag="fork-v${release#fork-v}"
 fi
 case "$tag" in
-  fork-v*-alpha.*.fork) ;;
+  fork-v*-alpha.*.fork|fork-v*-alpha.*.fork.[0-9]*) ;;
   *) echo 'Expected a fork alpha version.' >&2; exit 1 ;;
 esac
 case "$tag" in *[!a-zA-Z0-9.-]*) exit 1 ;; esac
 download "$DOWNLOAD/$tag/fork-release.json" "$tmp/manifest.json"
 version="$(extract version "$tmp/manifest.json")"
 commit="$(extract source_commit "$tmp/manifest.json")"
-digest="$(extract sha256 "$tmp/manifest.json")"
-asset="$(extract asset "$tmp/manifest.json")"
+if extract "packages.$target.asset" "$tmp/manifest.json" >/dev/null 2>&1; then
+  digest="$(extract "packages.$target.sha256" "$tmp/manifest.json")"
+  asset="$(extract "packages.$target.asset" "$tmp/manifest.json")"
+else
+  [ "$target" = aarch64-apple-darwin ] || { echo 'Release has no Linux package.' >&2; exit 1; }
+  digest="$(extract sha256 "$tmp/manifest.json")"
+  asset="$(extract asset "$tmp/manifest.json")"
+fi
 [ "fork-v$version" = "$tag" ] || { echo 'Release version mismatch.' >&2; exit 1; }
 [ "${#commit}" = 40 ] && [ "${#digest}" = 64 ] || exit 1
 case "$commit$digest" in *[!0-9a-f]*) exit 1 ;; esac
 case "$asset" in
-  "codex-package-aarch64-apple-darwin-$digest.tar.xz"|"codex-package-aarch64-apple-darwin-$digest.tar.gz") ;;
+  "codex-package-$target.tar.xz"|"codex-package-$target-$digest.tar.xz"|"codex-package-$target-$digest.tar.gz") ;;
   *) exit 1 ;;
 esac
-name="$version-$commit-$digest-aarch64-apple-darwin"
+name="$version-$commit-$digest-$target"
 destination="$ROOT/releases/$name"
 short_commit="$(printf '%.8s' "$commit")"
 
@@ -178,9 +203,10 @@ if [ ! -f "$destination/fork-release.json" ]; then
   mkdir "$stage"
   tar -xf "$tmp/package.tar" -C "$stage"
   [ "$(extract version "$stage/codex-package.json")" = "$version" ]
-  [ "$(extract target "$stage/codex-package.json")" = aarch64-apple-darwin ]
+  [ "$(extract target "$stage/codex-package.json")" = "$target" ]
   [ -x "$stage/bin/codex-code-mode-host" ]
   [ -x "$stage/codex-path/rg" ]
+  if [ "$platform" = Linux ]; then [ -x "$stage/codex-resources/bwrap" ]; fi
   [ "$("$stage/bin/codex" --version)" = "codex-cli $version" ]
   cp "$tmp/manifest.json" "$stage/fork-release.json"
   ln -s bin/codex "$stage/codex"
@@ -192,7 +218,7 @@ if [ -L "$ROOT/current" ]; then
   if [ "$previous" != "$destination" ]; then
     link "$previous" "$ROOT/fork-previous"
     case "$(basename "$previous")" in
-      *.fork-*) ;;
+      *.fork-*|*.fork.[0-9]*-*) ;;
       *)
         if [ ! -e "$ROOT/official-before-fork" ]; then
           link "$previous" "$ROOT/official-before-fork"

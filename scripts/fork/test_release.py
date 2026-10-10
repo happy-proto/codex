@@ -8,6 +8,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
@@ -73,7 +74,7 @@ sys.stdin.read()
         with mock.patch.dict(os.environ):
             os.environ.pop("CODEX_REPO_ROOT", None)
             result = release.run(
-                "python3",
+                sys.executable,
                 "scripts/build_codex_package.py",
                 "--help",
                 capture_output=True,
@@ -81,9 +82,9 @@ sys.stdin.read()
             )
         self.assertIn("--package-version", result.stdout)
 
-    def test_alpha_version_has_only_fork_marker(self):
+    def test_alpha_version_has_numbered_fork_marker(self):
         self.assertEqual(
-            release.fork_version("rust-v0.162.0-alpha.14"), "0.162.0-alpha.14.fork"
+            release.fork_version("rust-v0.162.0-alpha.14"), "0.162.0-alpha.14.fork.1"
         )
 
     def test_stable_and_untrusted_tags_are_rejected(self):
@@ -96,6 +97,120 @@ sys.stdin.read()
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 release.fork_version(tag)
 
+    def test_revision_is_numeric_and_resets_for_each_alpha(self):
+        existing = [
+            {"tag_name": tag}
+            for tag in [
+                "fork-v0.162.0-alpha.14.fork.1",
+                "fork-v0.162.0-alpha.14.fork.2",
+                "fork-v0.162.0-alpha.14.fork.10",
+                "fork-v0.162.0-alpha.14.2.fork.30",
+                "fork-v0.162.0-alpha.15.fork.50",
+                "fork-v0.162.0-alpha.14.fork.invalid",
+            ]
+        ]
+        self.assertEqual(
+            release.next_version("rust-v0.162.0-alpha.14", existing),
+            "0.162.0-alpha.14.fork.11",
+        )
+        self.assertEqual(
+            release.next_version("rust-v0.162.0-alpha.16", existing),
+            "0.162.0-alpha.16.fork.1",
+        )
+
+    def test_pinned_version_must_match_alpha_and_positive_revision(self):
+        for version in [
+            "0.163.0-alpha.5.fork.0",
+            "0.163.0-alpha.5.fork.01",
+            "0.163.0-alpha.4.fork.1",
+        ]:
+            with (
+                mock.patch.dict(os.environ, CODEX_FORK_VERSION=version),
+                self.assertRaises(ValueError),
+            ):
+                release.selected_version()
+
+
+class RetentionTests(unittest.TestCase):
+    def test_keep_latest_three_and_all_versions_within_seven_days(self):
+        now = datetime(2026, 10, 10, tzinfo=UTC)
+
+        def item(number, age, draft=False):
+            date = (now - timedelta(days=age)).isoformat()
+            return {
+                "tag_name": f"fork-v0.163.0-alpha.5.fork.{number}",
+                "draft": draft,
+                "published_at": None if draft else date,
+                "created_at": date,
+            }
+
+        existing = [
+            item(1, 12),
+            item(3, 9),
+            item(4, 8),
+            item(5, 8),
+            item(6, 7),
+            item(7, 1, True),
+        ]
+        existing.append(
+            {
+                "tag_name": "rust-v0.163.0-alpha.1",
+                "draft": False,
+                "published_at": "2020-01-01T00:00:00Z",
+            }
+        )
+        keep, expired = release.expired_releases(existing, now)
+        self.assertEqual(keep, {existing[i]["tag_name"] for i in (2, 3, 4)})
+        self.assertEqual(
+            [r["tag_name"] for r in expired], [existing[i]["tag_name"] for i in (0, 1)]
+        )
+
+    def test_old_draft_without_a_tag_can_be_cleaned_up(self):
+        existing = [
+            {
+                "tag_name": "fork-v0.163.0-alpha.4.fork.1",
+                "draft": True,
+                "published_at": None,
+                "created_at": "2020-01-01T00:00:00Z",
+            }
+        ]
+        with (
+            mock.patch.object(release, "releases", return_value=existing),
+            mock.patch.object(release, "api", return_value=[[]]),
+            mock.patch.object(release, "run") as write,
+        ):
+            release.prune(apply=True)
+        write.assert_called_once_with(
+            "gh",
+            "release",
+            "delete",
+            existing[0]["tag_name"],
+            "--repo",
+            release.REPO,
+            "--yes",
+        )
+
+    def test_recent_fourth_release_is_kept_and_old_draft_is_removed(self):
+        now = datetime(2026, 10, 10, tzinfo=UTC)
+        existing = [
+            {
+                "tag_name": f"fork-v0.163.0-alpha.5.fork.{i}",
+                "draft": False,
+                "published_at": (now - timedelta(days=i)).isoformat(),
+            }
+            for i in range(1, 5)
+        ]
+        existing.append(
+            {
+                "tag_name": "fork-v0.163.0-alpha.4.fork",
+                "draft": True,
+                "published_at": None,
+                "created_at": (now - timedelta(days=8)).isoformat(),
+            }
+        )
+        _, expired = release.expired_releases(existing, now)
+        self.assertEqual(expired, [existing[-1]])
+
 
 class PublicationTests(unittest.TestCase):
     def test_new_draft_without_tag_can_publish_verified_package(self):
@@ -105,8 +220,8 @@ class PublicationTests(unittest.TestCase):
             dist.mkdir()
             archive = b"verified package bytes"
             metadata = {
-                "tag": "fork-v0.162.0-alpha.14.fork",
-                "version": "0.162.0-alpha.14.fork",
+                "tag": "fork-v0.162.0-alpha.14.fork.1",
+                "version": "0.162.0-alpha.14.fork.1",
                 "source_commit": "a" * 40,
                 "upstream_tag": "rust-v0.162.0-alpha.14",
                 "upstream_commit": "b" * 40,
@@ -139,7 +254,16 @@ class PublicationTests(unittest.TestCase):
 
             def query(args, **kwargs):
                 if args[:3] == ["gh", "release", "view"]:
-                    return subprocess.CompletedProcess(args, 0)
+                    return subprocess.CompletedProcess(
+                        args,
+                        0,
+                        stdout=json.dumps(
+                            {
+                                "isDraft": True,
+                                "targetCommitish": metadata["source_commit"],
+                            }
+                        ),
+                    )
                 return subprocess.CompletedProcess(
                     args, 1, stderr="gh: Not Found (HTTP 404)"
                 )
@@ -154,6 +278,90 @@ class PublicationTests(unittest.TestCase):
             self.assertEqual(tags[metadata["tag"]], metadata["source_commit"])
             self.assertEqual(calls[-1][:3], ("gh", "release", "edit"))
             self.assertIn("--draft=false", calls[-1])
+
+    def test_published_version_cannot_be_overwritten(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "fork-dist").mkdir()
+            metadata = {
+                "tag": "fork-v0.163.0-alpha.5.fork.1",
+                "source_commit": "a" * 40,
+            }
+            (root / "fork-dist/fork-release.json").write_text(json.dumps(metadata))
+            with (
+                mock.patch.object(release, "ROOT", root),
+                mock.patch.object(
+                    release, "api", return_value={"object": {"sha": "a" * 40}}
+                ),
+                mock.patch.object(release, "run") as write,
+                mock.patch.object(
+                    release.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess(
+                        [],
+                        0,
+                        stdout=json.dumps(
+                            {"isDraft": False, "targetCommitish": "a" * 40}
+                        ),
+                    ),
+                ),
+                self.assertRaises(ValueError),
+            ):
+                release.publish()
+            write.assert_not_called()
+
+    def test_both_platform_packages_are_verified_and_recorded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dist = Path(directory)
+            for target in release.TARGETS:
+                package = dist / target
+                package.mkdir()
+                contents = target.encode()
+                asset = f"codex-package-{target}.tar.xz"
+                metadata = {
+                    "target": target,
+                    "version": "0.163.0-alpha.5.fork.1",
+                    "tag": "fork-v0.163.0-alpha.5.fork.1",
+                    "source_commit": "a" * 40,
+                    "upstream_tag": "rust-v0.163.0-alpha.5",
+                    "upstream_commit": "b" * 40,
+                    "asset": asset,
+                    "sha256": hashlib.sha256(contents).hexdigest(),
+                }
+                (package / asset).write_bytes(contents)
+                (package / "fork-release.json").write_text(json.dumps(metadata))
+                (package / "install.sh").write_text("installer")
+            result = release.collect_packages(dist)
+            self.assertEqual(set(result["packages"]), set(release.TARGETS))
+            for target in release.TARGETS:
+                self.assertEqual(
+                    (dist / result["packages"][target]["asset"]).read_bytes(),
+                    target.encode(),
+                )
+            (dist / release.TARGETS[1] / "fork-release.json").unlink()
+            with self.assertRaisesRegex(ValueError, "Both platform packages"):
+                release.collect_packages(dist)
+
+    def test_platform_packages_must_share_the_same_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dist = Path(directory)
+            for index, target in enumerate(release.TARGETS):
+                directory = dist / target
+                directory.mkdir()
+                (directory / "fork-release.json").write_text(
+                    json.dumps(
+                        {
+                            "target": target,
+                            "version": f"0.163.0-alpha.5.fork.{index + 1}",
+                            "tag": "test",
+                            "source_commit": "a" * 40,
+                            "upstream_tag": "test",
+                            "upstream_commit": "b" * 40,
+                        }
+                    )
+                )
+            with self.assertRaisesRegex(ValueError, "different build identities"):
+                release.collect_packages(dist)
 
     def test_superseded_build_does_not_modify_releases(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -175,7 +383,6 @@ class PublicationTests(unittest.TestCase):
             query.assert_not_called()
 
 
-@unittest.skipUnless(sys.platform == "darwin", "安装契约由 macOS 产物构建 job 验证")
 class InstallerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -198,7 +405,11 @@ printf '%s\\n' "$FAKE_GH_TOKEN"
         )
         self.executable(
             tools / "uname",
-            '#!/bin/sh\ncase "$1" in -s) echo Darwin;; -m) echo arm64;; esac\n',
+            (
+                '#!/bin/sh\ncase "$1" in -s) echo Darwin;; -m) echo arm64;; esac\n'
+                if sys.platform == "darwin"
+                else '#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo x86_64;; esac\n'
+            ),
         )
         self.executable(
             tools / "curl",
@@ -245,7 +456,8 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
             "FAKE_NETWORK": str(self.network),
         }
         self.env.pop("CODEX_RELEASE", None)
-        self.version = "0.162.0-alpha.14.fork"
+        self.target = release.TARGET if sys.platform == "darwin" else release.TARGETS[1]
+        self.version = "0.162.0-alpha.14.fork.1"
         self.tag = f"fork-v{self.version}"
         (self.network / "releases.json").write_text(
             json.dumps(
@@ -261,11 +473,11 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
         path.write_text(text)
         path.chmod(0o755)
 
-    def prepare_build(self, commit, compression="xz"):
+    def prepare_build(self, commit, compression="xz", legacy=False):
         package = self.root / f"package-{commit}"
         package.mkdir()
         (package / "codex-package.json").write_text(
-            json.dumps({"version": self.version, "target": release.TARGET})
+            json.dumps({"version": self.version, "target": self.target})
         )
         self.executable(
             package / "bin/codex", f"#!/bin/sh\necho 'codex-cli {self.version}'\n"
@@ -273,6 +485,7 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
         for binary in [
             "bin/codex-code-mode-host",
             "codex-path/rg",
+            "codex-resources/bwrap",
         ]:
             self.executable(package / binary, "#!/bin/sh\nexit 0\n")
         # Changing source without changing the software version changes the actual package.
@@ -281,7 +494,7 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
         with tarfile.open(archive, f"w:{compression}") as handle:
             handle.add(package, arcname=".")
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-        asset = f"codex-package-{release.TARGET}-{digest}.tar.{compression}"
+        asset = f"codex-package-{self.target}{'-' + digest if legacy else ''}.tar.{compression}"
         (self.network / asset).write_bytes(archive.read_bytes())
         manifest = {
             "version": self.version,
@@ -289,6 +502,8 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
             "sha256": digest,
             "asset": asset,
         }
+        if not legacy:
+            manifest["packages"] = {self.target: {"asset": asset, "sha256": digest}}
         (self.network / "fork-release.json").write_text(json.dumps(manifest))
         return manifest
 
@@ -483,6 +698,7 @@ if os.environ.get("CORRUPT_AXEL") == "1":
             json.loads((self.selected() / "fork-release.json").read_text()), second
         )
         self.assertNotEqual(first["sha256"], second["sha256"])
+        self.assertEqual(first["asset"], second["asset"])
         self.assertFalse(
             (self.home / "packages/standalone/auto-update-version").exists()
         )
@@ -535,8 +751,10 @@ if os.environ.get("CORRUPT_AXEL") == "1":
         self.install("--release", self.version)
         self.assertTrue((self.bin / "codex").exists())
 
+    @unittest.skipUnless(sys.platform == "darwin", "Historical releases are macOS only")
     def test_explicit_version_accepts_existing_gzip_release(self):
-        manifest = self.prepare_build("a", compression="gz")
+        self.version = "0.162.0-alpha.14.fork"
+        manifest = self.prepare_build("a", compression="gz", legacy=True)
         self.install("--release", self.version)
         self.assertEqual(
             json.loads((self.selected() / "fork-release.json").read_text()), manifest
@@ -572,6 +790,7 @@ if os.environ.get("CORRUPT_AXEL") == "1":
         requests = (self.network / "requests.jsonl").read_text().splitlines()
         self.assertTrue(all(not json.loads(line)["headers"] for line in requests))
 
+    @unittest.skipUnless(sys.platform == "darwin", "macOS advisory lock")
     def test_official_installer_lock_prevents_fork_selection(self):
         self.prepare_build("a")
         root = self.home / "packages/standalone"
