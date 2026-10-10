@@ -56,6 +56,21 @@ def sha256(path):
         return hashlib.file_digest(handle, "sha256").hexdigest()
 
 
+def archive_package(package, dist):
+    archive = dist / "package.tar.xz"
+    run(
+        "tar",
+        "--use-compress-program",
+        "xz -9 -T0",
+        "-cf",
+        str(archive),
+        "-C",
+        str(package),
+        ".",
+    )
+    return archive
+
+
 def smoke(package):
     version = json.loads((package / "codex-package.json").read_text())["version"]
     with tempfile.TemporaryDirectory() as home:
@@ -173,10 +188,9 @@ def build():
         run(*args, str(binary))
         run("codesign", "--verify", "--strict", str(binary))
     smoke(package)
-    archive = dist / "package.tar.gz"
-    run("tar", "-czf", str(archive), "-C", str(package), ".")
+    archive = archive_package(package, dist)
     metadata["sha256"] = sha256(archive)
-    metadata["asset"] = f"codex-package-{TARGET}-{metadata['sha256']}.tar.gz"
+    metadata["asset"] = f"codex-package-{TARGET}-{metadata['sha256']}.tar.xz"
     archive.rename(dist / metadata["asset"])
     (dist / "fork-release.json").write_text(json.dumps(metadata, indent=2) + "\n")
     run("cp", "scripts/fork/install.sh", str(dist / "install.sh"))

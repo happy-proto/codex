@@ -24,6 +24,9 @@ codex --version
 并替换 `~/.local/bin` 中的 `codex`。可用 `CODEX_HOME` 和 `CODEX_INSTALL_DIR` 指定路径。
 安装包下载检测到 `axel` 时使用其默认并行度，失败后清理未完成的文件并回退到 curl；
 未安装 axel 时直接使用 curl。元数据始终用 curl 获取，安装前仍校验整个包的 SHA-256。
+新安装包使用 `tar.xz`，发布时通过 `xz -9 -T0` 自动选择压缩并行度；安装器使用
+macOS 自带的 tar 解压，并继续支持已发布的 `tar.gz` 历史包。自行下载的脚本应读取
+`fork-release.json` 中的 `asset`，不要固定 gzip 后缀或解压参数。
 继续使用现有 Codex 目录中的配置、凭据和会话。按需将 `~/.local/bin` 加入 PATH；
 如果同时安装了 npm/Homebrew 版本，可以保留独立管理，或在确定不用后移除。
 

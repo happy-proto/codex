@@ -143,7 +143,10 @@ asset="$(extract asset "$tmp/manifest.json")"
 [ "fork-v$version" = "$tag" ] || { echo 'Release version mismatch.' >&2; exit 1; }
 [ "${#commit}" = 40 ] && [ "${#digest}" = 64 ] || exit 1
 case "$commit$digest" in *[!0-9a-f]*) exit 1 ;; esac
-[ "$asset" = "codex-package-aarch64-apple-darwin-$digest.tar.gz" ] || exit 1
+case "$asset" in
+  "codex-package-aarch64-apple-darwin-$digest.tar.xz"|"codex-package-aarch64-apple-darwin-$digest.tar.gz") ;;
+  *) exit 1 ;;
+esac
 name="$version-$commit-$digest-aarch64-apple-darwin"
 destination="$ROOT/releases/$name"
 short_commit="$(printf '%.8s' "$commit")"
@@ -160,20 +163,20 @@ fi
 
 if [ ! -f "$destination/fork-release.json" ]; then
   printf '  Downloading %s…\n' "$version"
-  download "$DOWNLOAD/$tag/$asset" "$tmp/package.tar.gz" package || {
+  download "$DOWNLOAD/$tag/$asset" "$tmp/package.tar" package || {
     echo 'Package download failed; current CLI unchanged.' >&2; exit 1;
   }
   echo '  Verifying and installing…'
-  actual="$(shasum -a 256 "$tmp/package.tar.gz" | awk '{print $1}')"
+  actual="$(shasum -a 256 "$tmp/package.tar" | awk '{print $1}')"
   [ "$actual" = "$digest" ] || { echo 'Package checksum mismatch; current CLI unchanged.' >&2; exit 1; }
   # Only the repository's canonical relative-path package layout is accepted.
-  tar -tzf "$tmp/package.tar.gz" > "$tmp/entries"
+  tar -tf "$tmp/package.tar" > "$tmp/entries"
   if LC_ALL=C awk '/^\// || /(^|\/)\.\.(\/|$)/ {bad=1} END {exit !bad}' "$tmp/entries"; then
     echo 'Unsafe archive paths.' >&2; exit 1
   fi
   stage="$ROOT/releases/.fork-staging.$$"
   mkdir "$stage"
-  tar -xzf "$tmp/package.tar.gz" -C "$stage"
+  tar -xf "$tmp/package.tar" -C "$stage"
   [ "$(extract version "$stage/codex-package.json")" = "$version" ]
   [ "$(extract target "$stage/codex-package.json")" = aarch64-apple-darwin ]
   [ -x "$stage/bin/codex-code-mode-host" ]
