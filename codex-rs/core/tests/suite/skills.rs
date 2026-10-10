@@ -48,14 +48,40 @@ use tracing::Level;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_test::internal::MockWriter;
 
-#[rstest::rstest]
-#[case::plain(false, false)]
-#[case::attachment(true, false)]
-#[case::disabled(false, true)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn steered_explicit_only_skill_instructions(
-    #[case] attachment: bool,
-    #[case] disabled: bool,
+async fn steered_explicit_only_skill_plain() -> Result<()> {
+    check_steered_explicit_only_skill(false, false, true).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steered_explicit_only_skill_attachment() -> Result<()> {
+    check_steered_explicit_only_skill(true, false, false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steered_explicit_only_skill_text_and_attachment() -> Result<()> {
+    check_steered_explicit_only_skill(true, false, true).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steered_explicit_only_skill_disabled_plain() -> Result<()> {
+    check_steered_explicit_only_skill(false, true, true).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steered_explicit_only_skill_disabled_attachment() -> Result<()> {
+    check_steered_explicit_only_skill(true, true, false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steered_explicit_only_skill_unmentioned() -> Result<()> {
+    check_steered_explicit_only_skill(false, false, false).await
+}
+
+async fn check_steered_explicit_only_skill(
+    attachment: bool,
+    disabled: bool,
+    text_mention: bool,
 ) -> Result<()> {
     skip_if_wine_exec!(
         Ok(()),
@@ -81,7 +107,11 @@ async fn steered_explicit_only_skill_instructions(
         }],
     ])
     .await;
+    let recorder = Arc::new(SkillInvocationRecorder::default());
+    let mut extensions = ExtensionRegistryBuilder::default();
+    extensions.skill_invocation_contributor(recorder.clone());
     let mut builder = test_codex()
+        .with_extensions(Arc::new(extensions.build()))
         .with_workspace_setup(|cwd, fs| async move {
             write_repo_skill(
                 cwd.clone(),
@@ -136,7 +166,12 @@ async fn steered_explicit_only_skill_instructions(
     )
     .await?;
     let mut input = vec![UserInput::Text {
-        text: "Use $steer-demo".to_string(),
+        text: if text_mention {
+            "Use $steer-demo"
+        } else {
+            "Follow this request"
+        }
+        .to_string(),
         text_elements: Vec::new(),
     }];
     if attachment {
@@ -179,9 +214,21 @@ async fn steered_explicit_only_skill_instructions(
         .count();
     assert_eq!(
         injected_count,
-        usize::from(!disabled),
+        usize::from(!disabled && (attachment || text_mention)),
         "steered skill instructions must reach the next request exactly once unless disabled"
     );
+    {
+        let invocations = recorder.0.lock().unwrap();
+        assert_eq!(
+            invocations.len(),
+            usize::from(!disabled && (attachment || text_mention))
+        );
+        assert!(
+            invocations
+                .iter()
+                .all(|(_, kind)| *kind == SkillInvocationKind::Explicit)
+        );
+    }
     server.shutdown().await;
     Ok(())
 }
