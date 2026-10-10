@@ -7,6 +7,9 @@ description: 维护 happy-proto/codex 个人 fork；用于判断修改所属功�
 
 先读仓库通用约定 [AGENTS.md](../../../AGENTS.md)，再按当前任务读取操作参考。
 
+进行 fork 改动时，默认按 [upstream.md](references/upstream.md) 同步最新已发布的上游 alpha，
+将本轮改动和同步结果一起验证、统一推送，以复用完整 CI；适用边界和例外见该参考。
+
 ## 按需读取
 
 - 定位修改层、交付代码及调整 stack：读 [stack.md](references/stack.md)。
