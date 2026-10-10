@@ -64,6 +64,11 @@ Fork 的更新渠道只选择 fork 发行版，上游 alpha 同步由维护者�
 
 ## Fork 功能
 
+- **工作中显式调用 skill**：以 steer 补充消息调用 `$skill` 或附加 skill 时，
+  在下一次模型请求前加载并注入其正文，支持 `allow_implicit_invocation: false`。
+  未调用的 skill 仍不进入隐式目录，已禁用或被 hook 拦截的调用不注入。
+  临时修复 [上游 issue #23454](https://github.com/openai/codex/issues/23454)
+  和 [#47011](https://github.com/openai/codex/issues/47011) 所述的 steer 路径遗漏。
 - **Markdown 主题配色**：链接和有序列表编号使用 `/theme` 选中主题的 Markdown 颜色，
   链接保留下划线；主题未定义对应颜色时沿用原有回退。自定义 `.tmTheme` 可通过
   `markup.underline.link.markdown`（或 `markup.link.markdown`）设置链接颜色，

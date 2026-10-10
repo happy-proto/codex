@@ -435,15 +435,15 @@ pub(crate) async fn run_turn(
             Vec::new()
         };
 
-        if run_hooks_and_record_inputs(
+        let (blocked_input, pending_user_input) = run_hooks_and_collect_inputs(
             &sess,
             &turn_context,
             &turn_context.capture_current_model_info(),
             &pending_input,
             PersistContext::SteeredUserInput,
         )
-        .await
-        {
+        .await;
+        if blocked_input {
             break;
         }
 
@@ -470,7 +470,6 @@ pub(crate) async fn run_turn(
                 .await?
             }
             Some(_) | None => {
-                let pending_user_input = turn_user_input(&pending_input);
                 if allow_plugin_mentions {
                     required_plugins.extend(crate::plugins::collect_explicit_plugin_ids(
                         &pending_user_input,
@@ -495,6 +494,24 @@ pub(crate) async fn run_turn(
                 .await?
             }
         };
+        if !pending_user_input.is_empty() {
+            let available_connectors = available_connectors_for_step(step_context.as_ref());
+            let (skill_items, skill_connector_ids) = build_explicit_skill_injections(
+                &sess,
+                step_context.as_ref(),
+                &pending_user_input,
+                &available_connectors,
+                &cancellation_token,
+            )
+            .await;
+            sess.merge_connector_selection(skill_connector_ids).await;
+            sess.record_conversation_items(
+                &turn_context,
+                &step_context.settings.model_info,
+                &skill_items,
+            )
+            .await;
+        }
         let sampling_request_result: CodexResult<_> = async {
             super::time_reminder::maybe_record_current_time_reminder(
                 sess.as_ref(),
@@ -869,6 +886,18 @@ pub(crate) async fn run_hooks_and_record_inputs(
     input: &[TurnInput],
     persist_context: PersistContext,
 ) -> bool {
+    run_hooks_and_collect_inputs(sess, turn_context, model_info, input, persist_context)
+        .await
+        .0
+}
+
+async fn run_hooks_and_collect_inputs(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    model_info: &ModelInfo,
+    input: &[TurnInput],
+    persist_context: PersistContext,
+) -> (bool, Vec<UserInput>) {
     // Cancellation can reach this path before Guardian's tools and context are
     // resolved. Only finalized evidence may enter reusable reviewer history.
     if sess
@@ -877,18 +906,18 @@ pub(crate) async fn run_hooks_and_record_inputs(
         .get::<crate::guardian::PendingReviewContext>()
         .is_some()
     {
-        return false;
+        return (false, Vec::new());
     }
     let mut blocked_input = false;
-    let mut accepted_user_input = false;
+    let mut accepted_user_input = Vec::new();
     for input_item in input {
         let hook_outcome = inspect_pending_input(sess, turn_context, input_item).await;
         if hook_outcome.should_stop {
             blocked_input = true;
             record_additional_contexts(sess, turn_context, hook_outcome.additional_contexts).await;
         } else {
-            if matches!(input_item, TurnInput::UserInput { content, .. } if !content.is_empty()) {
-                accepted_user_input = true;
+            if let TurnInput::UserInput { content, .. } = input_item {
+                accepted_user_input.extend(content.iter().cloned());
             }
             // Tool outputs retain their durability barrier, including in mixed input batches.
             let input_persist_context = if persist_context == PersistContext::SteeredUserInput
@@ -909,7 +938,10 @@ pub(crate) async fn run_hooks_and_record_inputs(
             .await;
         }
     }
-    blocked_input && !accepted_user_input
+    (
+        blocked_input && accepted_user_input.is_empty(),
+        accepted_user_input,
+    )
 }
 
 fn turn_user_input(input: &[TurnInput]) -> Vec<UserInput> {
@@ -1027,21 +1059,36 @@ async fn required_mcp_servers_for_input(
     (required_servers.into_iter().collect(), mentioned_plugins)
 }
 
+fn available_connectors_for_step(step_context: &StepContext) -> Vec<connectors::AppInfo> {
+    let turn_context = step_context.turn.as_ref();
+    let connector_snapshot = &step_context.mcp.config().connector_snapshot;
+    if turn_context.apps_enabled() {
+        let connectors = codex_connectors::merge::merge_plugin_connectors_with_accessible(
+            connector_snapshot
+                .connector_ids()
+                .iter()
+                .map(|connector_id| connector_id.0.clone()),
+            connectors::accessible_connectors_from_mcp_tools(step_context.mcp.tools()),
+        );
+        AppToolPolicyEvaluator::new(&turn_context.config.config_layer_stack)
+            .apply_app_enabled_state(connectors)
+    } else {
+        Vec::new()
+    }
+}
+
 #[instrument(level = "trace", skip_all)]
-async fn build_skills_and_plugins(
+async fn build_explicit_skill_injections(
     sess: &Arc<Session>,
     step_context: &StepContext,
     user_input: &[UserInput],
-    mentioned_plugins: &[crate::plugins::PluginCapabilitySummary],
+    available_connectors: &[connectors::AppInfo],
     cancellation_token: &CancellationToken,
-) -> Option<(Vec<ResponseItem>, HashSet<String>)> {
+) -> (Vec<ResponseItem>, HashSet<String>) {
     let turn_context = step_context.turn.as_ref();
-    // Guardian input embeds the parent transcript as untrusted evidence. Do not interpret skill or
-    // plugin mentions from that generated prompt as requests to inject additional instructions.
     if crate::guardian::is_basic_session_source(&turn_context.session_source) {
-        return Some((Vec::new(), HashSet::new()));
+        return (Vec::new(), HashSet::new());
     }
-
     let tracking = build_track_events_context(
         turn_context.model_info().slug.clone(),
         sess.thread_id.to_string(),
@@ -1049,34 +1096,9 @@ async fn build_skills_and_plugins(
         turn_context.originator.clone(),
         Some(turn_context.turn_metadata_state.clone()),
     );
-    let connector_snapshot = step_context.mcp.config().connector_snapshot.clone();
-    let mcp_tools = if turn_context.apps_enabled() || !mentioned_plugins.is_empty() {
-        // Plugin mentions need raw MCP/app inventory even when app tools
-        // are normally hidden so we can describe the plugin's currently
-        // usable capabilities for this turn.
-        step_context.mcp.tools()
-    } else {
-        &[]
-    };
-    let available_connectors = if turn_context.apps_enabled() {
-        let connectors = codex_connectors::merge::merge_plugin_connectors_with_accessible(
-            connector_snapshot
-                .connector_ids()
-                .iter()
-                .map(|connector_id| connector_id.0.clone()),
-            connectors::accessible_connectors_from_mcp_tools(mcp_tools),
-        );
-        AppToolPolicyEvaluator::new(&turn_context.config.config_layer_stack)
-            .apply_app_enabled_state(connectors)
-    } else {
-        Vec::new()
-    };
     let skills_snapshot = turn_context.skills_snapshot();
     let skills_outcome = skills_snapshot.outcome();
-    let connector_slug_counts = build_connector_slug_counts(&available_connectors);
-    let extension_injection_items =
-        build_extension_turn_input_items(sess, step_context, user_input, cancellation_token)
-            .await?;
+    let connector_slug_counts = build_connector_slug_counts(available_connectors);
     let skill_name_counts_lower =
         build_skill_name_counts(&skills_outcome.skills, &skills_outcome.disabled_paths).1;
     let mentioned_skills =
@@ -1116,9 +1138,66 @@ async fn build_skills_and_plugins(
         .collect::<Vec<_>>();
     let skill_connector_ids = collect_explicit_app_ids_from_skill_items(
         &skill_items,
-        &available_connectors,
+        available_connectors,
         &skill_name_counts_lower,
     );
+    let injection_items = match injected_host_skill_prompts {
+        Some(injected_host_skill_prompts) => skill_items
+            .into_iter()
+            .zip(injected_host_skills.iter())
+            .filter_map(|(item, skill)| {
+                (!injected_host_skill_prompts
+                    .contains_path(&skill.path_to_skills_md.inferred_native_path_string()))
+                .then_some(item)
+            })
+            .collect(),
+        None => skill_items,
+    };
+    (injection_items, skill_connector_ids)
+}
+
+#[instrument(level = "trace", skip_all)]
+async fn build_skills_and_plugins(
+    sess: &Arc<Session>,
+    step_context: &StepContext,
+    user_input: &[UserInput],
+    mentioned_plugins: &[crate::plugins::PluginCapabilitySummary],
+    cancellation_token: &CancellationToken,
+) -> Option<(Vec<ResponseItem>, HashSet<String>)> {
+    let turn_context = step_context.turn.as_ref();
+    // Guardian input embeds the parent transcript as untrusted evidence. Do not interpret skill or
+    // plugin mentions from that generated prompt as requests to inject additional instructions.
+    if crate::guardian::is_basic_session_source(&turn_context.session_source) {
+        return Some((Vec::new(), HashSet::new()));
+    }
+
+    let tracking = build_track_events_context(
+        turn_context.model_info().slug.clone(),
+        sess.thread_id.to_string(),
+        turn_context.sub_id.clone(),
+        turn_context.originator.clone(),
+        Some(turn_context.turn_metadata_state.clone()),
+    );
+    let mcp_tools = if turn_context.apps_enabled() || !mentioned_plugins.is_empty() {
+        // Plugin mentions need raw MCP/app inventory even when app tools
+        // are normally hidden so we can describe the plugin's currently
+        // usable capabilities for this turn.
+        step_context.mcp.tools()
+    } else {
+        &[]
+    };
+    let available_connectors = available_connectors_for_step(step_context);
+    let extension_injection_items =
+        build_extension_turn_input_items(sess, step_context, user_input, cancellation_token)
+            .await?;
+    let (skill_items, skill_connector_ids) = build_explicit_skill_injections(
+        sess,
+        step_context,
+        user_input,
+        &available_connectors,
+        cancellation_token,
+    )
+    .await;
     let plugin_items = build_plugin_injections(mentioned_plugins, mcp_tools, &available_connectors);
     let mut explicitly_enabled_connectors = collect_explicit_app_ids(user_input);
     explicitly_enabled_connectors.extend(skill_connector_ids);
@@ -1151,18 +1230,7 @@ async fn build_skills_and_plugins(
         }
     }
 
-    let mut injection_items = match injected_host_skill_prompts {
-        Some(injected_host_skill_prompts) => skill_items
-            .into_iter()
-            .zip(injected_host_skills.iter())
-            .filter_map(|(item, skill)| {
-                (!injected_host_skill_prompts
-                    .contains_path(&skill.path_to_skills_md.inferred_native_path_string()))
-                .then_some(item)
-            })
-            .collect(),
-        None => skill_items,
-    };
+    let mut injection_items = skill_items;
     injection_items.extend(plugin_items);
     injection_items.extend(extension_injection_items);
     Some((injection_items, explicitly_enabled_connectors))
