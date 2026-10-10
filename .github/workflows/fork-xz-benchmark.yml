@@ -1,0 +1,91 @@
+name: Fork xz runner experiment
+
+on:
+  pull_request:
+    branches: [fork]
+    paths:
+      - .github/workflows/fork-xz-benchmark.yml
+      - scripts/fork/benchmark_xz.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-xz-experiment-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    if: github.repository == 'happy-proto/codex' && github.head_ref == 'chore/xz-runner-benchmark'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: 固定最新 binary 包的发布清单
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/fork/benchmark_xz.py resolve benchmark
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: xz-release-snapshot
+          path: benchmark/snapshot.json
+          retention-days: 14
+
+  compress:
+    needs: release
+    name: xz -9 -T${{ matrix.threads }} / macos-15
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        threads: [1, 0]
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: 准备压缩与多线程下载工具
+        run: |
+          command -v axel || brew install axel
+          command -v xz || brew install xz
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: xz-release-snapshot
+          path: benchmark
+      - name: axel 下载并校验 binary 包，解出相同 tar 字节流
+        run: python3 scripts/fork/benchmark_xz.py prepare benchmark
+      - name: 重复三次压缩，计时并验证解压内容
+        run: python3 scripts/fork/benchmark_xz.py measure benchmark --threads ${{ matrix.threads }}
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        if: always()
+        with:
+          name: xz-results-T${{ matrix.threads }}
+          path: |
+            benchmark/result-*.json
+            benchmark/*.log
+          retention-days: 14
+
+  comparison:
+    needs: compress
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: xz-results-*
+          path: benchmark
+          merge-multiple: true
+      - name: 汇总体积、压缩比和耗时
+        run: python3 scripts/fork/benchmark_xz.py compare benchmark
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: xz-comparison
+          path: benchmark/comparison.md
+          retention-days: 14
