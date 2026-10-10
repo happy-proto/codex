@@ -1,0 +1,30 @@
+name: Fork PR checks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-pr-${{ github.event.pull_request.number }}
+  # 同一 PR 更新后只保留最新检查，不继续执行过时提交。
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: '3.12'
+      - name: 验证 fork 版本与发布契约
+        run: python3 -m unittest discover -s scripts/fork -p 'test_*.py' -v
+      - name: 检查 shell 语法
+        run: |
+          sh -n scripts/fork/install.sh
+          sh -n scripts/fork/cargo-timed.sh
