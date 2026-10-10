@@ -15,6 +15,20 @@ import release
 
 
 class VersionTests(unittest.TestCase):
+    def test_xz_package_preserves_binary_contents_and_executable_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            package = root / "package"
+            (package / "bin").mkdir(parents=True)
+            binary = package / "bin/codex"
+            binary.write_bytes(b"binary contents\x00\xff")
+            binary.chmod(0o755)
+            archive = release.archive_package(package, root)
+            with tarfile.open(archive, "r:xz") as handle:
+                member = handle.getmember("./bin/codex")
+                self.assertEqual(handle.extractfile(member).read(), binary.read_bytes())
+                self.assertEqual(member.mode & 0o777, 0o755)
+
     def test_timed_cargo_preserves_arguments_and_failure_status(self):
         with tempfile.TemporaryDirectory() as directory:
             cargo = Path(directory) / "cargo"
@@ -96,7 +110,7 @@ class PublicationTests(unittest.TestCase):
                 "source_commit": "a" * 40,
                 "upstream_tag": "rust-v0.162.0-alpha.14",
                 "upstream_commit": "b" * 40,
-                "asset": "package.tar.gz",
+                "asset": "package.tar.xz",
                 "sha256": hashlib.sha256(archive).hexdigest(),
             }
             (dist / "fork-release.json").write_text(json.dumps(metadata))
@@ -200,10 +214,10 @@ for i, arg in enumerate(args):
 with (pathlib.Path(os.environ["FAKE_NETWORK"]) / "requests.jsonl").open("a") as log:
     import json
     log.write(json.dumps({"url": url, "headers": headers, "args": args}) + "\\n")
-if url.endswith(".tar.gz") and os.environ.get("FAIL_PACKAGE_DOWNLOAD") == "1":
+if url.endswith((".tar.xz", ".tar.gz")) and os.environ.get("FAIL_PACKAGE_DOWNLOAD") == "1":
     print("curl: (22) The requested URL returned error: 503", file=sys.stderr)
     sys.exit(22)
-if url.endswith(".tar.gz") and os.environ.get("FAIL_AXEL") == "1":
+if url.endswith((".tar.xz", ".tar.gz")) and os.environ.get("FAIL_AXEL") == "1":
     output = pathlib.Path(args[args.index("-o") + 1])
     assert not output.exists(), "axel partial file was not removed"
     assert not pathlib.Path(str(output) + ".st").exists(), "axel state was not removed"
@@ -247,7 +261,7 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
         path.write_text(text)
         path.chmod(0o755)
 
-    def prepare_build(self, commit):
+    def prepare_build(self, commit, compression="xz"):
         package = self.root / f"package-{commit}"
         package.mkdir()
         (package / "codex-package.json").write_text(
@@ -263,11 +277,11 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
             self.executable(package / binary, "#!/bin/sh\nexit 0\n")
         # Changing source without changing the software version changes the actual package.
         (package / "source.txt").write_text(commit)
-        archive = self.root / "archive.tar.gz"
-        with tarfile.open(archive, "w:gz") as handle:
+        archive = self.root / f"archive.tar.{compression}"
+        with tarfile.open(archive, f"w:{compression}") as handle:
             handle.add(package, arcname=".")
         digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-        asset = f"codex-package-{release.TARGET}-{digest}.tar.gz"
+        asset = f"codex-package-{release.TARGET}-{digest}.tar.{compression}"
         (self.network / asset).write_bytes(archive.read_bytes())
         manifest = {
             "version": self.version,
@@ -336,7 +350,7 @@ if os.environ.get("CORRUPT_AXEL") == "1":
         self.assertEqual(result.stderr, "")
         self.assertFalse(
             any(
-                json.loads(line)["url"].endswith(".tar.gz")
+                json.loads(line)["url"].endswith((".tar.xz", ".tar.gz"))
                 for line in (self.network / "requests.jsonl").read_text().splitlines()
             )
         )
@@ -412,7 +426,10 @@ if os.environ.get("CORRUPT_AXEL") == "1":
         self.assertEqual(self.selected(), old)
         requests = (self.network / "requests.jsonl").read_text().splitlines()
         self.assertFalse(
-            any(json.loads(line)["url"].endswith(".tar.gz") for line in requests)
+            any(
+                json.loads(line)["url"].endswith((".tar.xz", ".tar.gz"))
+                for line in requests
+            )
         )
 
     def test_interactive_download_only_shows_progress_for_package(self):
@@ -439,7 +456,7 @@ if os.environ.get("CORRUPT_AXEL") == "1":
         for request in requests:
             self.assertEqual(
                 "--progress-bar" in request["args"],
-                request["url"].endswith(".tar.gz"),
+                request["url"].endswith((".tar.xz", ".tar.gz")),
             )
 
     def test_download_failure_preserves_diagnostics_and_selected_package(self):
@@ -516,6 +533,14 @@ if os.environ.get("CORRUPT_AXEL") == "1":
     def test_explicit_version_uses_fork_release(self):
         self.prepare_build("a")
         self.install("--release", self.version)
+        self.assertTrue((self.bin / "codex").exists())
+
+    def test_explicit_version_accepts_existing_gzip_release(self):
+        manifest = self.prepare_build("a", compression="gz")
+        self.install("--release", self.version)
+        self.assertEqual(
+            json.loads((self.selected() / "fork-release.json").read_text()), manifest
+        )
         self.assertTrue((self.bin / "codex").exists())
 
     def test_logged_in_gh_authenticates_api_without_leaking_to_downloads(self):

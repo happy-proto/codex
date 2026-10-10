@@ -136,7 +136,7 @@ jobs:
         with:
           name: fork-package-${{ github.sha }}
           path: |
-            fork-dist/*.tar.gz
+            fork-dist/*.tar.xz
             fork-dist/fork-release.json
             fork-dist/install.sh
           if-no-files-found: error
