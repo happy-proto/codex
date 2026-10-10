@@ -719,7 +719,7 @@ fn markdown_accents_preserve_fallbacks_without_theme_scopes() {
 }
 
 #[test]
-fn ordered_list_markers_use_terminal_palette_snapshot() {
+fn ordered_list_markers_follow_syntax_theme_snapshot() {
     let text = render_markdown_text(
         "1. plain [plain](https://example.com) `code` [`code`](https://example.com)",
     );
