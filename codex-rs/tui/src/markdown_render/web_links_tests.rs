@@ -1,7 +1,7 @@
 use super::WebLinkDisplay;
+use crate::markdown_render::MarkdownStyles;
 use crate::markdown_render::render_markdown_lines_with_width_cwd_and_hidden_link_destinations;
 use crate::markdown_render::render_streaming_markdown_lines_with_width_and_cwd;
-use crate::style::accent_color;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::TerminalHyperlink;
 use crate::terminal_hyperlinks::visible_lines;
@@ -10,7 +10,6 @@ use codex_terminal_detection::TerminalInfo;
 use codex_terminal_detection::TerminalName;
 use insta::assert_debug_snapshot;
 use pretty_assertions::assert_eq;
-use ratatui::style::Style;
 use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Text;
@@ -27,14 +26,13 @@ fn bare_urls_are_styled_without_coloring_surrounding_prose() {
         text,
         Text::from(Line::from(vec![
             "界 (".into(),
-            "https://example.com/a".fg(accent_color()).underlined(),
+            "https://example.com/a".style(MarkdownStyles::default().link),
             "); ".into(),
-            "https://example.com/b".fg(accent_color()).underlined(),
+            "https://example.com/b".style(MarkdownStyles::default().link),
             "! ".into(),
             "https://example.com/c"
-                .bold()
-                .fg(accent_color())
-                .underlined(),
+                .style(MarkdownStyles::default().link)
+                .bold(),
         ])),
     );
     assert_debug_snapshot!(text);
@@ -44,13 +42,15 @@ fn bare_urls_are_styled_without_coloring_surrounding_prose() {
 fn bare_url_styling_preserves_tabs_and_unicode() {
     let line = super::style_bare_web_urls(
         "界\t(https://example.com).".bold(),
-        Style::new().fg(accent_color()).underlined(),
+        MarkdownStyles::default().link,
     );
     assert_eq!(
         line.line,
         Line::from(vec![
             "界\t(".bold(),
-            "https://example.com".bold().fg(accent_color()).underlined(),
+            "https://example.com"
+                .style(MarkdownStyles::default().link)
+                .bold(),
             ").".bold(),
         ]),
     );
@@ -103,27 +103,27 @@ fn supporting_terminals_render_only_the_styled_label_and_keep_its_target() {
         for (markdown, label) in [
             (
                 "[label](https://example.com)",
-                "label".fg(accent_color()).underlined(),
+                "label".style(MarkdownStyles::default().link),
             ),
             (
                 "[`label`](https://example.com)",
-                "label".fg(accent_color()).underlined(),
+                "label".style(MarkdownStyles::default().link),
             ),
             (
                 "[**label**](https://example.com)",
-                "label".fg(accent_color()).bold().underlined(),
+                "label".style(MarkdownStyles::default().link).bold(),
             ),
             (
                 "[*label*](https://example.com)",
-                "label".fg(accent_color()).italic().underlined(),
+                "label".style(MarkdownStyles::default().link).italic(),
             ),
             (
                 "[<b>](https://example.com)",
-                "<b>".fg(accent_color()).underlined(),
+                "<b>".style(MarkdownStyles::default().link),
             ),
             (
                 "[https://example.com](https://example.com)",
-                "https://example.com".fg(accent_color()).underlined(),
+                "https://example.com".style(MarkdownStyles::default().link),
             ),
         ] {
             let label_width = label.width();

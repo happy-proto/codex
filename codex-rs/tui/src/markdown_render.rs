@@ -152,9 +152,22 @@ impl MarkdownStyles {
             emphasis: Style::new().italic(),
             strong: Style::new().bold(),
             strikethrough: Style::new().crossed_out(),
-            ordered_list_marker: Style::new().light_blue(),
+            ordered_list_marker: foreground_style_for_scopes_with_theme(
+                theme,
+                &[
+                    "markup.list.numbered.markdown",
+                    "punctuation.definition.list.begin.markdown",
+                    "punctuation.definition.list_item.markdown",
+                ],
+            )
+            .unwrap_or_else(|| Style::new().light_blue()),
             unordered_list_marker: Style::new(),
-            link: Style::new().fg(accent_color()).underlined(),
+            link: foreground_style_for_scopes_with_theme(
+                theme,
+                &["markup.underline.link.markdown", "markup.link.markdown"],
+            )
+            .unwrap_or_else(|| Style::new().fg(accent_color()))
+            .underlined(),
             blockquote: Style::new().green(),
         }
     }
