@@ -666,7 +666,7 @@ fn markdown_accents_follow_bundled_themes() {
     use ratatui::style::Style;
 
     for (name, link, marker) in [
-        ("dracula", (189, 147, 249), (255, 121, 198)),
+        ("dracula", (139, 233, 253), (255, 121, 198)),
         ("catppuccin-mocha", (137, 180, 250), (148, 226, 213)),
         ("catppuccin-latte", (30, 102, 245), (23, 146, 153)),
     ] {
@@ -685,6 +685,49 @@ fn markdown_accents_follow_bundled_themes() {
             Style::new().fg(Color::Rgb(marker.0, marker.1, marker.2)),
             "{name} list markers"
         );
+    }
+}
+
+#[test]
+fn dracula_markdown_code_links_distinguish_labels_destinations_and_punctuation() {
+    use crate::render::highlight;
+    use ratatui::style::Color;
+
+    let original_theme = highlight::current_syntax_theme();
+    highlight::set_syntax_theme(highlight::resolve_theme_by_name("dracula", None).unwrap());
+    let source = "[示例链接](https://example.com)";
+    let markdown = format!("```markdown\n{source}\n```\n");
+    let rendered = render_markdown_text(&markdown);
+    let streaming = Text::from(crate::terminal_hyperlinks::visible_lines(
+        super::render_streaming_markdown_lines_with_width_and_cwd(
+            &markdown,
+            None,
+            None,
+            &|_| false,
+            super::ListSpacing::default(),
+        )
+        .lines,
+    ));
+    highlight::set_syntax_theme(original_theme);
+
+    let expected = [
+        ("[", Color::Rgb(189, 147, 249)),
+        ("示例链接", Color::Rgb(255, 121, 198)),
+        ("](", Color::Rgb(189, 147, 249)),
+        ("https://example.com", Color::Rgb(139, 233, 253)),
+        (")", Color::Rgb(189, 147, 249)),
+    ]
+    .into_iter()
+    .flat_map(|(text, color)| text.chars().map(move |ch| (ch, Some(color))))
+    .collect::<Vec<_>>();
+    for text in [rendered, streaming] {
+        assert_eq!(plain_lines(&text), vec![source]);
+        let actual = text.lines[0]
+            .spans
+            .iter()
+            .flat_map(|span| span.content.chars().map(|ch| (ch, span.style.fg)))
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
     }
 }
 
