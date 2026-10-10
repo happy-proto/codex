@@ -12,6 +12,6 @@ description: 维护 happy-proto/codex 个人 fork；用于判断修改所属功�
 
 ## 按需读取
 
-- 定位修改层、交付代码及调整 stack：读 [stack.md](references/stack.md)。
+- 定位修改层、交付代码、调整 stack 及维护每层最多 5 个提交：读 [stack.md](references/stack.md)。
 - 同步 alpha 或分析上游变化：读 [upstream.md](references/upstream.md)。
 - 构建、发布、安装、更新和回退：读 [release.md](references/release.md)。
