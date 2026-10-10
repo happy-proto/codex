@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Fork 的 Dracula Markdown 覆盖：链接文字粉色、地址青色、括号紫色；其余配色继承内置主题。 -->
+<plist version="1.0">
+<dict>
+  <key>name</key><string>Dracula Markdown overrides</string>
+  <key>settings</key>
+  <array>
+    <dict>
+      <key>scope</key><string>markup.underline.link.markdown</string>
+      <key>settings</key><dict><key>foreground</key><string>#8BE9FD</string></dict>
+    </dict>
+    <dict>
+      <key>scope</key><string>string.other.link.title.markdown, string.other.link.description.markdown, meta.link.inline.description.markdown, meta.link.reference.description.markdown</string>
+      <key>settings</key><dict><key>foreground</key><string>#FF79C6</string></dict>
+    </dict>
+    <dict>
+      <key>scope</key><string>punctuation.definition.link.markdown, punctuation.definition.metadata.markdown</string>
+      <key>settings</key><dict><key>foreground</key><string>#BD93F9</string></dict>
+    </dict>
+  </array>
+</dict>
+</plist>
