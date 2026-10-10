@@ -68,6 +68,8 @@ Fork 的更新渠道只选择 fork 发行版，上游 alpha 同步由维护者�
   链接保留下划线；主题未定义对应颜色时沿用原有回退。自定义 `.tmTheme` 可通过
   `markup.underline.link.markdown`（或 `markup.link.markdown`）设置链接颜色，
   通过 `markup.list.numbered.markdown` 设置编号颜色，也支持主题常用的列表标点 scope。
+  内置 Dracula 的 Markdown 配色接近 Zed：代码块内链接文字为粉色、地址为青色、
+  方括号和圆括号为紫色；渲染后的可点击链接使用青色，其余语法配色保持原主题。
   跟踪 [上游 issue #47497](https://github.com/openai/codex/issues/47497)。
 - **MCP 列表展示**：`codex mcp list` 默认按服务器显示紧凑信息块，将名称、启用状态和
   传输类型与命令、参数、URL、认证状态分层展示；长字段换行，环境变量值继续脱敏。
