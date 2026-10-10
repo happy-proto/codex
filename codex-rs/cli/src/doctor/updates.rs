@@ -404,10 +404,14 @@ async fn fetch_latest_version(
     client: &RouteAwareClientPool,
     context: &InstallContext,
 ) -> Result<String, String> {
-    if context
-        .package_manifest()
-        .is_some_and(|manifest| manifest.version.pre.as_str().ends_with(".fork"))
-    {
+    if context.package_manifest().is_some_and(|manifest| {
+        manifest
+            .version
+            .pre
+            .as_str()
+            .split('.')
+            .any(|part| part == "fork")
+    }) {
         return fetch_latest_github_release_version(client).await;
     }
     match &context.method {
@@ -435,7 +439,16 @@ async fn fetch_latest_github_release_version(
         .filter(|info| !info.draft)
         .filter_map(|info| {
             let version = info.tag_name.strip_prefix("fork-v")?;
-            let upstream_version = version.strip_suffix(".fork")?;
+            let (upstream_version, revision) =
+                if let Some((upstream, revision)) = version.rsplit_once(".fork.") {
+                    let number = revision.parse::<u64>().ok()?;
+                    if number == 0 || number.to_string() != revision {
+                        return None;
+                    }
+                    (upstream, number)
+                } else {
+                    (version.strip_suffix(".fork")?, 0)
+                };
             let parsed = codex_build_info::BuildInfo::from_version(upstream_version)
                 .version()
                 .clone();
@@ -443,7 +456,7 @@ async fn fetch_latest_github_release_version(
                 .pre
                 .as_str()
                 .starts_with("alpha.")
-                .then_some((parsed, version.to_string()))
+                .then_some(((parsed, revision), version.to_string()))
         })
         .max_by(|left, right| left.0.cmp(&right.0))
         .map(|(_, version)| version)

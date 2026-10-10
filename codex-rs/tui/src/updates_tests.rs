@@ -12,7 +12,7 @@ use wiremock::matchers::path;
 
 fn latest_info(commit: &str) -> VersionInfo {
     VersionInfo {
-        latest_version: "0.162.0-alpha.20.fork".to_string(),
+        latest_version: "0.162.0-alpha.20.fork.10".to_string(),
         latest_commit: Some(commit.to_string()),
         last_checked_at: Utc::now(),
     }
@@ -32,9 +32,18 @@ fn warning_text(event: AppEvent) -> String {
 
 #[test]
 fn alpha_hotfix_sorts_after_the_base_alpha_without_fork_marker() {
-    let base = upstream_alpha_version("fork-v0.162.0-alpha.14.fork").unwrap();
-    let hotfix = upstream_alpha_version("fork-v0.162.0-alpha.14.2.fork").unwrap();
+    let base = upstream_alpha_version("fork-v0.162.0-alpha.14.fork.99").unwrap();
+    let hotfix = upstream_alpha_version("fork-v0.162.0-alpha.14.2.fork.1").unwrap();
     assert!(hotfix > base);
+}
+
+#[test]
+fn fork_revisions_sort_numerically_and_legacy_releases_remain_readable() {
+    let legacy = upstream_alpha_version("fork-v0.162.0-alpha.14.fork").unwrap();
+    let second = upstream_alpha_version("fork-v0.162.0-alpha.14.fork.2").unwrap();
+    let tenth = upstream_alpha_version("fork-v0.162.0-alpha.14.fork.10").unwrap();
+    let next_alpha = upstream_alpha_version("fork-v0.162.0-alpha.15.fork.1").unwrap();
+    assert!(legacy < second && second < tenth && tenth < next_alpha);
 }
 
 #[test]
@@ -43,6 +52,10 @@ fn only_fork_alpha_tags_participate_in_update_selection() {
         "rust-v0.162.0-alpha.14",
         "fork-v0.162.0.fork",
         "fork-v0.162.0-alpha.14",
+        "fork-v0.162.0-alpha.14.fork.0",
+        "fork-v0.162.0-alpha.14.fork.01",
+        "fork-v0.162.0-alpha.14.fork.foo",
+        "fork-v0.162.0-alpha.14.foo.fork.1",
     ] {
         assert!(upstream_alpha_version(tag).is_none());
     }
@@ -83,7 +96,7 @@ async fn slow_refresh_returns_immediately_and_notifies_once_after_completion() {
     finish.send(()).unwrap();
     task.await.unwrap();
     let message = warning_text(receiver.try_recv().unwrap());
-    assert!(message.contains("0.162.0-alpha.20.fork (aaaaaaaa)"));
+    assert!(message.contains("0.162.0-alpha.20.fork.10 (aaaaaaaa)"));
     assert!(message.contains("Run codex update"));
     assert!(receiver.try_recv().is_err());
 }
@@ -166,7 +179,9 @@ async fn release_lookup_scopes_tokens_to_the_api_and_supports_anonymous_fallback
             .and(path("/api/releases"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([
                 {"tag_name": "fork-v0.162.0-alpha.18.1.fork", "draft": false},
-                {"tag_name": "fork-v0.162.0-alpha.20.fork", "draft": false},
+                {"tag_name": "fork-v0.162.0-alpha.20.fork.10", "draft": false},
+                {"tag_name": "fork-v0.162.0-alpha.20.fork.2", "draft": false},
+                {"tag_name": "fork-v0.162.0-alpha.20.fork.11", "draft": true},
                 {"tag_name": "fork-v0.162.0-alpha.21.fork", "draft": true},
             ])))
             .expect(1)
@@ -174,10 +189,10 @@ async fn release_lookup_scopes_tokens_to_the_api_and_supports_anonymous_fallback
             .await;
         Mock::given(method("GET"))
             .and(path(
-                "/download/fork-v0.162.0-alpha.20.fork/fork-release.json",
+                "/download/fork-v0.162.0-alpha.20.fork.10/fork-release.json",
             ))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "version": "0.162.0-alpha.20.fork",
+                "version": "0.162.0-alpha.20.fork.10",
                 "source_commit": "a".repeat(40),
             })))
             .expect(1)

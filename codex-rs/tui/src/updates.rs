@@ -37,10 +37,26 @@ struct ForkRelease {
     source_commit: String,
 }
 
-fn upstream_alpha_version(tag: &str) -> Option<semver::Version> {
-    let version = tag.strip_prefix("fork-v")?.strip_suffix(".fork")?;
-    let parsed = semver::Version::parse(version).ok()?;
-    parsed.pre.as_str().starts_with("alpha.").then_some(parsed)
+fn upstream_alpha_version(tag: &str) -> Option<(semver::Version, u64)> {
+    let version = tag.strip_prefix("fork-v")?;
+    let (upstream, revision) = if let Some((upstream, revision)) = version.rsplit_once(".fork.") {
+        let number = revision.parse::<u64>().ok()?;
+        if number == 0 || number.to_string() != revision {
+            return None;
+        }
+        (upstream, number)
+    } else {
+        (version.strip_suffix(".fork")?, 0)
+    };
+    let parsed = semver::Version::parse(upstream).ok()?;
+    let components: Vec<_> = parsed.pre.as_str().split('.').collect();
+    (parsed.build.is_empty()
+        && (2..=3).contains(&components.len())
+        && components[0] == "alpha"
+        && components[1..]
+            .iter()
+            .all(|part| part.parse::<u64>().is_ok()))
+    .then_some((parsed, revision))
 }
 
 pub(crate) fn start_update_check(config: &Config, events: AppEventSender) {

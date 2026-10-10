@@ -29,10 +29,14 @@ pub enum UpdateAction {
 impl UpdateAction {
     #[cfg(any(not(debug_assertions), test))]
     pub(crate) fn from_install_context(context: &InstallContext) -> Option<Self> {
-        if context
-            .package_manifest()
-            .is_some_and(|manifest| manifest.version.pre.as_str().ends_with(".fork"))
-        {
+        if context.package_manifest().is_some_and(|manifest| {
+            manifest
+                .version
+                .pre
+                .as_str()
+                .split('.')
+                .any(|part| part == "fork")
+        }) {
             return Some(UpdateAction::StandaloneUnix);
         }
         match &context.method {

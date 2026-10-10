@@ -11,9 +11,11 @@
 
 ## 安装此 fork
 
-首期仅支持 macOS Apple Silicon。完整包包含 code-mode host 和 ripgrep；从上游
+支持 macOS Apple Silicon 和 Linux AMD64（glibc，建议 Ubuntu 24.04 或更新版本）。
+完整包包含 code-mode host 和 ripgrep，Linux 还包含 bubblewrap sandbox；从上游
 `0.163.0-alpha.1` 起不再附带补丁 zsh，执行命令沿用上游的系统 shell 路径。
-采用 ad-hoc 签名，未经 Apple 公证；macOS 首次运行时可能需要手动批准。
+macOS 采用 ad-hoc 签名，未经 Apple 公证；首次运行时可能需要手动批准。
+Linux 安装器需要 Python 3、flock、tar 和 xz；macOS 使用系统自带工具。
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork/install.sh | sh
@@ -25,8 +27,9 @@ codex --version
 安装包下载检测到 `axel` 时使用其默认并行度，失败后清理未完成的文件并回退到 curl；
 未安装 axel 时直接使用 curl。元数据始终用 curl 获取，安装前仍校验整个包的 SHA-256。
 新安装包使用 `tar.xz`，发布时通过 `xz -9 -T0` 自动选择压缩并行度；安装器使用
-macOS 自带的 tar 解压，并继续支持已发布的 `tar.gz` 历史包。自行下载的脚本应读取
-`fork-release.json` 中的 `asset`，不要固定 gzip 后缀或解压参数。
+系统 tar 解压，并继续支持已发布的 macOS `tar.gz` 历史包。自行下载的脚本应读取
+`fork-release.json` 中的 `packages.<target>.asset` 和 `sha256`；顶层 `asset` / `sha256`
+仍描述 macOS 包，历史单平台清单沿用原有字段。不要固定 gzip 后缀或解压参数。
 继续使用现有 Codex 目录中的配置、凭据和会话。按需将 `~/.local/bin` 加入 PATH；
 如果同时安装了 npm/Homebrew 版本，可以保留独立管理，或在确定不用后移除。
 
@@ -40,11 +43,17 @@ curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork
 发现新构建只显示一次 warning，不等待网络、不弹更新选择框，也不自动安装；使用 `codex update`
 主动更新。设置 `check_for_update_on_startup = false` 可同时关闭后台检查与提示。
 
-版本沿用上游 alpha 并添加 `.fork`，例如 `0.162.0-alpha.18.fork`。
-每次 `fork` 更新验证通过后自动发布；同一 alpha 下更新同名 Release 和标签，
-因此版本字符串不能唯一标识构建。`fork-release.json` 记录源提交、上游提交和包摘要，
-安装包文件名包含摘要，旧包保持可下载。Fork 的更新渠道只选择 fork 发行版，
-上游 alpha 同步由维护者发起。
+版本沿用上游 alpha 并添加 `.fork.N`，例如 `0.163.0-alpha.5.fork.1`。
+同一 alpha 每次发布递增序号，新 alpha 从 1 开始；失败构建可能留下序号空缺。
+每次 `fork` 更新验证通过后自动发布独立 Release 和 tag，已发布版本不覆盖更新。
+macOS 和 Linux 并行构建并共享版本号，通过测试和两平台验收后统一发布。
+每个 Release 的平台包使用固定文件名，不附带提交或摘要；`fork-release.json`
+记录源提交、上游提交和每个平台包的 SHA-256。更新检查按上游 alpha、fork 序号数字排序。
+旧 `.fork` 安装可直接执行 `codex update` 迁移；旧版启动检查无法识别新后缀，首次需要手动更新。
+发布后清理超过 7 天的 fork Release 及对应 tag，按发布时间最新三个已发布版本始终保留；
+没有 Release 的旧 fork tag 按 tagger 时间（轻量 tag 使用提交时间）清理。
+远端清理不删除本地保留的安装包，仍可 `--rollback`。
+Fork 的更新渠道只选择 fork 发行版，上游 alpha 同步由维护者发起。
 
 安装器查询 GitHub API 时优先使用已安装且登录 GitHub.com 的 `gh` 凭据，
 认证仅用于 API 查询；未安装或未登录 `gh` 时使用匿名请求，可能受出口 IP 的限流影响。
@@ -64,8 +73,8 @@ curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork
 [PR 工作流](.github/workflows/fork-pr.yml) 只在 Linux 上运行轻量脚本检查，
 不创建构建、Rust 测试和发布 Job；同一 PR 更新后取消旧检查。
 推送 `fork` 后由 Fork 工作流对完整集成 stack 执行一次构建和 Rust 测试。
-通用 Rust 测试在 Linux x64 上运行；只有完整 Apple Silicon 包的构建、签名、
-macOS 安装契约和真实 CLI 验收使用 ARM macOS runner。
+通用 Rust 测试在 Linux x64 上运行；完整包通过平台 matrix 在 Linux x64 和 ARM macOS
+runner 并行构建，每个平台验证安装契约、真实 CLI 和 app-server；签名只在 macOS 执行。
 标准 macOS runner 上保留产物的 release 优化，关闭跨 crate Thin LTO。
 Rust 测试与构建并行，保留 release 条件编译及关闭 debug assertions，禁用测试优化以控制成本。
 Rust 编译通过 mbx 的 objects 模式缓存本次构建使用的对象，Cargo 下载目录单独缓存，
