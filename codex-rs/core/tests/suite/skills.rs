@@ -36,6 +36,8 @@ use core_test_support::responses::start_mock_server;
 use core_test_support::skip_if_no_network;
 use core_test_support::skip_if_remote;
 use core_test_support::skip_if_wine_exec;
+use core_test_support::streaming_sse::StreamingSseChunk;
+use core_test_support::streaming_sse::start_streaming_sse_server;
 use core_test_support::test_codex::local_requests;
 use core_test_support::test_codex::test_codex;
 use core_test_support::test_codex::turn_permission_fields;
@@ -45,6 +47,191 @@ use std::sync::Mutex;
 use tracing::Level;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_test::internal::MockWriter;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steered_explicit_only_skill_plain() -> Result<()> {
+    check_steered_explicit_only_skill(false, false, true).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steered_explicit_only_skill_attachment() -> Result<()> {
+    check_steered_explicit_only_skill(true, false, false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steered_explicit_only_skill_text_and_attachment() -> Result<()> {
+    check_steered_explicit_only_skill(true, false, true).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steered_explicit_only_skill_disabled_plain() -> Result<()> {
+    check_steered_explicit_only_skill(false, true, true).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steered_explicit_only_skill_disabled_attachment() -> Result<()> {
+    check_steered_explicit_only_skill(true, true, false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn steered_explicit_only_skill_unmentioned() -> Result<()> {
+    check_steered_explicit_only_skill(false, false, false).await
+}
+
+async fn check_steered_explicit_only_skill(
+    attachment: bool,
+    disabled: bool,
+    text_mention: bool,
+) -> Result<()> {
+    skip_if_wine_exec!(
+        Ok(()),
+        "skill paths require matching host and executor path conventions"
+    );
+    skip_if_no_network!(Ok(()));
+
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+    let (server, _) = start_streaming_sse_server(vec![
+        vec![
+            StreamingSseChunk {
+                gate: None,
+                body: sse(vec![ev_response_created("first")]),
+            },
+            StreamingSseChunk {
+                gate: Some(release_rx),
+                body: sse(vec![ev_completed("first")]),
+            },
+        ],
+        vec![StreamingSseChunk {
+            gate: None,
+            body: sse(vec![ev_completed("second")]),
+        }],
+    ])
+    .await;
+    let recorder = Arc::new(SkillInvocationRecorder::default());
+    let mut extensions = ExtensionRegistryBuilder::default();
+    extensions.skill_invocation_contributor(recorder.clone());
+    let mut builder = test_codex()
+        .with_extensions(Arc::new(extensions.build()))
+        .with_workspace_setup(|cwd, fs| async move {
+            write_repo_skill(
+                cwd.clone(),
+                fs.clone(),
+                "steer-demo",
+                "Explicit-only demo",
+                "STEER_SKILL_BODY",
+            )
+            .await?;
+            let agents = cwd.join(".agents/skills/steer-demo/agents");
+            fs.create_directory(
+                &PathUri::from_host_native_path(&agents)?,
+                CreateDirectoryOptions {
+                    recursive: true,
+                    follow_symlinks: true,
+                },
+                None,
+            )
+            .await?;
+            fs.write_file(
+                &PathUri::from_host_native_path(&agents.join("openai.yaml"))?,
+                b"policy:\n  allow_implicit_invocation: false\n".to_vec(),
+                Default::default(),
+                None,
+            )
+            .await?;
+            Ok(())
+        })
+        .with_pre_build_hook(move |home| {
+            if disabled {
+                std::fs::write(
+                    home.join("config.toml"),
+                    "[[skills.config]]\nname = 'steer-demo'\nenabled = false\n",
+                )
+                .unwrap();
+            }
+        });
+    let test = builder.build_with_streaming_server(&server).await?;
+    let started = test
+        .codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "Start working".to_string(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    let codex_core::TurnInputSubmission::Started { turn_id, .. } = started else {
+        anyhow::bail!("expected a new turn: {started:?}");
+    };
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        server.wait_for_request_count(1),
+    )
+    .await?;
+    let mut input = vec![UserInput::Text {
+        text: if text_mention {
+            "Use $steer-demo"
+        } else {
+            "Follow this request"
+        }
+        .to_string(),
+        text_elements: Vec::new(),
+    }];
+    if attachment {
+        input.push(UserInput::Skill {
+            name: "steer-demo".to_string(),
+            path: test
+                .config
+                .cwd
+                .join(".agents/skills/steer-demo/SKILL.md")
+                .to_path_buf(),
+        });
+    }
+    let submitted = test
+        .codex
+        .steer_turn(TurnInputRequest::user_input(input), turn_id)
+        .await?;
+    assert!(matches!(
+        submitted,
+        codex_core::SteerSubmission::Steered { .. }
+    ));
+    release_tx.send(()).expect("release first response");
+    core_test_support::wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    let requests = server.requests().await;
+    assert_eq!(requests.len(), 2);
+    let first: serde_json::Value = serde_json::from_slice(&requests[0])?;
+    let second: serde_json::Value = serde_json::from_slice(&requests[1])?;
+    assert!(
+        !first["input"].to_string().contains("Explicit-only demo"),
+        "explicit-only skill must stay out of the implicit catalog"
+    );
+    assert!(!first["input"].to_string().contains("STEER_SKILL_BODY"));
+    let injected_count = second["input"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item.to_string().contains("STEER_SKILL_BODY"))
+        .count();
+    assert_eq!(
+        injected_count,
+        usize::from(!disabled && (attachment || text_mention)),
+        "steered skill instructions must reach the next request exactly once unless disabled"
+    );
+    {
+        let invocations = recorder.0.lock().unwrap();
+        assert_eq!(
+            invocations.len(),
+            usize::from(!disabled && (attachment || text_mention))
+        );
+        assert!(
+            invocations
+                .iter()
+                .all(|(_, kind)| *kind == SkillInvocationKind::Explicit)
+        );
+    }
+    server.shutdown().await;
+    Ok(())
+}
 
 #[derive(Default)]
 struct SkillInvocationRecorder(Mutex<Vec<(String, SkillInvocationKind)>>);

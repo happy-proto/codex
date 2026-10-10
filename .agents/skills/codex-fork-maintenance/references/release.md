@@ -16,6 +16,8 @@ macOS 使用 ad-hoc 签名并保留上游 entitlements；不配置官方 Azure�
 下载 CI/Release 产物做隔离安装与轻量运行验收。
 标准 macOS runner 使用 release 优化、关闭跨 crate Thin LTO；`lto=false` 仍可能包含单 crate 优化。
 测试与产物构建并行；测试保留 release 条件编译及关闭 debug assertions，禁用测试优化以控制编译成本。
+Core 集成测试沿用上游 `ci-test` profile，保留测试所需的 debug assertions；
+skill 集成测试串行运行，避免线程本地 tracing 捕获受并行用例干扰。
 通用脚本检查和 Rust 测试使用 Linux x64 runner；完整包通过平台 matrix 并行构建，
 Linux x64 和 ARM macOS runner 分别验证本机安装契约和真实 CLI；仅 macOS 签名。
 分析耗时时读取各 job 的日志和 `fork-build-timings-*`、`fork-test-timings-*` artifact，
@@ -37,6 +39,7 @@ V8、rg 继续由上游下载器校验和获取，不额外缓存下载资源。
 手动实验默认不发布，`publish=true` 才请求发布 fork；受信任的手动完整验证允许保存缓存。
 只需验证 TUI 回归时，手动指定 `tui_test_filter`；该模式只运行匹配的 TUI 库测试，
 跳过产物构建、其它 Rust 测试及发布，不受 `publish` 输入影响。
+显式 skill 回归可通过 `core_test_filter` 定向运行，采用相同的跳过规则。
 手动实验和自动发布使用不同并发组，避免耗时实验占用自动发布队列。
 比较迁移前完整版本、首次预热和热缓存完整版本，分别记录构建、测试 job 的执行时间、
 缓存恢复/保存时间和排队时间；读取 `fork-*-mbx-*` 统计及 Cargo 耗时报告。
