@@ -396,7 +396,15 @@ pub(crate) fn resolve_theme_by_name(name: &str, codex_home: Option<&Path>) -> Op
     let ts = two_face::theme::extra();
     // Bundled theme?
     if let Some(embedded) = parse_theme_name(name) {
-        return Some(ts.get(embedded).clone());
+        let mut theme = ts.get(embedded).clone();
+        if embedded == EmbeddedThemeName::Dracula {
+            let markdown = ThemeSet::load_from_reader(&mut std::io::Cursor::new(include_bytes!(
+                "../../assets/themes/dracula-markdown.tmTheme"
+            )))
+            .expect("bundled Dracula Markdown overrides must be valid");
+            theme.scopes.extend(markdown.scopes);
+        }
+        return Some(theme);
     }
     // Custom .tmTheme file?
     if let Some(home) = codex_home
