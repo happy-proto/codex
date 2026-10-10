@@ -46,6 +46,17 @@ mkdir "$ROOT/fork-install.lock" || { echo 'Another fork installer is running.' >
 locked=true
 
 download() {
+  if [ "${3:-}" = package ] && command -v axel >/dev/null 2>&1; then
+    echo '  Using axel…'
+    axel_progress=-q
+    if [ -t 2 ]; then axel_progress=-a; fi
+    if axel "$axel_progress" -T 15 -o "$2" "$1" >&2; then
+      return 0
+    fi
+    echo 'Axel download failed; retrying with curl.' >&2
+    # 不把 axel 的残留文件或续传状态交给另一个下载器。
+    rm -f "$2" "$2.st"
+  fi
   progress=-s
   # 仅安装包在交互终端显示单行进度；元数据及日志输出保持简洁。
   if [ "${3:-}" = package ] && [ -t 2 ]; then progress=--progress-bar; fi

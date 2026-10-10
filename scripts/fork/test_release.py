@@ -203,6 +203,10 @@ with (pathlib.Path(os.environ["FAKE_NETWORK"]) / "requests.jsonl").open("a") as 
 if url.endswith(".tar.gz") and os.environ.get("FAIL_PACKAGE_DOWNLOAD") == "1":
     print("curl: (22) The requested URL returned error: 503", file=sys.stderr)
     sys.exit(22)
+if url.endswith(".tar.gz") and os.environ.get("FAIL_AXEL") == "1":
+    output = pathlib.Path(args[args.index("-o") + 1])
+    assert not output.exists(), "axel partial file was not removed"
+    assert not pathlib.Path(str(output) + ".st").exists(), "axel state was not removed"
 if "/releases?" in url and os.environ.get("REQUIRE_GH_AUTH") == "1":
     if headers != ["Authorization: Bearer " + os.environ["FAKE_GH_TOKEN"]]:
         print("curl: (22) The requested URL returned error: 403", file=sys.stderr)
@@ -213,7 +217,15 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
         )
         self.env = {
             **os.environ,
-            "PATH": str(tools) + os.pathsep + os.environ["PATH"],
+            # 不让宿主机的可选下载器影响 curl 路径的安装契约。
+            "PATH": os.pathsep.join(
+                [str(tools)]
+                + [
+                    entry
+                    for entry in os.environ["PATH"].split(os.pathsep)
+                    if not (Path(entry) / "axel").exists()
+                ]
+            ),
             "CODEX_HOME": str(self.home),
             "CODEX_INSTALL_DIR": str(self.bin),
             "FAKE_NETWORK": str(self.network),
@@ -283,6 +295,93 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
 
     def selected(self):
         return (self.home / "packages/standalone/current").resolve()
+
+    def enable_axel(self):
+        self.executable(
+            self.tools / "axel",
+            """#!/usr/bin/env python3
+import json, os, pathlib, shutil, sys
+args = sys.argv[1:]
+network = pathlib.Path(os.environ["FAKE_NETWORK"])
+url = next(arg for arg in args if arg.startswith("https://"))
+output = pathlib.Path(args[args.index("-o") + 1])
+with (network / "axel.jsonl").open("a") as log:
+    log.write(json.dumps({"url": url, "args": args}) + "\\n")
+if os.environ.get("FAIL_AXEL") == "1":
+    output.write_bytes(b"partial")
+    pathlib.Path(str(output) + ".st").write_bytes(b"resume state")
+    print("axel: connection failed", file=sys.stderr)
+    sys.exit(1)
+shutil.copyfile(network / url.rsplit("/", 1)[1], output)
+if os.environ.get("CORRUPT_AXEL") == "1":
+    output.write_bytes(b"corrupted download")
+""",
+        )
+
+    def test_axel_downloads_only_package_with_default_connections(self):
+        self.enable_axel()
+        manifest = self.prepare_build("a")
+        result = self.install()
+        requests = [
+            json.loads(line)
+            for line in (self.network / "axel.jsonl").read_text().splitlines()
+        ]
+        self.assertEqual(len(requests), 1)
+        self.assertTrue(requests[0]["url"].endswith(manifest["asset"]))
+        self.assertIn("-q", requests[0]["args"])
+        self.assertNotIn("-n", requests[0]["args"])
+        self.assertFalse(
+            any(arg.startswith("--num-connections") for arg in requests[0]["args"])
+        )
+        self.assertEqual(result.stderr, "")
+        self.assertFalse(
+            any(
+                json.loads(line)["url"].endswith(".tar.gz")
+                for line in (self.network / "requests.jsonl").read_text().splitlines()
+            )
+        )
+
+    def test_axel_failure_falls_back_to_curl(self):
+        self.enable_axel()
+        self.prepare_build("a")
+        self.env["FAIL_AXEL"] = "1"
+        result = self.install()
+        self.assertIn("axel: connection failed", result.stderr)
+        self.assertIn("retrying with curl", result.stderr)
+        self.assertIn("✓ Installed", result.stdout)
+
+    def test_axel_corruption_preserves_selected_package(self):
+        self.prepare_build("a")
+        self.install()
+        old = self.selected()
+        self.enable_axel()
+        self.prepare_build("b")
+        self.env["CORRUPT_AXEL"] = "1"
+        result = self.install(succeeds=False)
+        self.assertIn("Package checksum mismatch", result.stderr)
+        self.assertEqual(self.selected(), old)
+
+    def test_axel_interactive_progress_goes_to_terminal(self):
+        self.enable_axel()
+        self.prepare_build("a")
+        master, slave = pty.openpty()
+        try:
+            result = subprocess.run(
+                ["sh", str(Path(__file__).with_name("install.sh"))],
+                env=self.env,
+                stdout=subprocess.PIPE,
+                stderr=slave,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+        finally:
+            os.close(slave)
+            os.close(master)
+        request = json.loads((self.network / "axel.jsonl").read_text())
+        self.assertIn("-a", request["args"])
+        self.assertNotIn("-q", request["args"])
 
     def test_noninteractive_install_has_compact_output_and_silent_downloads(self):
         self.prepare_build("a")

@@ -22,6 +22,8 @@ codex --version
 
 安装器选择已发布的 fork alpha Release，验证安装包 SHA-256，保留上一个安装包，
 并替换 `~/.local/bin` 中的 `codex`。可用 `CODEX_HOME` 和 `CODEX_INSTALL_DIR` 指定路径。
+安装包下载检测到 `axel` 时使用其默认并行度，失败后清理未完成的文件并回退到 curl；
+未安装 axel 时直接使用 curl。元数据始终用 curl 获取，安装前仍校验整个包的 SHA-256。
 继续使用现有 Codex 目录中的配置、凭据和会话。按需将 `~/.local/bin` 加入 PATH；
 如果同时安装了 npm/Homebrew 版本，可以保留独立管理，或在确定不用后移除。
 
