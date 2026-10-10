@@ -5,6 +5,24 @@ use super::DaemonSettings;
 use super::MAX_SHUTDOWN_GRACE_SECONDS;
 
 #[tokio::test]
+async fn fork_defaults_to_manual_updates() {
+    let temp = TempDir::new().expect("temp dir");
+    let settings = DaemonSettings::load(&temp.path().join("settings.json"))
+        .await
+        .expect("load defaults");
+    assert_eq!(settings.auto_update_enabled, false);
+
+    let path = temp.path().join("settings.json");
+    tokio::fs::write(&path, r#"{"updater":{"autoUpdateEnabled":true}}"#)
+        .await
+        .expect("write explicit updater setting");
+    let settings = DaemonSettings::load(&path)
+        .await
+        .expect("load explicit updater setting");
+    assert_eq!(settings.auto_update_enabled, true);
+}
+
+#[tokio::test]
 async fn remote_control_save_preserves_updater_settings() {
     let temp = TempDir::new().expect("temp dir");
     let path = temp.path().join("settings.json");
@@ -136,11 +154,12 @@ async fn telemetry_distinguishes_presence_from_default_values() -> anyhow::Resul
     let dir = home.path().join("app-server-daemon");
     tokio::fs::create_dir(&dir).await?;
     let path = dir.join("settings.json");
-    for (contents, presence) in [
-        ("{}", "default"),
+    for (contents, presence, update_state) in [
+        ("{}", "default", "disabled"),
         (
             r#"{"updater":{"autoUpdateEnabled":true,"updateIntervalMinutes":60},"shutdownGraceSeconds":60}"#,
             "configured",
+            "enabled",
         ),
     ] {
         tokio::fs::write(&path, contents).await?;
@@ -148,7 +167,7 @@ async fn telemetry_distinguishes_presence_from_default_values() -> anyhow::Resul
             crate::telemetry::settings_tags(home.path())
                 .await
                 .map(|(_, value)| value),
-            ["enabled", presence, presence, presence]
+            [update_state, presence, presence, presence]
         );
     }
     Ok(())
