@@ -249,13 +249,13 @@ fn blockquote_with_ordered_list() {
     let expected = Text::from_iter([
         Line::from_iter(vec![
             Span::from("> "),
-            "1. ".light_blue(),
+            Span::styled("1. ", MarkdownStyles::default().ordered_list_marker),
             Span::from("first"),
         ])
         .green(),
         Line::from_iter(vec![
             Span::from("> "),
-            "2. ".light_blue(),
+            Span::styled("2. ", MarkdownStyles::default().ordered_list_marker),
             Span::from("second"),
         ])
         .green(),
@@ -584,8 +584,14 @@ fn list_unordered_multiple() {
 fn list_ordered() {
     let text = render_markdown_text("1. List item 1\n2. List item 2\n");
     let expected = Text::from_iter([
-        Line::from_iter(["1. ".light_blue(), "List item 1".into()]),
-        Line::from_iter(["2. ".light_blue(), "List item 2".into()]),
+        Line::from_iter([
+            Span::styled("1. ", MarkdownStyles::default().ordered_list_marker),
+            "List item 1".into(),
+        ]),
+        Line::from_iter([
+            Span::styled("2. ", MarkdownStyles::default().ordered_list_marker),
+            "List item 2".into(),
+        ]),
     ]);
     assert_eq!(text, expected);
 }
@@ -608,7 +614,155 @@ fn list_nested() {
 }
 
 #[test]
-fn ordered_list_markers_use_terminal_palette_snapshot() {
+fn markdown_accents_follow_theme_scopes() {
+    use syntect::highlighting::Color;
+    use syntect::highlighting::StyleModifier;
+    use syntect::highlighting::Theme;
+    use syntect::highlighting::ThemeItem;
+
+    let theme = Theme {
+        scopes: [
+            ("markup.underline.link", (189, 147, 249)),
+            ("markup.list.numbered", (255, 184, 108)),
+        ]
+        .into_iter()
+        .map(|(scope, (r, g, b))| ThemeItem {
+            scope: scope.parse().unwrap(),
+            style: StyleModifier {
+                foreground: Some(Color { r, g, b, a: 255 }),
+                ..StyleModifier::default()
+            },
+        })
+        .collect(),
+        ..Theme::default()
+    };
+    let styles = MarkdownStyles::for_theme(&theme);
+    let link = ratatui::style::Style::new()
+        .fg(crate::terminal_palette::rgb_color((189, 147, 249)))
+        .underlined();
+    let marker =
+        ratatui::style::Style::new().fg(crate::terminal_palette::rgb_color((255, 184, 108)));
+    assert_eq!(styles.link, link);
+    assert_eq!(styles.ordered_list_marker, marker);
+
+    let markdown = "3. [**docs**](https://example.com)\n4. <https://example.org>";
+    let mut writer = super::Writer::new(markdown, Some(80), None, &|_| false);
+    writer.styles = styles;
+    writer.run(&mut pulldown_cmark::Parser::new(markdown).into_offset_iter());
+    let lines = crate::terminal_hyperlinks::visible_lines(writer.text);
+    let spans = lines
+        .iter()
+        .flat_map(|line| &line.spans)
+        .collect::<Vec<_>>();
+    assert!(spans.contains(&&Span::styled("3. ", marker)));
+    assert!(spans.contains(&&Span::styled("4. ", marker)));
+    assert!(spans.contains(&&Span::styled("docs", link.bold())));
+    assert!(spans.contains(&&Span::styled("https://example.org", link)));
+}
+
+#[test]
+fn markdown_accents_follow_bundled_themes() {
+    use ratatui::style::Color;
+    use ratatui::style::Style;
+
+    for (name, link, marker) in [
+        ("dracula", (139, 233, 253), (255, 121, 198)),
+        ("catppuccin-mocha", (137, 180, 250), (148, 226, 213)),
+        ("catppuccin-latte", (30, 102, 245), (23, 146, 153)),
+    ] {
+        let theme =
+            crate::render::highlight::resolve_theme_by_name(name, None).expect("bundled theme");
+        let styles = MarkdownStyles::for_theme(&theme);
+        assert_eq!(
+            styles.link,
+            Style::new()
+                .fg(Color::Rgb(link.0, link.1, link.2))
+                .underlined(),
+            "{name} links"
+        );
+        assert_eq!(
+            styles.ordered_list_marker,
+            Style::new().fg(Color::Rgb(marker.0, marker.1, marker.2)),
+            "{name} list markers"
+        );
+    }
+}
+
+#[test]
+fn dracula_markdown_code_links_distinguish_labels_destinations_and_punctuation() {
+    use crate::render::highlight;
+    use ratatui::style::Color;
+
+    let original_theme = highlight::current_syntax_theme();
+    highlight::set_syntax_theme(highlight::resolve_theme_by_name("dracula", None).unwrap());
+    let source = "[示例链接](https://example.com)";
+    let markdown = format!("```markdown\n{source}\n```\n");
+    let rendered = render_markdown_text(&markdown);
+    let streaming = Text::from(crate::terminal_hyperlinks::visible_lines(
+        super::render_streaming_markdown_lines_with_width_and_cwd(
+            &markdown,
+            None,
+            None,
+            &|_| false,
+            super::ListSpacing::default(),
+        )
+        .lines,
+    ));
+    highlight::set_syntax_theme(original_theme);
+
+    let expected = [
+        ("[", Color::Rgb(189, 147, 249)),
+        ("示例链接", Color::Rgb(255, 121, 198)),
+        ("](", Color::Rgb(189, 147, 249)),
+        ("https://example.com", Color::Rgb(139, 233, 253)),
+        (")", Color::Rgb(189, 147, 249)),
+    ]
+    .into_iter()
+    .flat_map(|(text, color)| text.chars().map(move |ch| (ch, Some(color))))
+    .collect::<Vec<_>>();
+    for text in [rendered, streaming] {
+        assert_eq!(plain_lines(&text), vec![source]);
+        let actual = text.lines[0]
+            .spans
+            .iter()
+            .flat_map(|span| span.content.chars().map(|ch| (ch, span.style.fg)))
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected);
+    }
+}
+
+#[test]
+fn markdown_accents_preserve_ansi_theme_palette() {
+    let theme =
+        crate::render::highlight::resolve_theme_by_name("ansi", None).expect("bundled ANSI theme");
+    let styles = MarkdownStyles::for_theme(&theme);
+    assert!(!matches!(
+        styles.link.fg,
+        Some(ratatui::style::Color::Rgb(..))
+    ));
+    assert!(!matches!(
+        styles.ordered_list_marker.fg,
+        Some(ratatui::style::Color::Rgb(..))
+    ));
+    assert!(styles.link.add_modifier.contains(Modifier::UNDERLINED));
+}
+
+#[test]
+fn markdown_accents_preserve_fallbacks_without_theme_scopes() {
+    let styles = MarkdownStyles::for_theme(&syntect::highlighting::Theme::default());
+    assert_eq!(
+        styles.link,
+        ratatui::style::Style::new().fg(accent_color()).underlined()
+    );
+    assert_eq!(
+        styles.ordered_list_marker,
+        ratatui::style::Style::new().light_blue()
+    );
+    assert_eq!(styles.unordered_list_marker, ratatui::style::Style::new());
+}
+
+#[test]
+fn ordered_list_markers_follow_syntax_theme_snapshot() {
     let text = render_markdown_text(
         "1. plain [plain](https://example.com) `code` [`code`](https://example.com)",
     );
@@ -619,8 +773,14 @@ fn ordered_list_markers_use_terminal_palette_snapshot() {
 fn list_ordered_custom_start() {
     let text = render_markdown_text("3. First\n4. Second\n");
     let expected = Text::from_iter([
-        Line::from_iter(["3. ".light_blue(), "First".into()]),
-        Line::from_iter(["4. ".light_blue(), "Second".into()]),
+        Line::from_iter([
+            Span::styled("3. ", MarkdownStyles::default().ordered_list_marker),
+            "First".into(),
+        ]),
+        Line::from_iter([
+            Span::styled("4. ", MarkdownStyles::default().ordered_list_marker),
+            "Second".into(),
+        ]),
     ]);
     assert_eq!(text, expected);
 }
@@ -630,11 +790,17 @@ fn nested_unordered_in_ordered() {
     let md = "1. Outer\n    - Inner A\n    - Inner B\n2. Next\n";
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
-        Line::from_iter(["1. ".light_blue(), "Outer".into()]),
+        Line::from_iter([
+            Span::styled("1. ", MarkdownStyles::default().ordered_list_marker),
+            "Outer".into(),
+        ]),
         Line::from_iter(["    • ", "Inner A"]),
         Line::from_iter(["    • ", "Inner B"]),
         Line::default(),
-        Line::from_iter(["2. ".light_blue(), "Next".into()]),
+        Line::from_iter([
+            Span::styled("2. ", MarkdownStyles::default().ordered_list_marker),
+            "Next".into(),
+        ]),
     ]);
     assert_eq!(text, expected);
 }
@@ -645,8 +811,14 @@ fn nested_ordered_in_unordered() {
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
         Line::from_iter(["• ", "Outer"]),
-        Line::from_iter(["    1. ".light_blue(), "One".into()]),
-        Line::from_iter(["    2. ".light_blue(), "Two".into()]),
+        Line::from_iter([
+            Span::styled("    1. ", MarkdownStyles::default().ordered_list_marker),
+            "One".into(),
+        ]),
+        Line::from_iter([
+            Span::styled("    2. ", MarkdownStyles::default().ordered_list_marker),
+            "Two".into(),
+        ]),
         Line::default(),
         Line::from_iter(["• ", "Last"]),
     ]);
@@ -658,11 +830,17 @@ fn loose_list_item_multiple_paragraphs() {
     let md = "1. First paragraph\n\n   Second paragraph of same item\n\n2. Next item\n";
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
-        Line::from_iter(["1. ".light_blue(), "First paragraph".into()]),
+        Line::from_iter([
+            Span::styled("1. ", MarkdownStyles::default().ordered_list_marker),
+            "First paragraph".into(),
+        ]),
         Line::default(),
         Line::from_iter(["   ", "Second paragraph of same item"]),
         Line::default(),
-        Line::from_iter(["2. ".light_blue(), "Next item".into()]),
+        Line::from_iter([
+            Span::styled("2. ", MarkdownStyles::default().ordered_list_marker),
+            "Next item".into(),
+        ]),
     ]);
     assert_eq!(text, expected);
 }
@@ -683,11 +861,20 @@ fn deeply_nested_mixed_three_levels() {
     let md = "1. A\n    - B\n        1. C\n2. D\n";
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
-        Line::from_iter(["1. ".light_blue(), "A".into()]),
+        Line::from_iter([
+            Span::styled("1. ", MarkdownStyles::default().ordered_list_marker),
+            "A".into(),
+        ]),
         Line::from_iter(["    • ", "B"]),
-        Line::from_iter(["        1. ".light_blue(), "C".into()]),
+        Line::from_iter([
+            Span::styled("        1. ", MarkdownStyles::default().ordered_list_marker),
+            "C".into(),
+        ]),
         Line::default(),
-        Line::from_iter(["2. ".light_blue(), "D".into()]),
+        Line::from_iter([
+            Span::styled("2. ", MarkdownStyles::default().ordered_list_marker),
+            "D".into(),
+        ]),
     ]);
     assert_eq!(text, expected);
 }
@@ -697,8 +884,14 @@ fn loose_items_due_to_blank_line_between_items() {
     let md = "1. First\n\n2. Second\n";
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
-        Line::from_iter(["1. ".light_blue(), "First".into()]),
-        Line::from_iter(["2. ".light_blue(), "Second".into()]),
+        Line::from_iter([
+            Span::styled("1. ", MarkdownStyles::default().ordered_list_marker),
+            "First".into(),
+        ]),
+        Line::from_iter([
+            Span::styled("2. ", MarkdownStyles::default().ordered_list_marker),
+            "Second".into(),
+        ]),
     ]);
     assert_eq!(text, expected);
 }
@@ -708,8 +901,14 @@ fn mixed_tight_then_loose_in_one_list() {
     let md = "1. Tight\n\n2.\n   Loose\n";
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
-        Line::from_iter(["1. ".light_blue(), "Tight".into()]),
-        Line::from_iter(["2. ".light_blue(), "Loose".into()]),
+        Line::from_iter([
+            Span::styled("1. ", MarkdownStyles::default().ordered_list_marker),
+            "Tight".into(),
+        ]),
+        Line::from_iter([
+            Span::styled("2. ", MarkdownStyles::default().ordered_list_marker),
+            "Loose".into(),
+        ]),
     ]);
     assert_eq!(text, expected);
 }
@@ -719,7 +918,10 @@ fn ordered_item_with_indented_continuation_is_tight() {
     let md = "1. Foo\n   Bar\n";
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
-        Line::from_iter(["1. ".light_blue(), "Foo".into()]),
+        Line::from_iter([
+            Span::styled("1. ", MarkdownStyles::default().ordered_list_marker),
+            "Foo".into(),
+        ]),
         Line::from_iter(["   ", "Bar"]),
     ]);
     assert_eq!(text, expected);
@@ -934,9 +1136,9 @@ fn strong_emphasis() {
 fn link() {
     let text = render_markdown_text("[Link](https://example.com)");
     let expected = Text::from(Line::from_iter([
-        "Link".fg(accent_color()).underlined(),
+        Span::styled("Link", MarkdownStyles::default().link),
         " (".into(),
-        "https://example.com".fg(accent_color()).underlined(),
+        Span::styled("https://example.com", MarkdownStyles::default().link),
         ")".into(),
     ]));
     assert_eq!(text, expected);
@@ -945,12 +1147,21 @@ fn link() {
 #[test]
 fn web_link_labels_use_link_style_and_preserve_inline_formatting() {
     for (label, expected_label) in [
-        ("plain", "plain".fg(accent_color()).underlined()),
-        ("`code`", "code".fg(accent_color()).underlined()),
-        ("**bold**", "bold".fg(accent_color()).bold().underlined()),
+        (
+            "plain",
+            Span::styled("plain", MarkdownStyles::default().link),
+        ),
+        (
+            "`code`",
+            Span::styled("code", MarkdownStyles::default().link),
+        ),
+        (
+            "**bold**",
+            Span::styled("bold", MarkdownStyles::default().link).bold(),
+        ),
         (
             "*italic*",
-            "italic".fg(accent_color()).italic().underlined(),
+            Span::styled("italic", MarkdownStyles::default().link).italic(),
         ),
     ] {
         let text = render_markdown_text(&format!(
@@ -960,7 +1171,7 @@ fn web_link_labels_use_link_style_and_preserve_inline_formatting() {
             "before ".into(),
             expected_label,
             " (".into(),
-            "https://example.com".fg(accent_color()).underlined(),
+            Span::styled("https://example.com", MarkdownStyles::default().link),
             ")".into(),
             " after ".into(),
             Span::styled("code", MarkdownStyles::default().code),
@@ -989,9 +1200,9 @@ fn web_link_labels_keep_link_style_in_wrapped_prose_and_tables() {
             assert_eq!(
                 labels,
                 vec![
-                    "plain".fg(accent_color()).underlined(),
-                    "code".fg(accent_color()).underlined(),
-                    "<b>".fg(accent_color()).underlined()
+                    Span::styled("plain", MarkdownStyles::default().link),
+                    Span::styled("code", MarkdownStyles::default().link),
+                    Span::styled("<b>", MarkdownStyles::default().link)
                 ]
             );
         }
@@ -1348,9 +1559,9 @@ fn file_link_uses_target_path_for_hash_range() {
 fn url_link_shows_destination() {
     let text = render_markdown_text("[docs](https://example.com/docs)");
     let expected = Text::from(Line::from_iter([
-        "docs".fg(accent_color()).underlined(),
+        Span::styled("docs", MarkdownStyles::default().link),
         " (".into(),
-        "https://example.com/docs".fg(accent_color()).underlined(),
+        Span::styled("https://example.com/docs", MarkdownStyles::default().link),
         ")".into(),
     ]));
     assert_eq!(text, expected);
@@ -1838,9 +2049,15 @@ fn nested_five_levels_mixed_lists() {
     let md = "1. First\n   - Second level\n     1. Third level (ordered)\n        - Fourth level (bullet)\n          - Fifth level to test indent consistency\n";
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
-        Line::from_iter(["1. ".light_blue(), "First".into()]),
+        Line::from_iter([
+            Span::styled("1. ", MarkdownStyles::default().ordered_list_marker),
+            "First".into(),
+        ]),
         Line::from_iter(["    • ", "Second level"]),
-        Line::from_iter(["        1. ".light_blue(), "Third level (ordered)".into()]),
+        Line::from_iter([
+            Span::styled("        1. ", MarkdownStyles::default().ordered_list_marker),
+            "Third level (ordered)".into(),
+        ]),
         Line::from_iter(["            • ", "Fourth level (bullet)"]),
         Line::from_iter([
             "                • ",
@@ -1875,7 +2092,10 @@ fn html_in_tight_ordered_item_soft_breaks_with_space() {
     let md = "1. Foo\n   <i>Bar</i>\n";
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
-        Line::from_iter(["1. ".light_blue(), "Foo".into()]),
+        Line::from_iter([
+            Span::styled("1. ", MarkdownStyles::default().ordered_list_marker),
+            "Foo".into(),
+        ]),
         Line::from_iter(["   ", "<i>", "Bar", "</i>"]),
     ]);
     assert_eq!(text, expected);
@@ -1923,7 +2143,10 @@ fn ordered_item_continuation_paragraph_is_indented() {
     let md = "1. Intro\n\n   More details about intro\n";
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
-        Line::from_iter(["1. ".light_blue(), "Intro".into()]),
+        Line::from_iter([
+            Span::styled("1. ", MarkdownStyles::default().ordered_list_marker),
+            "Intro".into(),
+        ]),
         Line::default(),
         Line::from_iter(["   ", "More details about intro"]),
     ]);
@@ -1935,12 +2158,18 @@ fn nested_item_continuation_paragraph_is_indented() {
     let md = "1. A\n    - B\n\n      Continuation for B\n2. C\n";
     let text = render_markdown_text(md);
     let expected = Text::from_iter([
-        Line::from_iter(["1. ".light_blue(), "A".into()]),
+        Line::from_iter([
+            Span::styled("1. ", MarkdownStyles::default().ordered_list_marker),
+            "A".into(),
+        ]),
         Line::from_iter(["    • ", "B"]),
         Line::default(),
         Line::from_iter(["      ", "Continuation for B"]),
         Line::default(),
-        Line::from_iter(["2. ".light_blue(), "C".into()]),
+        Line::from_iter([
+            Span::styled("2. ", MarkdownStyles::default().ordered_list_marker),
+            "C".into(),
+        ]),
     ]);
     assert_eq!(text, expected);
 }
