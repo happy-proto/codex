@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -790,11 +791,63 @@ if os.environ.get("CORRUPT_AXEL") == "1":
         requests = (self.network / "requests.jsonl").read_text().splitlines()
         self.assertTrue(all(not json.loads(line)["headers"] for line in requests))
 
+    def test_empty_legacy_directory_does_not_block_installation(self):
+        """取得系统锁后可移除旧空目录锁，不阻塞正常安装。"""
+        self.prepare_build("a")
+        legacy = self.home / "packages/standalone/fork-install.lock"
+        legacy.mkdir(parents=True)
+        self.install()
+        self.assertFalse(legacy.exists())
+
+    def test_unknown_contents_in_legacy_lock_are_preserved(self):
+        """旧目录锁含有未知文件时拒绝自动移除，保留原内容。"""
+        self.prepare_build("a")
+        legacy = self.home / "packages/standalone/fork-install.lock"
+        legacy.mkdir(parents=True)
+        (legacy / "unknown").write_text("preserve")
+        self.install(succeeds=False)
+        self.assertEqual((legacy / "unknown").read_text(), "preserve")
+
+    def test_sigkill_releases_installer_lock(self):
+        """安装器在下载阶段被强杀后，下一次仍可安装，锁文件本身保持原 inode。"""
+        self.prepare_build("a")
+        ready = self.root / "ready"
+        curl = self.tools / "curl"
+        original = curl.read_text()
+        curl.write_text(
+            original.replace(
+                "args = sys.argv[1:]",
+                'import time\npathlib.Path(os.environ["INSTALL_READY"]).write_text("ready")\ntime.sleep(60)\nargs = sys.argv[1:]',
+            )
+        )
+        owner = subprocess.Popen(
+            ["sh", str(Path(__file__).with_name("install.sh"))],
+            env={**self.env, "INSTALL_READY": str(ready)},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        try:
+            deadline = time.monotonic() + 5
+            while not ready.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(ready.exists())
+            lock = self.home / "packages/standalone/install.lock"
+            inode = lock.stat().st_ino
+        finally:
+            os.killpg(owner.pid, signal.SIGKILL)
+            owner.communicate(timeout=5)
+            curl.write_text(original)
+        self.install()
+        self.assertEqual(lock.stat().st_ino, inode)
+
     @unittest.skipUnless(sys.platform == "darwin", "macOS advisory lock")
     def test_official_installer_lock_prevents_fork_selection(self):
         self.prepare_build("a")
         root = self.home / "packages/standalone"
         root.mkdir(parents=True)
+        legacy = root / "fork-install.lock"
+        legacy.mkdir()
         owner = subprocess.Popen(
             [
                 "/usr/bin/lockf",
@@ -813,6 +866,7 @@ if os.environ.get("CORRUPT_AXEL") == "1":
             self.assertEqual(owner.stdout.readline().strip(), "locked")
             self.install(succeeds=False)
             self.assertFalse((root / "current").exists())
+            self.assertTrue(legacy.is_dir())
         finally:
             os.killpg(owner.pid, signal.SIGTERM)
             owner.wait()

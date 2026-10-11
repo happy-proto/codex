@@ -33,10 +33,8 @@ else command -v python3 >/dev/null; command -v flock >/dev/null; fi
 mkdir -p "$ROOT/releases" "$BIN_DIR"
 ROOT="$(cd -P "$ROOT" && pwd)"
 tmp="$(mktemp -d)"
-locked=false
 cleanup() {
   rm -rf "$tmp"
-  if [ "$locked" = true ]; then rmdir "$ROOT/fork-install.lock"; fi
 }
 trap cleanup EXIT
 trap 'exit 130' INT
@@ -50,8 +48,15 @@ if [ "$platform" = Darwin ]; then
 else
   flock -n 9 || { echo 'Another installer is running.' >&2; exit 1; }
 fi
-mkdir "$ROOT/fork-install.lock" || { echo 'Another fork installer is running.' >&2; exit 1; }
-locked=true
+# 系统锁随进程退出自动释放，包括 SIGKILL；不要删除锁文件，否则会拆分锁的 inode。
+# 旧安装器也持有上述系统锁，取得排他锁后才可迁移遗留的空目录锁。
+legacy_lock="$ROOT/fork-install.lock"
+if [ -e "$legacy_lock" ] || [ -L "$legacy_lock" ]; then
+  if [ -L "$legacy_lock" ] || [ ! -d "$legacy_lock" ] || ! rmdir "$legacy_lock"; then
+    echo "Refusing to remove unexpected legacy installer lock: $legacy_lock" >&2
+    exit 1
+  fi
+fi
 
 download() {
   if [ "${3:-}" = package ] && command -v axel >/dev/null 2>&1; then
