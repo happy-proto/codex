@@ -6,6 +6,8 @@
   <key>name</key><string>Dracula Markdown overrides</string>
   <key>settings</key>
   <array>
+    <!-- syntect 将第一项作为全局设置；覆盖文件仅提供 scope 规则，保留原主题全局配色。 -->
+    <dict><key>settings</key><dict/></dict>
     <dict>
       <key>scope</key><string>markup.underline.link.markdown</string>
       <key>settings</key><dict><key>foreground</key><string>#8BE9FD</string></dict>
@@ -15,7 +17,7 @@
       <key>settings</key><dict><key>foreground</key><string>#FF79C6</string></dict>
     </dict>
     <dict>
-      <key>scope</key><string>punctuation.definition.link.markdown, punctuation.definition.metadata.markdown</string>
+      <key>scope</key><string>punctuation.definition.link.begin.markdown, punctuation.definition.link.end.markdown, punctuation.definition.metadata.begin.markdown, punctuation.definition.metadata.end.markdown</string>
       <key>settings</key><dict><key>foreground</key><string>#BD93F9</string></dict>
     </dict>
   </array>
