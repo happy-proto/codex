@@ -64,6 +64,11 @@ Fork 的更新渠道只选择 fork 发行版，上游 alpha 同步由维护者�
 
 ## Fork 功能
 
+- **Markdown 主题配色**：链接和有序列表编号使用 `/theme` 选中主题的 Markdown 颜色，
+  链接保留下划线；主题未定义对应颜色时沿用原有回退。自定义 `.tmTheme` 可通过
+  `markup.underline.link.markdown`（或 `markup.link.markdown`）设置链接颜色，
+  通过 `markup.list.numbered.markdown` 设置编号颜色，也支持主题常用的列表标点 scope。
+  跟踪 [上游 issue #47497](https://github.com/openai/codex/issues/47497)。
 - **MCP 列表展示**：`codex mcp list` 默认按服务器显示紧凑信息块，将名称、启用状态和
   传输类型与命令、参数、URL、认证状态分层展示；长字段换行，环境变量值继续脱敏。
   终端输出使用少量状态颜色，重定向、`NO_COLOR` 和 `TERM=dumb` 时关闭配色。
