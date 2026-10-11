@@ -398,11 +398,13 @@ pub(crate) fn resolve_theme_by_name(name: &str, codex_home: Option<&Path>) -> Op
     if let Some(embedded) = parse_theme_name(name) {
         let mut theme = ts.get(embedded).clone();
         if embedded == EmbeddedThemeName::Dracula {
-            let markdown = ThemeSet::load_from_reader(&mut std::io::Cursor::new(include_bytes!(
-                "../../assets/themes/dracula-markdown.tmTheme"
-            )))
+            let mut markdown = ThemeSet::load_from_reader(&mut std::io::Cursor::new(
+                include_bytes!("../../assets/themes/dracula-markdown.tmTheme"),
+            ))
             .expect("bundled Dracula Markdown overrides must be valid");
-            theme.scopes.extend(markdown.scopes);
+            // syntect 在匹配优先级相同时保留先出现的规则，因此覆盖规则必须在原主题之前。
+            markdown.scopes.extend(theme.scopes);
+            theme.scopes = markdown.scopes;
         }
         return Some(theme);
     }
