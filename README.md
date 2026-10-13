@@ -1,181 +1,37 @@
 # Codex 个人 fork
 
 这是 [happy-proto/codex](https://github.com/happy-proto/codex)，基于
-[OpenAI Codex](https://github.com/openai/codex) 的个人 fork。跟进上游 **alpha**
-版本，用 `main` 和 `fork` 两个分支维护自定义功能。公开提供可复现的安装方式，暂不承诺大众支持。
+[OpenAI Codex](https://github.com/openai/codex)，跟进上游 alpha 版本。
 
-- `main`：选定上游 alpha Release 的原始提交。
-- `fork`：包含全部自有改动，也是默认分支；直接在此维护，不再建立功能 PR。
-- 每个改造点在 [编号改造记录](docs/fork-changes/README.md) 中持续记录动机、实现和维护边界。
-- 不新增 i18n，也不分发官方 Desktop 应用。
+主要改造包括中文 Markdown 与主题配色、OSC 7 工作目录、列表展示、
+显式 skill 调用、容量错误无限重试，以及会话名称同步。
+完整说明见 [编号改造记录](docs/fork-changes/README.md)。
 
-## 安装此 fork
+## 安装
 
-支持 macOS Apple Silicon 和 Linux AMD64（glibc，建议 Ubuntu 24.04 或更新版本）。
-完整包包含 code-mode host 和 ripgrep，Linux 还包含 bubblewrap sandbox；从上游
-`0.163.0-alpha.1` 起不再附带补丁 zsh，执行命令沿用上游的系统 shell 路径。
-macOS 采用 ad-hoc 签名，未经 Apple 公证；首次运行时可能需要手动批准。
-Linux 安装器需要 Python 3、flock、tar 和 xz；macOS 使用系统自带工具。
+支持 macOS Apple Silicon 和 Linux AMD64（glibc）。
+Linux 需要 Python 3、flock、tar 和 xz；macOS 包采用 ad-hoc 签名。
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork/install.sh | sh
-codex --version
 ```
 
-安装器选择已发布的 fork alpha Release，验证安装包 SHA-256，保留上一个安装包，
-并替换 `~/.local/bin` 中的 `codex`。可用 `CODEX_HOME` 和 `CODEX_INSTALL_DIR` 指定路径。
-安装器与官方安装器共用系统文件锁，异常退出（含强制终止）后由操作系统自动释放，
-不删除锁文件。取得排他锁后仅移除旧版遗留的空目录锁，未知内容保持原状并停止安装。
-安装包下载检测到 `axel` 时使用其默认并行度，失败后清理未完成的文件并回退到 curl；
-未安装 axel 时直接使用 curl。元数据始终用 curl 获取，安装前仍校验整个包的 SHA-256。
-新安装包使用 `tar.xz`，发布时通过 `xz -9 -T0` 自动选择压缩并行度；安装器使用
-系统 tar 解压，并继续支持已发布的 macOS `tar.gz` 历史包。自行下载的脚本应读取
-`fork-release.json` 中的 `packages.<target>.asset` 和 `sha256`；顶层 `asset` / `sha256`
-仍描述 macOS 包，历史单平台清单沿用原有字段。不要固定 gzip 后缀或解压参数。
-继续使用现有 Codex 目录中的配置、凭据和会话。按需将 `~/.local/bin` 加入 PATH；
-如果同时安装了 npm/Homebrew 版本，可以保留独立管理，或在确定不用后移除。
+默认安装到 `~/.local/bin`，继续使用现有配置、凭据和会话。
+请将该目录加入 PATH，再运行 `codex`。
+
+## 更新与回退
+
+启动时只提示新版本，使用以下命令主动更新或回退：
 
 ```sh
-codex update            # 手动更新，默认关闭后台升级
-# 回退到此前安装的包：
+codex update
 curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork/install.sh | sh -s -- --rollback
 ```
 
-启动后在后台异步检查 fork Release，优先使用 `GH_TOKEN`、`GITHUB_TOKEN` 或已登录的 `gh`。
-发现新构建只显示一次 warning，不等待网络、不弹更新选择框，也不自动安装；使用 `codex update`
-主动更新。设置 `check_for_update_on_startup = false` 可同时关闭后台检查与提示。
-
-版本沿用上游 alpha 并添加 `.fork.N`，例如 `0.163.0-alpha.5.fork.1`。
-同一 alpha 每次发布递增序号，新 alpha 从 1 开始；失败构建可能留下序号空缺。
-每次 `fork` 更新验证通过后自动发布独立 Release 和 tag，已发布版本不覆盖更新。
-macOS 和 Linux 并行构建并共享版本号，通过测试和两平台验收后统一发布。
-每个 Release 的平台包使用固定文件名，不附带提交或摘要；`fork-release.json`
-记录源提交、上游提交和每个平台包的 SHA-256。更新检查按上游 alpha、fork 序号数字排序。
-旧 `.fork` 安装可直接执行 `codex update` 迁移；旧版启动检查无法识别新后缀，首次需要手动更新。
-发布后清理超过 7 天的 fork Release 及对应 tag，按发布时间最新三个已发布版本始终保留；
-没有 Release 的旧 fork tag 按 tagger 时间（轻量 tag 使用提交时间）清理。
-远端清理不删除本地保留的安装包，仍可 `--rollback`。
-Fork 的更新渠道只选择 fork 发行版，上游 alpha 同步由维护者发起。
-
-安装器查询 GitHub API 时优先使用已安装且登录 GitHub.com 的 `gh` 凭据，
-认证仅用于 API 查询；未安装或未登录 `gh` 时使用匿名请求，可能受出口 IP 的限流影响。
-
-首次从官方独立安装包切换时，还会将其保留在
-`~/.codex/packages/standalone/official-before-fork`。
-需要返回官方版本时，可重新运行下方官方安装器并指定所需版本。
-
-## Fork 功能
-
-- [独立的 alpha 分发、更新与安装](docs/fork-changes/0001-distribution-and-updates.md)。
-- [OSC 7 终端工作目录](docs/fork-changes/0002-terminal-working-directory.md)。
-- [中文 Markdown 加粗](docs/fork-changes/0003-cjk-emphasis.md)。
-- [功能列表输出格式](docs/fork-changes/0004-features-list.md)。
-- [MCP 列表展示与兼容输出](docs/fork-changes/0005-mcp-list.md)。
-- [Markdown 链接与列表主题配色](docs/fork-changes/0006-markdown-theme.md)。
-- [工作中显式调用 skill 的正文注入](docs/fork-changes/0007-steered-skills.md)。
-- [容量错误无限重试，间隔最多五分钟](docs/fork-changes/0008-capacity-retries.md)。
-- [已打开会话的 status line 和终端标题名称同步](docs/fork-changes/0009-thread-name-refresh.md)。
-
 ## 维护
 
-通用规则见 [AGENTS.md](AGENTS.md)，具体操作见仓库内的
-[维护 skill](.agents/skills/codex-fork-maintenance/SKILL.md)。
-本地只做轻量验证，编译和重型测试交给 GitHub Actions。
-[Fork 工作流](.github/workflows/fork.yml) 验证安装契约、构建并签名完整包、
-测试更新行为，并在发布前验收实际 CLI 和 app-server。
-依赖 OpenAI 基础设施的上游工作流已在此 fork 的 GitHub 设置中禁用。
-推送 `fork` 后由 Fork 工作流对完整版本执行构建和 Rust 测试；
-不再维护 PR 专用检查或 stack。
-通用 Rust 测试在 Linux x64 上运行；完整包通过平台 matrix 在 Linux x64 和 ARM macOS
-runner 并行构建，每个平台验证安装契约、真实 CLI 和 app-server；签名只在 macOS 执行。
-标准 macOS runner 上保留产物的 release 优化，关闭跨 crate Thin LTO。
-Rust 测试与构建并行，保留 release 条件编译及关闭 debug assertions，禁用测试优化以控制成本。
-Rust 编译通过 mbx 的 objects 模式缓存本次构建使用的对象，Cargo 下载目录单独缓存，
-不重复归档整个 target。构建和测试分别维护缓存，手动完整实验可预热但默认不发布。
-CI 上传 mbx 缓存统计和 Cargo 耗时报告，分别观察产物和测试构建；构建失败时也尽量保留报告。
+`main` 保存选定上游版本，`fork` 保存全部改造；推送 `fork` 后由 CI 验证并发布。
+维护规则见 [AGENTS.md](AGENTS.md)，操作方法见 [维护 skill](.agents/skills/codex-fork-maintenance/SKILL.md)。
+安装、版本和发布细节见 [分发与更新说明](docs/fork-changes/0001-distribution-and-updates.md)。
 
-下方保留的上游介绍与安装说明指向 **官方版本**，不用于安装此 fork。
-
----
-
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
-<p align="center">
-  <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
-</p>
-</br>
-If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
-</br>If you want the desktop app experience, run <code>codex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
-</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
-
----
-
-## Quickstart
-
-### Installing and running Codex CLI
-
-Run the following on Mac or Linux to install Codex CLI:
-
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
-```
-
-Run the following on Windows to install Codex CLI:
-
-```shell
-powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
-```
-
-The standalone installers download from `https://releases.openai.com/codex` by default and fall back to GitHub Releases if a metadata or asset download is unavailable. To force GitHub Releases, set `CODEX_INSTALLER_USE_RELEASES_OPENAI_COM` to `false` (`0` and `no` are also accepted):
-
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALLER_USE_RELEASES_OPENAI_COM=false sh
-```
-
-```powershell
-$env:CODEX_INSTALLER_USE_RELEASES_OPENAI_COM='false'; irm https://chatgpt.com/codex/install.ps1 | iex
-```
-
-Codex CLI can also be installed via the following package managers:
-
-```shell
-# Install using npm
-npm install -g @openai/codex
-```
-
-```shell
-# Install using Homebrew
-brew install --cask codex
-```
-
-Then simply run `codex` to get started.
-
-<details>
-<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
-
-Each GitHub Release contains many executables, but in practice, you likely want one of these:
-
-- macOS
-  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
-  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
-- Linux
-  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
-  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
-
-Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
-
-</details>
-
-### Using Codex with your ChatGPT plan
-
-Run `codex` and select **Sign in with ChatGPT**. We recommend signing into your ChatGPT account to use Codex as part of your Plus, Pro, Business, Edu, or Enterprise plan. [Learn more about what's included in your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt).
-
-You can also use Codex with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
-
-## Docs
-
-- [**Codex Documentation**](https://developers.openai.com/codex)
-- [**Contributing**](./docs/contributing.md)
-- [**Installing & building**](./docs/install.md)
-- [**Open source fund**](./docs/open-source-fund.md)
-
-This repository is licensed under the [Apache-2.0 License](LICENSE).
+[上游介绍与文档](docs/upstream-readme.md) · [Apache-2.0 License](LICENSE)
