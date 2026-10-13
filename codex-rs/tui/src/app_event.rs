@@ -802,6 +802,14 @@ pub(crate) enum AppEvent {
         result: Result<ThreadUsageOutcome, String>,
     },
 
+    /// Metadata-only read for low-frequency status-line and terminal-title reconciliation.
+    ThreadNameRefreshed {
+        request_id: uuid::Uuid,
+        thread_id: ThreadId,
+        revision: uuid::Uuid,
+        result: Result<Option<String>, String>,
+    },
+
     /// Result of fetching usage for the selected dashboard task.
     AgentsOverviewUsageLoaded {
         thread_id: ThreadId,

@@ -229,6 +229,7 @@ impl ChatWidget {
             pet_image_support_override: None,
             thread_id: None,
             thread_name: None,
+            thread_name_revision: uuid::Uuid::new_v4(),
             thread_rename_block_message: None,
             active_side_conversation: false,
             blocks_direct_input: false,
