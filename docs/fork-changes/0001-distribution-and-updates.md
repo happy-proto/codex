@@ -26,6 +26,7 @@ Rust 编译使用 mbx 对象缓存，下载缓存独立维护。
 
 **Breaking change**：新包采用 tar.xz，下载脚本须读取清单而不是拼 tar.gz 文件名；历史 gzip 包仍可安装。
 启动时不再弹更新选择框，使用 `codex update`；需要 daemon 自动更新时显式开启设置。
+根 README 只保留使用入口，[上游英文说明](../upstream-readme.md) 独立保存；同步上游时更新该说明并核对相对链接。
 同步时核对上游 package builder、资源布局、签名和更新入口。macOS 包为 ad-hoc 签名，Linux 包依赖 glibc。
 验证必须区分 CI、发布产物和本机实际安装，不能仅凭版本输出判断完整包可用。
 历史设计讨论：[PR #1](https://github.com/happy-proto/codex/pull/1)。
