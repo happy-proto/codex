@@ -131,31 +131,71 @@ async fn capacity_retry_wait_can_be_cancelled() {
     );
 }
 
-/// Internal approval reviews retain their independent retry/deadline policy.
+/// Excluding Guardian must not disable capacity retries for ordinary subagents.
+#[tokio::test(start_paused = true)]
+async fn ordinary_subagent_capacity_failure_retries_without_stream_budget() {
+    use codex_protocol::protocol::SessionSource;
+    use codex_protocol::protocol::SubAgentSource;
+
+    for source in [
+        SubAgentSource::Review,
+        SubAgentSource::Other("worker".to_string()),
+    ] {
+        let (session, mut turn_context) = make_session_and_context().await;
+        turn_context.session_source = SessionSource::SubAgent(source);
+        let step_context = StepContext::for_test(Arc::new(turn_context));
+        let mut client_session = session.services.model_client.new_session();
+        let mut retry_state = ResponsesStreamRetryState::default();
+        handle_response_stream_error(
+            &mut retry_state,
+            /*max_retries*/ 0,
+            CodexErr::ServerOverloaded,
+            &mut client_session,
+            &session,
+            &step_context,
+            ResponsesStreamRequest::Sampling,
+        )
+        .await
+        .expect("ordinary subagents retain unbounded capacity retries");
+        assert_eq!(retry_state.capacity_retries, 1);
+        assert_eq!(retry_state.retries, 0);
+    }
+}
+
+/// Both Guardian source representations retain the approval retry policy.
 #[tokio::test(start_paused = true)]
 async fn internal_capacity_failure_is_not_retried_indefinitely() {
     use codex_protocol::protocol::InternalSessionSource;
     use codex_protocol::protocol::SessionSource;
+    use codex_protocol::protocol::SubAgentSource;
 
-    let (session, mut turn_context) = make_session_and_context().await;
-    turn_context.session_source = SessionSource::Internal(InternalSessionSource::Guardian);
-    let step_context = StepContext::for_test(Arc::new(turn_context));
-    let mut client_session = session.services.model_client.new_session();
-    let mut retry_state = ResponsesStreamRetryState::default();
-    let result = handle_response_stream_error(
-        &mut retry_state,
-        /*max_retries*/ 0,
-        CodexErr::ServerOverloaded,
-        &mut client_session,
-        &session,
-        &step_context,
-        ResponsesStreamRequest::Sampling,
-    )
-    .await;
-    assert!(
-        matches!(result, Err(err) if matches!(err.details(), codex_protocol::error::CodexErrorDetails::ServerOverloaded))
-    );
-    assert_eq!(retry_state.capacity_retries, 0);
+    for source in [
+        SessionSource::Internal(InternalSessionSource::Guardian),
+        SessionSource::Internal(InternalSessionSource::MemoryConsolidation),
+        SessionSource::SubAgent(SubAgentSource::Other(
+            crate::guardian::GUARDIAN_REVIEWER_NAME.to_string(),
+        )),
+    ] {
+        let (session, mut turn_context) = make_session_and_context().await;
+        turn_context.session_source = source;
+        let step_context = StepContext::for_test(Arc::new(turn_context));
+        let mut client_session = session.services.model_client.new_session();
+        let mut retry_state = ResponsesStreamRetryState::default();
+        let result = handle_response_stream_error(
+            &mut retry_state,
+            /*max_retries*/ 0,
+            CodexErr::ServerOverloaded,
+            &mut client_session,
+            &session,
+            &step_context,
+            ResponsesStreamRequest::Sampling,
+        )
+        .await;
+        assert!(
+            matches!(result, Err(err) if matches!(err.details(), codex_protocol::error::CodexErrorDetails::ServerOverloaded))
+        );
+        assert_eq!(retry_state.capacity_retries, 0);
+    }
 }
 
 #[tokio::test]
