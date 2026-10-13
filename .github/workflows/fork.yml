@@ -294,6 +294,12 @@ jobs:
           # subscriber isolated from the other skill tests.
           mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::skills:: -- --test-threads=1
           mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all steered_explicit_only_skill_respects_blocked_queued_prompt
+      - name: 验证已打开会话的名称同步
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: |
+          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib thread_name_refresh
+          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib refreshed_thread_name
       - name: 验证模型容量错误的无限退避重试
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs

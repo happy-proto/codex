@@ -2066,6 +2066,14 @@ impl App {
             } => {
                 self.finish_thread_usage_refresh(tui, thread_id, request_id, result)?;
             }
+            AppEvent::ThreadNameRefreshed {
+                request_id,
+                thread_id,
+                revision,
+                result,
+            } => {
+                self.finish_thread_name_refresh(request_id, thread_id, revision, result);
+            }
             AppEvent::AgentsOverviewUsageLoaded { thread_id, request_id, result } => {
                 self.finish_agents_overview_usage(thread_id, request_id, result);
             }
