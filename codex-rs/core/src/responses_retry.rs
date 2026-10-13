@@ -94,6 +94,7 @@ pub(crate) async fn handle_response_stream_error(
     };
     if matches!(err.details(), CodexErrorDetails::ServerOverloaded)
         && !turn_context.session_source.is_internal()
+        && !crate::guardian::is_basic_session_source(&turn_context.session_source)
     {
         let delay = retry_state
             .capacity_retry_delay
