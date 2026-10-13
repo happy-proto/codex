@@ -808,7 +808,11 @@ fn run_update_action(
     }
     println!();
     let cmd_str = action.command_str();
-    println!("Updating Codex via `{cmd_str}`...");
+    if action == UpdateAction::StandaloneUnix {
+        println!("Updating Codex\n");
+    } else {
+        println!("Updating Codex via `{cmd_str}`...");
+    }
     let status = {
         #[cfg(windows)]
         {
@@ -850,7 +854,9 @@ fn run_update_action(
     if !status.success() {
         anyhow::bail!("`{cmd_str}` failed with status {status}");
     }
-    println!("\n🎉 Update ran successfully! Please restart Codex.");
+    if action != UpdateAction::StandaloneUnix {
+        println!("\n🎉 Update ran successfully! Please restart Codex.");
+    }
     Ok(())
 }
 
