@@ -1,7 +1,7 @@
 # Codex 个人 fork
 
-这是 [happy-proto/codex](https://github.com/happy-proto/codex)，基于
-[OpenAI Codex](https://github.com/openai/codex)，跟进上游 alpha 版本。
+这是个人自用的 [Codex CLI](https://github.com/openai/codex) fork，跟进上游 alpha 版本。
+官方 CLI 的一些功能需求和 Bug Issue 长期排不上期，因此在这里维护自己需要的功能和修复。
 
 主要改造包括中文 Markdown 与主题配色、OSC 7 工作目录、列表展示、
 显式 skill 调用、容量错误无限重试，以及会话名称同步。
