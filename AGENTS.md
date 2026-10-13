@@ -1,23 +1,24 @@
 # Fork 开发
 
-本仓库是个人 fork `happy-proto/codex`。修改 fork、维护 PR stack、同步上游 alpha、
+本仓库是个人 fork `happy-proto/codex`。修改 fork、维护改造记录、同步上游 alpha、
 发布或安装时，使用 [维护 skill](.agents/skills/codex-fork-maintenance/SKILL.md)。
 
 - `origin` 指向 `happy-proto/codex`，`upstream` 指向 `openai/codex`。
 - `main` 保持选定上游 alpha Release 的原始提交，不包含 fork 修改。
-- `fork` 是完整 stack 的顶部及默认分支；功能 PR 长期开启，不合并进 `main`。
-- 栈底保留一个长期杂项 PR，集中维护 fork 规范、构建、发布、安装、更新及相关小修正；
-  独立产品功能在其上分别建层。
-- 按维护目的确定修改归属：已有功能的修复、测试和文档留在原层，新需求单独建层；修改下层后重放依赖层。
-- 每个 PR 相对直接 base 默认只保留一个独有 commit，不计入下层继承的提交。
-  更新已有层时，将本轮变更整理进该层提交，再重放依赖层，以减少重复解决 rebase 冲突。
-  确有必要保留多个提交时，在 PR 正文说明原因；提交整理仍遵循本轮的 commit 和 push 授权范围。
+- `fork` 是默认分支，保存全部自有改动；直接在此维护，不建立长期功能分支、PR 或 stack。
+  远端只保留 `main` 和 `fork`；确需临时验证分支或 worktree 时，完成后清理。
+- 用 `git diff main..fork` 核对实际改动，维护索引见 [编号改造记录](docs/fork-changes/README.md)。
+  每个改造点对应一个 `NNNN-主题.md`，说明动机、实现、代码入口、验证和同步上游的注意事项。
+  修改现有改造时同步更新对应记录；新增改造使用下一个编号，编号不重用。
+  上游吸收或移除改造时保留记录并标明状态，不让文档误报仍有差异。
+- 按改造点组织清晰的英文 Conventional Commits；不再设置每个 PR 的提交数约定。
+  编号对应改造点，不绑定分支、PR 或固定 commit SHA。提交、推送和历史改写仍遵循当前任务授权。
 - 保留上游许可证和声明，不新增 i18n；不为了方便 fork 维护而改变上游 API。
 - 功能裁剪以实测构建收益和长期上游同步成本为依据，优先采用修改集中、维护成本低的方案。
   不为少量耗时收益大范围删除上游功能或增加复杂条件分支。
 - 沿用 Rust/Cargo/just 工具链。本机性能有限，只做格式、静态检查、定向脚本测试和已构建产物验收。
   编译、release 构建、全量或其它重型测试交给 GitHub Actions，未经用户明确要求不在本地执行。
-- 本 fork 的 PR 标题和正文用中文，commit message 用英文。
+- Fork 自有维护说明使用中文；用户另行要求 PR 时，标题和正文用中文，commit message 用英文。
 
 ## 维护本文件与 skill
 
