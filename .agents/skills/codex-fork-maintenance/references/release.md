@@ -32,10 +32,9 @@ V8、rg 继续由上游下载器校验和获取，不额外缓存下载资源。
 使用 mbx Action 默认的对象库布局，避免隔离模式清理只读 build-script 输出时的权限错误。
 每次导出只包含该 job 的构建闭包，不归档整个历史对象库；runner 在 job 结束后销毁。
 
-先在默认分支 `fork` 预热；其它分支可读取默认分支缓存，默认分支不能反向读取功能分支的私有缓存。
-因此各功能 PR 使用独立的 `fork-pr.yml`，只定义轻量脚本检查，更新后取消旧检查。
-`fork.yml` 只接受集成顶部的 push 和手动触发，避免 PR 创建注定跳过的重型 Job；
-用 workflow_dispatch 按需验证指定层。
+在默认分支 `fork` 预热和保存正式缓存。
+`fork.yml` 接受 `fork` 的 push 和手动触发；提交直接在 `fork` 维护，
+没有功能 PR 专用工作流。需要快速反馈时用 workflow_dispatch 指定测试过滤条件。
 手动实验默认不发布，`publish=true` 才请求发布 fork；受信任的手动完整验证允许保存缓存。
 只需验证 TUI 回归时，手动指定 `tui_test_filter`；该模式只运行匹配的 TUI 库测试，
 跳过产物构建、其它 Rust 测试及发布，不受 `publish` 输入影响。

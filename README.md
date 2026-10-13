@@ -2,11 +2,11 @@
 
 这是 [happy-proto/codex](https://github.com/happy-proto/codex)，基于
 [OpenAI Codex](https://github.com/openai/codex) 的个人 fork。跟进上游 **alpha**
-版本，用长期 PR stack 维护自定义功能。公开提供可复现的安装方式，暂不承诺大众支持。
+版本，用 `main` 和 `fork` 两个分支维护自定义功能。公开提供可复现的安装方式，暂不承诺大众支持。
 
 - `main`：选定上游 alpha Release 的原始提交。
-- `fork`：完整功能 stack 的顶部，也是默认分支。
-- 功能 PR 长期开启，升级上游 alpha 时重放各层修改。
+- `fork`：包含全部自有改动，也是默认分支；直接在此维护，不再建立功能 PR。
+- 每个改造点在 [编号改造记录](docs/fork-changes/README.md) 中持续记录动机、实现和维护边界。
 - 不新增 i18n，也不分发官方 Desktop 应用。
 
 ## 安装此 fork
@@ -66,42 +66,15 @@ Fork 的更新渠道只选择 fork 发行版，上游 alpha 同步由维护者�
 
 ## Fork 功能
 
-- **已打开会话的名称同步**：当 status line 或 terminal tab title 展示 thread 名称时，
-  每 30 秒后台读取当前会话的元数据，补齐其他 app-server 实例改名后遗漏的通知。
-  名称变化会同时刷新两处标题；不读取聊天历史，失败静默重试，旧查询不会覆盖较新的改名。
-- **模型容量错误自动重试**：模型请求和远程压缩 v2 遇到 `server_is_overloaded`
-  时持续重试，间隔从 1 秒指数增长到最多 5 分钟；服务端建议的等待时间也最多 5 分钟。
-  等待时显示重试提示，可随时取消。容量错误不受普通重试次数限制，其他错误保持原有策略；
-  内部自动审批会话继续遵守其独立的重试与超时限制。
-- **工作中显式调用 skill**：以 steer 补充消息调用 `$skill` 或附加 skill 时，
-  在下一次模型请求前加载并注入其正文，支持 `allow_implicit_invocation: false`。
-  未调用的 skill 仍不进入隐式目录，已禁用或被 hook 拦截的调用不注入。
-  临时修复 [上游 issue #23454](https://github.com/openai/codex/issues/23454)
-  和 [#47011](https://github.com/openai/codex/issues/47011) 所述的 steer 路径遗漏。
-- **Markdown 主题配色**：链接和有序列表编号使用 `/theme` 选中主题的 Markdown 颜色，
-  链接保留下划线；主题未定义对应颜色时沿用原有回退。自定义 `.tmTheme` 可通过
-  `markup.underline.link.markdown`（或 `markup.link.markdown`）设置链接颜色，
-  通过 `markup.list.numbered.markdown` 设置编号颜色，也支持主题常用的列表标点 scope。
-  内置 Dracula 的 Markdown 配色接近 Zed：代码块内链接文字为粉色、地址为青色、
-  方括号和圆括号为紫色；渲染后的可点击链接使用青色，其余语法配色保持原主题。
-  跟踪 [上游 issue #47497](https://github.com/openai/codex/issues/47497)。
-- **MCP 列表展示**：`codex mcp list` 默认按服务器显示紧凑信息块，将名称、启用状态和
-  传输类型与命令、参数、URL、认证状态分层展示；长字段换行，环境变量值继续脱敏。
-  终端输出使用少量状态颜色，重定向、`NO_COLOR` 和 `TERM=dumb` 时关闭配色。
-  **Breaking change**：默认文本布局改变；解析旧输出的脚本需添加 `--format plain`，
-  结构化读取继续使用原有 `--json`。启用状态只反映配置，不表示服务器连接正常。
-- **功能列表输出格式**：`codex features list` 默认显示带表头的表格，
-  可通过 `--format plain|table|markdown|json` 选择纯文本、表格、Markdown 或 JSON。
-  JSON 使用 `features` 数组，每项包含 `name`、`stage` 和布尔值 `enabled`；
-  所有格式按名称排序，并使用加载配置后的实际开关状态。
-  **Breaking change**：默认输出从对齐纯文本改为表格；解析旧输出的脚本需添加 `--format plain`。
-  跟踪 [上游 issue #8397](https://github.com/openai/codex/issues/8397)。
-- **中文 Markdown 加粗**：CLI 兼容中文与全角标点旁的双星号加粗，例如 `**加粗内容。**后续中文`。
-  流式输出与完整回复使用相同规则，保留代码、转义文本和原始消息。
-  此功能仅覆盖 fork CLI 的渲染器，跟踪 [上游 issue #37531](https://github.com/openai/codex/issues/37531)。
-- **终端工作目录（OSC 7）**：在启动、会话切换、恢复和 worktree 切换后报告当前本地会话目录，
-  让兼容终端在该目录打开新标签页、面板，并解析相对文件链接。
-  跳过远程工作区和非终端输出，跟踪 [上游 issue #38229](https://github.com/openai/codex/issues/38229)。
+- [独立的 alpha 分发、更新与安装](docs/fork-changes/0001-distribution-and-updates.md)。
+- [OSC 7 终端工作目录](docs/fork-changes/0002-terminal-working-directory.md)。
+- [中文 Markdown 加粗](docs/fork-changes/0003-cjk-emphasis.md)。
+- [功能列表输出格式](docs/fork-changes/0004-features-list.md)。
+- [MCP 列表展示与兼容输出](docs/fork-changes/0005-mcp-list.md)。
+- [Markdown 链接与列表主题配色](docs/fork-changes/0006-markdown-theme.md)。
+- [工作中显式调用 skill 的正文注入](docs/fork-changes/0007-steered-skills.md)。
+- [容量错误无限重试，间隔最多五分钟](docs/fork-changes/0008-capacity-retries.md)。
+- [已打开会话的 status line 和终端标题名称同步](docs/fork-changes/0009-thread-name-refresh.md)。
 
 ## 维护
 
@@ -111,9 +84,8 @@ Fork 的更新渠道只选择 fork 发行版，上游 alpha 同步由维护者�
 [Fork 工作流](.github/workflows/fork.yml) 验证安装契约、构建并签名完整包、
 测试更新行为，并在发布前验收实际 CLI 和 app-server。
 依赖 OpenAI 基础设施的上游工作流已在此 fork 的 GitHub 设置中禁用。
-[PR 工作流](.github/workflows/fork-pr.yml) 只在 Linux 上运行轻量脚本检查，
-不创建构建、Rust 测试和发布 Job；同一 PR 更新后取消旧检查。
-推送 `fork` 后由 Fork 工作流对完整集成 stack 执行一次构建和 Rust 测试。
+推送 `fork` 后由 Fork 工作流对完整版本执行构建和 Rust 测试；
+不再维护 PR 专用检查或 stack。
 通用 Rust 测试在 Linux x64 上运行；完整包通过平台 matrix 在 Linux x64 和 ARM macOS
 runner 并行构建，每个平台验证安装契约、真实 CLI 和 app-server；签名只在 macOS 执行。
 标准 macOS runner 上保留产物的 release 优化，关闭跨 crate Thin LTO。
