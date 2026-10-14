@@ -1,4 +1,3 @@
-use super::token_speed::item_starts_tool_call;
 use super::*;
 
 impl ChatWidget {
@@ -8,8 +7,8 @@ impl ChatWidget {
         replay_kind: Option<ReplayKind>,
     ) {
         if replay_kind.is_some() {
-            // Replayed deltas are not sampled, so a step that spans the replay is
-            // only partly observed and cannot calibrate the estimate.
+            // Replayed deltas are not sampled, so the step that spans the replay is
+            // only partly observed and cannot be measured.
             self.note_partially_observed_step();
         }
         // Reject misrouted child updates before shared notification handling mutates parent state.
@@ -135,7 +134,7 @@ impl ChatWidget {
                         ))
                 {
                     if replay_kind.is_none() {
-                        self.note_generation_delta(&notification.delta, DeltaKind::Content);
+                        self.note_generation_delta();
                     }
                     self.on_agent_message_delta(notification.delta);
                 }
@@ -143,7 +142,7 @@ impl ChatWidget {
             ServerNotification::PlanDelta(notification) => {
                 self.restore_realtime_transcripts_before_turn(&notification.turn_id);
                 if replay_kind.is_none() {
-                    self.note_generation_delta(&notification.delta, DeltaKind::Content);
+                    self.note_generation_delta();
                 }
                 self.on_plan_delta(notification.delta);
             }
@@ -154,9 +153,6 @@ impl ChatWidget {
                 ) && self.status_state.reasoning_item_id.as_deref()
                     == Some(&notification.item_id)
                 {
-                    if replay_kind.is_none() {
-                        self.note_generation_delta(&notification.delta, DeltaKind::Reasoning);
-                    }
                     self.on_agent_reasoning_delta(notification.delta);
                 }
             }
@@ -168,9 +164,6 @@ impl ChatWidget {
                     )
                     && self.status_state.reasoning_item_id.as_deref() == Some(&notification.item_id)
                 {
-                    if replay_kind.is_none() {
-                        self.note_generation_delta(&notification.delta, DeltaKind::Reasoning);
-                    }
                     self.on_agent_reasoning_delta(notification.delta);
                 }
             }
@@ -573,9 +566,6 @@ impl ChatWidget {
         replay_kind: Option<ReplayKind>,
     ) {
         self.restore_realtime_transcripts_before_turn(&notification.turn_id);
-        if replay_kind.is_none() && item_starts_tool_call(&notification.item) {
-            self.note_tool_call_started();
-        }
         match notification.item {
             ThreadItem::UserMessage { content, .. } if replay_kind.is_none() => {
                 self.note_realtime_user_item_started(&notification.turn_id, &content);

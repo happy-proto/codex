@@ -50,7 +50,6 @@ impl StatusLineAccent {
             | StatusLineItem::UsedTokens
             | StatusLineItem::TotalInputTokens
             | StatusLineItem::TotalOutputTokens
-            | StatusLineItem::TokensPerSecond
             | StatusLineItem::ThreadCredits
             | StatusLineItem::EstimatedThreadCost => Self::Usage,
             StatusLineItem::FiveHourLimit | StatusLineItem::WeeklyLimit => Self::Limit,

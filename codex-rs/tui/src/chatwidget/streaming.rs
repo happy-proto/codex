@@ -350,9 +350,6 @@ impl ChatWidget {
     }
 
     pub(super) fn on_agent_reasoning_final(&mut self) {
-        // The reasoning item is done streaming, so its segment ends here; the wait
-        // before the next item must not be charged as generation time.
-        self.end_generation_segment();
         // At the end of a reasoning block, record transcript-only content.
         if !self.reasoning_buffer.is_empty() {
             self.reasoning_summary_parts
@@ -573,7 +570,7 @@ impl ChatWidget {
     }
 
     pub(super) fn handle_stream_finished(&mut self) {
-        // No further deltas belong to the completed item, so the live rate ends here.
+        // No further deltas belong to the completed item, so its segment ends here.
         self.end_generation_segment();
         if self.task_complete_pending {
             self.bottom_pane.hide_status_indicator();

@@ -5,7 +5,6 @@ use crate::chatwidget::ThreadUsageOutcome;
 use crate::chatwidget::rate_limits::NUDGE_MODEL_SLUG;
 use crate::chatwidget::rate_limits::get_limits_duration;
 use crate::chatwidget::realtime::tests::activate_voice_for_thread;
-use crate::chatwidget::token_speed::DeltaKind;
 use codex_app_server_protocol::SpendControlLimitSnapshot;
 use codex_app_server_protocol::ThreadUsage;
 use pretty_assertions::assert_eq;
@@ -5886,81 +5885,11 @@ async fn chatwidget_tall() {
 }
 
 #[tokio::test]
-async fn live_token_speed_retracts_from_the_status_line() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.local_settings.tui.status_line = Some(vec!["tokens-per-second".to_string()]);
-    chat.refresh_status_surfaces();
-
-    assert!(!shows_token_speed(&mut chat));
-
-    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
-    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
-
-    let status_line = chat
-        .status_line_text()
-        .expect("status line with live speed");
-    assert!(
-        status_line.contains("tok/s"),
-        "unexpected status line: {status_line}"
-    );
-
-    chat.end_generation_segment();
-
-    assert!(!shows_token_speed(&mut chat));
-}
-
-fn shows_token_speed(chat: &mut ChatWidget) -> bool {
-    chat.status_line_text()
-        .is_some_and(|line| line.contains("tok/s"))
-}
-
-#[tokio::test]
-async fn reasoning_completion_retracts_the_live_rate() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.local_settings.tui.status_line = Some(vec!["tokens-per-second".to_string()]);
-    chat.refresh_status_surfaces();
-
-    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Reasoning);
-    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Reasoning);
-    assert!(shows_token_speed(&mut chat));
-
-    chat.on_agent_reasoning_final();
-
-    assert!(!shows_token_speed(&mut chat));
-}
-
-#[tokio::test]
-async fn live_token_speed_keeps_an_expiry_frame_pending() {
-    let (frame_requester, mut frames) = FrameRequester::test_channel();
-    let (mut chat, _rx, _op_rx) = super::helpers::make_chatwidget_manual_with_auth(
-        /*model_override*/ None,
-        /*has_chatgpt_account*/ false,
-        /*has_codex_backend_auth*/ false,
-        frame_requester,
-    )
-    .await;
-    chat.local_settings.tui.status_line = Some(vec!["tokens-per-second".to_string()]);
-    chat.refresh_status_surfaces();
-
-    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
-    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
-
-    // Simulate a redraw that already consumed the deadline scheduled by a delta.
-    while frames.try_recv().is_ok() {}
-    chat.pre_draw_tick();
-
-    assert!(
-        frames.try_recv().is_ok(),
-        "an expiry frame must stay pending while the rate is live"
-    );
-}
-
-#[tokio::test]
 async fn turn_completion_reports_average_generation_speed() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
-    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
-    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
+    chat.note_generation_delta();
+    chat.note_generation_delta();
     chat.on_task_complete(
         /*last_agent_message*/ None,
         Some(history_cell::FinalMessageSeparator::new(
@@ -6001,13 +5930,13 @@ async fn snapshot_replay_marks_the_resumed_step_as_partial() {
         ReplayKind::ThreadSnapshot,
     );
 
-    // Only the tail of the resumed step is observable, so its reported usage must
-    // not rescale the estimate.
-    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
-    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
+    // Only the tail of the resumed step is observable, so its reported usage and
+    // the measured time do not belong together.
+    chat.note_generation_delta();
+    chat.note_generation_delta();
     chat.note_reported_token_usage(
         /*total_output_tokens*/ 400, /*total_reasoning_tokens*/ 0,
     );
 
-    assert_eq!(chat.token_speed.calibration(), None);
+    assert_eq!(chat.finish_token_speed_turn(), None);
 }
