@@ -5886,26 +5886,6 @@ async fn chatwidget_tall() {
 }
 
 #[tokio::test]
-async fn live_token_speed_is_only_shown_while_deltas_stream() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    let item = crate::bottom_pane::StatusLineItem::TokensPerSecond;
-
-    assert_eq!(chat.status_line_value_for_item(item), None);
-
-    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
-    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
-
-    let label = chat
-        .status_line_value_for_item(item)
-        .expect("live generation speed");
-    assert!(label.ends_with(" tok/s"), "unexpected label: {label}");
-
-    chat.end_generation_segment();
-
-    assert_eq!(chat.status_line_value_for_item(item), None);
-}
-
-#[tokio::test]
 async fn live_token_speed_retracts_from_the_status_line() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.local_settings.tui.status_line = Some(vec!["tokens-per-second".to_string()]);

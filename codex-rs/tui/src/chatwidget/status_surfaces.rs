@@ -177,9 +177,11 @@ impl ChatWidget {
     fn sync_status_surface_shared_state(&mut self, selections: &StatusSurfaceSelections) {
         // Cached for the per-delta generation-speed refresh, which must not parse
         // the status-line configuration or rebuild the line when the item is off.
-        self.status_line_uses_token_speed = selections
+        let uses_token_speed = selections
             .status_line_items
             .contains(&StatusLineItem::TokensPerSecond);
+        self.status_line_uses_token_speed = uses_token_speed;
+        self.set_token_speed_live_enabled(uses_token_speed);
 
         if !selections.uses_git_branch() {
             self.status_line_branch = None;

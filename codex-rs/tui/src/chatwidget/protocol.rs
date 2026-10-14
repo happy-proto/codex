@@ -7,6 +7,11 @@ impl ChatWidget {
         notification: ServerNotification,
         replay_kind: Option<ReplayKind>,
     ) {
+        if replay_kind.is_some() {
+            // Replayed deltas are not sampled, so a step that spans the replay is
+            // only partly observed and cannot calibrate the estimate.
+            self.note_partially_observed_step();
+        }
         // Reject misrouted child updates before shared notification handling mutates parent state.
         if let ServerNotification::McpServerStatusUpdated(notification) = &notification
             && let (Some(notification_thread_id), Some(thread_id)) =

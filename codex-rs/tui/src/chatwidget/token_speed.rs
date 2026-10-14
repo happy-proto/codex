@@ -107,6 +107,8 @@ struct PendingStep {
     estimated_tokens: f64,
     /// Output tokens that were not reasoning tokens.
     visible_tokens: u64,
+    /// A tool call was reported for this step, whose arguments never stream here.
+    tool_call: bool,
 }
 
 /// Measures generation speed from streamed deltas.
@@ -120,13 +122,15 @@ pub(super) struct TokenSpeedTracker {
     turn_tokens: f64,
     /// Decode time accumulated for the turn.
     turn_active: Duration,
+    /// Whether the live window is worth maintaining for the status line.
+    live_enabled: bool,
     pending: Option<PendingStep>,
-    /// Whether a tool call belongs to the step awaiting attribution.
-    ///
-    /// A call can be reported before or after that step's usage, and its
-    /// arguments are output tokens that never stream here, so the flag is only
-    /// cleared when the pending step is actually committed or dropped.
-    step_had_tool_call: bool,
+    /// A tool call reported after the pending step's usage belongs to that step.
+    pending_tool_call: bool,
+    /// A tool call reported while a step is streaming belongs to that step.
+    step_tool_call: bool,
+    /// The step in progress was only partly observed, so it cannot calibrate.
+    partial_step: bool,
     /// Reported-to-estimated ratio learned from clean steps.
     calibration: Option<f64>,
     /// Cumulative output tokens of the last attributed step.
@@ -147,7 +151,9 @@ impl TokenSpeedTracker {
         self.turn_tokens = 0.0;
         self.turn_active = Duration::ZERO;
         self.pending = None;
-        self.step_had_tool_call = false;
+        self.pending_tool_call = false;
+        self.step_tool_call = false;
+        self.partial_step = false;
     }
 
     /// Record one streamed delta; returns the live rate when one can be reported.
@@ -163,7 +169,6 @@ impl TokenSpeedTracker {
 
         if !delta.is_empty() {
             let tokens = delta.len() as f64 / BYTES_PER_TOKEN;
-            self.window.push_back(Sample { at: now, tokens });
             self.segment.estimated_tokens += tokens;
             self.segment.first_at.get_or_insert(now);
             self.segment.last_at = Some(now);
@@ -171,7 +176,10 @@ impl TokenSpeedTracker {
             if kind == DeltaKind::Content {
                 self.step_estimated_tokens += tokens;
             }
-            self.drop_expired_samples(now);
+            if self.live_enabled {
+                self.window.push_back(Sample { at: now, tokens });
+                self.drop_expired_samples(now);
+            }
         }
 
         self.live_rate(now)
@@ -188,9 +196,34 @@ impl TokenSpeedTracker {
     }
 
     /// Note that a tool call started; its streamed arguments never reach us.
+    ///
+    /// A call reported while the streaming step already produced content belongs
+    /// to that step. Otherwise it can belong either to the step that just reported
+    /// usage or to the next step before its first delta, so both are excluded
+    /// instead of guessing which one lost its arguments to the tool.
     pub(super) fn note_tool_call(&mut self) {
         self.close_segment();
-        self.step_had_tool_call = true;
+        self.step_tool_call = true;
+        if self.step_estimated_tokens <= 0.0 {
+            self.pending_tool_call = true;
+        }
+    }
+
+    /// Note that replayed history means the step in progress is only partly seen.
+    ///
+    /// Replayed deltas are not sampled, so the resumed step's reported usage would
+    /// be compared against an estimate that misses everything streamed before the
+    /// switch.
+    pub(super) fn note_partially_observed_step(&mut self) {
+        self.partial_step = true;
+    }
+
+    /// Enable or disable live-rate tracking for the status line.
+    pub(super) fn set_live_enabled(&mut self, enabled: bool) {
+        self.live_enabled = enabled;
+        if !enabled {
+            self.window.clear();
+        }
     }
 
     /// Attribute the cumulative usage the app server reported for one finished step.
@@ -209,8 +242,10 @@ impl TokenSpeedTracker {
             // step that was streaming.
             self.close_segment();
             self.pending = None;
+            self.pending_tool_call = false;
+            self.step_tool_call = false;
             self.step_estimated_tokens = 0.0;
-            self.step_had_tool_call = false;
+            self.partial_step = false;
             self.last_total_output_tokens = total_output_tokens;
             self.last_total_reasoning_tokens = total_reasoning_tokens;
             return;
@@ -221,16 +256,23 @@ impl TokenSpeedTracker {
             return;
         }
         self.close_segment();
+        // Attribute the step that was pending before this one replaces it.
+        self.commit_pending_step();
         let output_tokens = total_output_tokens - self.last_total_output_tokens;
         let reasoning_tokens = total_reasoning_tokens
             .saturating_sub(self.last_total_reasoning_tokens)
             .min(output_tokens);
         self.last_total_output_tokens = total_output_tokens;
         self.last_total_reasoning_tokens = total_reasoning_tokens;
-        self.pending = Some(PendingStep {
-            estimated_tokens: self.step_estimated_tokens,
-            visible_tokens: output_tokens - reasoning_tokens,
-        });
+        if std::mem::take(&mut self.partial_step) {
+            self.step_tool_call = false;
+        } else {
+            self.pending = Some(PendingStep {
+                estimated_tokens: self.step_estimated_tokens,
+                visible_tokens: output_tokens - reasoning_tokens,
+                tool_call: std::mem::take(&mut self.step_tool_call),
+            });
+        }
         self.step_estimated_tokens = 0.0;
     }
 
@@ -244,6 +286,9 @@ impl TokenSpeedTracker {
 
     /// Rate over the recent delta window, or `None` while nothing is streaming.
     pub(super) fn live_rate(&self, now: Instant) -> Option<f64> {
+        if !self.live_enabled {
+            return None;
+        }
         // A single delta cannot measure a rate: it would report the whole burst
         // against the assumed short-burst duration.
         if self.window.len() < 2 {
@@ -276,13 +321,12 @@ impl TokenSpeedTracker {
 
     /// Turn reported usage into a calibration ratio for later steps.
     fn commit_pending_step(&mut self) {
-        // Keep the tool flag while no step is pending: a tool call can be reported
-        // before the usage of the step it ends.
         let Some(pending) = self.pending.take() else {
+            // Keep the flags: a tool call can be reported before the usage of the
+            // step it ends.
             return;
         };
-        let invalidated = std::mem::take(&mut self.step_had_tool_call);
-        if invalidated {
+        if std::mem::take(&mut self.pending_tool_call) || pending.tool_call {
             // Tool arguments were generated as output tokens but never streamed here.
             return;
         }
@@ -346,8 +390,18 @@ impl ChatWidget {
 
     /// Record a streamed delta and refresh the live rate on the status line.
     pub(super) fn note_generation_delta(&mut self, delta: &str, kind: DeltaKind) {
-        self.token_speed.record_delta(delta, kind, Instant::now());
-        self.refresh_live_token_speed();
+        let rate = self.token_speed.record_delta(delta, kind, Instant::now());
+        self.publish_live_token_speed(rate);
+    }
+
+    /// Note that replayed history makes the step in progress only partly observed.
+    pub(super) fn note_partially_observed_step(&mut self) {
+        self.token_speed.note_partially_observed_step();
+    }
+
+    /// Track the live window only while the status line shows the speed item.
+    pub(super) fn set_token_speed_live_enabled(&mut self, enabled: bool) {
+        self.token_speed.set_live_enabled(enabled);
     }
 
     /// Record the cumulative usage the app server reported for a finished step.
@@ -389,7 +443,13 @@ impl ChatWidget {
         ))
     }
 
-    /// Publish the live rate to the status line, or retract it once it is stale.
+    /// Recompute the live rate and publish it to the status line.
+    pub(super) fn refresh_live_token_speed(&mut self) {
+        let rate = self.token_speed.live_rate(Instant::now());
+        self.publish_live_token_speed(rate);
+    }
+
+    /// Push a measured rate to the status line, or retract the previous value.
     ///
     /// The status line stores rendered text, so the value has to be pushed again
     /// whenever it changes and retracted when deltas stop. Retraction is driven
@@ -398,12 +458,13 @@ impl ChatWidget {
     /// and an unrelated redraw could consume the only deadline and leave the
     /// number on screen. The same guard keeps the per-delta path free when the
     /// item is not configured.
-    pub(super) fn refresh_live_token_speed(&mut self) {
+    fn publish_live_token_speed(&mut self, rate: Option<f64>) {
         if !self.status_line_uses_token_speed {
             self.token_speed_label = None;
             return;
         }
-        let label = self.live_token_speed_label();
+        let label =
+            rate.map(|rate| format!("{} tok/s", crate::token_usage::format_token_rate(rate)));
         if label != self.token_speed_label {
             self.token_speed_label = label;
             self.refresh_status_line_only();
@@ -418,13 +479,39 @@ impl ChatWidget {
 mod tests {
     use super::*;
 
+    /// Tracker with live-rate tracking enabled, as when the status line shows it.
+    fn live_tracker() -> TokenSpeedTracker {
+        let mut tracker = TokenSpeedTracker::default();
+        tracker.set_live_enabled(true);
+        tracker
+    }
+
     fn delta(tracker: &mut TokenSpeedTracker, text: &str, at: Instant) -> Option<f64> {
         tracker.record_delta(text, DeltaKind::Content, at)
     }
 
     #[test]
-    fn live_rate_tracks_recent_deltas() {
+    fn disabled_live_tracking_keeps_the_turn_average() {
         let mut tracker = TokenSpeedTracker::default();
+        let start = Instant::now();
+        tracker.start_turn();
+        delta(&mut tracker, &"a".repeat(400), start);
+        delta(
+            &mut tracker,
+            &"a".repeat(400),
+            start + Duration::from_secs(4),
+        );
+
+        assert_eq!(tracker.live_rate(start + Duration::from_secs(4)), None);
+
+        let average = tracker.finish_turn().expect("turn average");
+
+        assert!((average - 50.0).abs() < 0.001, "average was {average}");
+    }
+
+    #[test]
+    fn live_rate_tracks_recent_deltas() {
+        let mut tracker = live_tracker();
         let start = Instant::now();
         // 400 bytes over 2s is 100 estimated tokens over 2s.
         assert_eq!(delta(&mut tracker, &"a".repeat(200), start), None);
@@ -440,7 +527,7 @@ mod tests {
 
     #[test]
     fn live_rate_disappears_once_deltas_stop() {
-        let mut tracker = TokenSpeedTracker::default();
+        let mut tracker = live_tracker();
         let start = Instant::now();
         delta(&mut tracker, &"a".repeat(200), start);
         delta(&mut tracker, "b", start + Duration::from_millis(500));
@@ -455,7 +542,7 @@ mod tests {
 
     #[test]
     fn calibration_rescales_estimates_from_clean_steps() {
-        let mut tracker = TokenSpeedTracker::default();
+        let mut tracker = live_tracker();
         let start = Instant::now();
         delta(&mut tracker, &"a".repeat(200), start);
         delta(
@@ -480,7 +567,7 @@ mod tests {
 
     #[test]
     fn calibration_survives_an_item_boundary_inside_the_step() {
-        let mut tracker = TokenSpeedTracker::default();
+        let mut tracker = live_tracker();
         let start = Instant::now();
         // A commentary item completes before the step reports its usage.
         delta(&mut tracker, &"a".repeat(200), start);
@@ -516,7 +603,7 @@ mod tests {
 
     #[test]
     fn tool_calls_do_not_calibrate_generation_speed() {
-        let mut tracker = TokenSpeedTracker::default();
+        let mut tracker = live_tracker();
         let start = Instant::now();
         delta(&mut tracker, &"a".repeat(200), start);
         delta(
@@ -541,7 +628,7 @@ mod tests {
 
     #[test]
     fn tool_calls_reported_before_the_rest_of_the_step_still_exclude_it() {
-        let mut tracker = TokenSpeedTracker::default();
+        let mut tracker = live_tracker();
         let start = Instant::now();
         // The tool call is reported first, then the response streams more text.
         tracker.note_tool_call();
@@ -567,8 +654,68 @@ mod tests {
     }
 
     #[test]
+    fn tool_calls_during_a_step_exclude_only_that_step() {
+        let mut tracker = live_tracker();
+        let start = Instant::now();
+        // Step A: 100 estimated tokens, 100 reported, no tool call.
+        delta(&mut tracker, &"a".repeat(400), start);
+        tracker.note_step_usage(
+            /*total_output_tokens*/ 100, /*total_reasoning_tokens*/ 0,
+        );
+        // Step B streams content and then requests a search of its own.
+        delta(
+            &mut tracker,
+            &"a".repeat(400),
+            start + Duration::from_secs(2),
+        );
+        tracker.note_tool_call();
+        tracker.note_step_usage(
+            /*total_output_tokens*/ 1_000, /*total_reasoning_tokens*/ 0,
+        );
+        // Step C streams another 100 estimated tokens.
+        delta(
+            &mut tracker,
+            &"a".repeat(400),
+            start + Duration::from_secs(4),
+        );
+        let rate = delta(
+            &mut tracker,
+            &"a".repeat(400),
+            start + Duration::from_secs(6),
+        )
+        .expect("live rate");
+
+        // Step A calibrated the estimate; step B's tool arguments never reached
+        // the estimate, so calibrating it would have reported 250 instead.
+        assert!((rate - 100.0).abs() < 0.001, "rate was {rate}");
+    }
+
+    #[test]
+    fn a_partially_observed_step_does_not_calibrate() {
+        let mut tracker = live_tracker();
+        let start = Instant::now();
+        // Only the tail of this step was sampled after switching back to the thread.
+        delta(&mut tracker, &"a".repeat(400), start);
+        tracker.note_partially_observed_step();
+        tracker.note_step_usage(
+            /*total_output_tokens*/ 400, /*total_reasoning_tokens*/ 0,
+        );
+        let next = start + Duration::from_secs(2);
+        delta(&mut tracker, &"a".repeat(400), next);
+        let rate = delta(
+            &mut tracker,
+            &"a".repeat(400),
+            next + Duration::from_secs(2),
+        )
+        .expect("live rate");
+
+        // Calibrating the partial step would have reported 400 instead.
+        assert!((rate - 100.0).abs() < 0.001, "rate was {rate}");
+    }
+
+    #[test]
     fn repeated_usage_notifications_keep_the_segment_together() {
-        let mut tracker = TokenSpeedTracker::default();
+        let mut tracker = live_tracker();
         let start = Instant::now();
         tracker.start_turn();
         delta(&mut tracker, &"a".repeat(400), start);
@@ -604,7 +751,7 @@ mod tests {
 
     #[test]
     fn reasoning_tokens_are_excluded_from_calibration() {
-        let mut tracker = TokenSpeedTracker::default();
+        let mut tracker = live_tracker();
         let start = Instant::now();
         delta(&mut tracker, &"a".repeat(200), start);
         delta(
@@ -632,7 +779,7 @@ mod tests {
 
     #[test]
     fn repeated_usage_notifications_do_not_reset_the_step() {
-        let mut tracker = TokenSpeedTracker::default();
+        let mut tracker = live_tracker();
         let start = Instant::now();
         // First step: 100 estimated tokens, 100 reported.
         delta(&mut tracker, &"a".repeat(400), start);
@@ -674,7 +821,7 @@ mod tests {
 
     #[test]
     fn a_restarted_session_resets_the_reported_baseline() {
-        let mut tracker = TokenSpeedTracker::default();
+        let mut tracker = live_tracker();
         let start = Instant::now();
         delta(&mut tracker, &"a".repeat(400), start);
         tracker.note_step_usage(
@@ -703,7 +850,7 @@ mod tests {
 
     #[test]
     fn turn_average_excludes_tool_waiting() {
-        let mut tracker = TokenSpeedTracker::default();
+        let mut tracker = live_tracker();
         let start = Instant::now();
         tracker.start_turn();
         // First step: 200 estimated tokens over 4s, then a 30s tool call.
@@ -731,7 +878,7 @@ mod tests {
 
     #[test]
     fn start_turn_drops_the_previous_window() {
-        let mut tracker = TokenSpeedTracker::default();
+        let mut tracker = live_tracker();
         let start = Instant::now();
         delta(&mut tracker, &"a".repeat(200), start);
         delta(
