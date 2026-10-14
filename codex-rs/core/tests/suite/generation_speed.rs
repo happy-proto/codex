@@ -170,6 +170,18 @@ async fn generation_speed_recovery_clears_pre_crash_statistics() -> anyhow::Resu
         .await?;
     let db = test.codex.state_db().expect("state db enabled");
     let thread_id = test.session_configured.thread_id;
+    // A pre-crash completion necessarily has persisted thread metadata.
+    let metadata = codex_state::ThreadMetadataBuilder::new(
+        thread_id,
+        test.session_configured
+            .rollout_path
+            .clone()
+            .expect("rollout path"),
+        chrono::Utc::now(),
+        codex_protocol::protocol::SessionSource::Cli,
+    )
+    .build(&test.session_configured.model_provider_id);
+    db.upsert_thread(&metadata).await?;
     db.save_generation_speed(
         thread_id,
         "recovered-turn",
