@@ -42,6 +42,8 @@ use tracing::warn;
 mod backfill;
 mod external_agent_config_imports;
 mod generation_speed;
+pub use generation_speed::GenerationSpeedCompletion;
+pub use generation_speed::GenerationSpeedRecord;
 mod goals;
 mod guardian_feedback;
 mod logs;

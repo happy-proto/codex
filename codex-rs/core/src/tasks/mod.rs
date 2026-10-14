@@ -885,18 +885,28 @@ impl Session {
                     .then(|| turn_context.turn_timing_state.generation_speed_totals())
                     .flatten();
             let result = tokio::time::timeout(Duration::from_millis(200), async {
-                match totals {
-                    Some((output_tokens, request_duration_us)) => {
+                match (totals, started_at, completed_at, duration_ms) {
+                    (
+                        Some((output_tokens, request_duration_us)),
+                        Some(started_at),
+                        Some(completed_at),
+                        Some(duration_ms),
+                    ) => {
                         state_db
                             .save_generation_speed(
                                 self.thread_id,
                                 &turn_context.sub_id,
                                 output_tokens,
                                 request_duration_us,
+                                codex_state::GenerationSpeedCompletion {
+                                    started_at,
+                                    completed_at,
+                                    duration_ms,
+                                },
                             )
                             .await
                     }
-                    None => {
+                    _ => {
                         state_db
                             .clear_generation_speed(self.thread_id, &turn_context.sub_id)
                             .await

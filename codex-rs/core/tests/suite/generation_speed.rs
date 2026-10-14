@@ -48,9 +48,9 @@ async fn generation_speed_is_saved_before_completion_and_missing_usage_hides_nex
     let speeds = db.generation_speeds(thread_id).await?;
     assert_eq!(speeds.len(), 1);
     assert!(
-        speeds
-            .values()
-            .all(|speed| speed.is_finite() && *speed > 0.0)
+        speeds.values().all(
+            |record| record.tokens_per_second().is_finite() && record.tokens_per_second() > 0.0
+        )
     );
     test.submit_turn("missing usage").await?;
     assert_eq!(db.generation_speeds(thread_id).await?, speeds);
@@ -170,8 +170,18 @@ async fn generation_speed_recovery_clears_pre_crash_statistics() -> anyhow::Resu
         .await?;
     let db = test.codex.state_db().expect("state db enabled");
     let thread_id = test.session_configured.thread_id;
-    db.save_generation_speed(thread_id, "recovered-turn", 20, 1_000_000)
-        .await?;
+    db.save_generation_speed(
+        thread_id,
+        "recovered-turn",
+        20,
+        1_000_000,
+        codex_state::GenerationSpeedCompletion {
+            started_at: 10,
+            completed_at: 11,
+            duration_ms: 1000,
+        },
+    )
+    .await?;
     test.codex
         .recover_turn_if_idle(codex_core::RecoverTurnRequest {
             turn_id: "recovered-turn".into(),

@@ -24,6 +24,7 @@ class GenerationSpeedStorageTests(unittest.TestCase):
         self.writer = sqlite3.connect(self.path)
         self.addCleanup(self.writer.close)
         self.writer.execute("PRAGMA foreign_keys = ON")
+        self.writer.execute("PRAGMA journal_mode = WAL")
         self.writer.execute("CREATE TABLE threads (id TEXT PRIMARY KEY)")
         self.writer.executescript(SCHEMA.read_text())
         self.writer.executemany(
@@ -33,17 +34,22 @@ class GenerationSpeedStorageTests(unittest.TestCase):
 
     def save(self, thread, turn, tokens, duration):
         self.writer.execute(
-            production_query("INSERT INTO"), (thread, turn, tokens, duration)
+            production_query("INSERT INTO"),
+            (thread, turn, tokens, duration, 10, 14, 4000),
         )
         self.writer.execute(
-            production_query("DELETE FROM fork_generation_speeds\n"), (thread, thread)
+            production_query("DELETE FROM fork_generation_speeds_v1\n"),
+            (thread, thread),
         )
         self.writer.commit()
 
     def read(self, connection, thread):
-        return connection.execute(
-            production_query("SELECT turn_id"), (thread,)
-        ).fetchall()
+        return [
+            row[:3]
+            for row in connection.execute(
+                production_query("SELECT turn_id"), (thread,)
+            ).fetchall()
+        ]
 
     def test_cross_connection_identity_and_thread_deletion(self):
         self.save("first", "same-turn", 200, 4_000_000)
@@ -70,7 +76,7 @@ class GenerationSpeedStorageTests(unittest.TestCase):
         self.save("first", "other", 30, 1_000_000)
         self.save("second", "recovered", 40, 1_000_000)
         self.writer.execute(
-            production_query("DELETE FROM fork_generation_speeds WHERE"),
+            production_query("DELETE FROM fork_generation_speeds_v1 WHERE"),
             ("first", "recovered"),
         )
         self.writer.commit()
@@ -78,6 +84,24 @@ class GenerationSpeedStorageTests(unittest.TestCase):
         self.assertEqual(
             self.read(self.writer, "second"), [("recovered", 40, 1_000_000)]
         )
+
+    def test_write_lock_leaves_old_completion_identity_readable(self):
+        self.save("first", "recovered", 200, 4_000_000)
+        locker = sqlite3.connect(self.path)
+        self.addCleanup(locker.close)
+        reader = sqlite3.connect(self.path, timeout=0.01)
+        self.addCleanup(reader.close)
+        locker.execute("BEGIN IMMEDIATE")
+        with self.assertRaises(sqlite3.OperationalError):
+            reader.execute(
+                production_query("DELETE FROM fork_generation_speeds_v1 WHERE"),
+                ("first", "recovered"),
+            )
+        old = reader.execute(production_query("SELECT turn_id"), ("first",)).fetchone()
+        self.assertEqual(old[3:], (10, 14, 4000))
+        # Rust/TUI tests reject a new completion even though this old row survives.
+        self.assertNotEqual(old[3:], (11, 14, 4000))
+        locker.rollback()
 
     def test_retention_and_updates_are_per_thread(self):
         self.save("second", "retained", 30, 1_000_000)

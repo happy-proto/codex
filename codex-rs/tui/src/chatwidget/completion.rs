@@ -45,7 +45,13 @@ impl ChatWidget {
                 self.thread_id.and_then(|thread_id| {
                     self.generation_speeds
                         .get(&(thread_id, turn.id.clone()))
-                        .copied()
+                        .and_then(|record| {
+                            record.for_completion(
+                                turn.started_at,
+                                turn.completed_at,
+                                turn.duration_ms,
+                            )
+                        })
                 })
             })
             .flatten();

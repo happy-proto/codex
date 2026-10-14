@@ -37,6 +37,14 @@ mod tests {
     use crate::test_support::boxed_future;
     use codex_protocol::protocol::SessionSource;
 
+    fn completion() -> codex_state::GenerationSpeedCompletion {
+        codex_state::GenerationSpeedCompletion {
+            started_at: 10,
+            completed_at: 14,
+            duration_ms: 4000,
+        }
+    }
+
     #[tokio::test]
     async fn generation_speed_local_daemon_replay_is_isolated_and_remote_is_hidden()
     -> anyhow::Result<()> {
@@ -56,7 +64,7 @@ mod tests {
             )
             .build("test");
             db.upsert_thread(&metadata).await?;
-            db.save_generation_speed(thread_id, "turn", tokens, 1_000_000)
+            db.save_generation_speed(thread_id, "turn", tokens, 1_000_000, completion())
                 .await?;
         }
         app.state_db = Some(db);
@@ -64,8 +72,9 @@ mod tests {
         assert_eq!(
             app.chat_widget
                 .generation_speeds
-                .get(&(first, "turn".into())),
-            Some(&100.0)
+                .get(&(first, "turn".into()))
+                .map(codex_state::GenerationSpeedRecord::tokens_per_second),
+            Some(100.0)
         );
         let endpoint = crate::RemoteAppServerEndpoint::UnixSocket {
             socket_path: codex_utils_absolute_path::AbsolutePathBuf::try_from(
@@ -81,8 +90,9 @@ mod tests {
         assert_eq!(
             app.chat_widget
                 .generation_speeds
-                .get(&(second, "turn".into())),
-            Some(&300.0)
+                .get(&(second, "turn".into()))
+                .map(codex_state::GenerationSpeedRecord::tokens_per_second),
+            Some(300.0)
         );
         app.app_server_target = AppServerTarget::Remote { endpoint };
         app.refresh_generation_speeds(first).await;
@@ -94,9 +104,10 @@ mod tests {
     async fn generation_speed_unavailable_storage_discards_cached_values() {
         let mut app = boxed_future!(make_test_app()).await;
         let thread_id = ThreadId::new();
-        app.chat_widget
-            .generation_speeds
-            .insert((thread_id, "turn".into()), 100.0);
+        app.chat_widget.generation_speeds.insert(
+            (thread_id, "turn".into()),
+            codex_state::GenerationSpeedRecord::new(100.0, completion()),
+        );
         app.refresh_generation_speeds(thread_id).await;
         assert!(app.chat_widget.generation_speeds.is_empty());
     }
