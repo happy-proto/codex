@@ -118,9 +118,15 @@ pub(super) struct TokenSpeedTracker {
     segment: Segment,
     /// Message and plan deltas seen since the last reported step, across item boundaries.
     step_estimated_tokens: f64,
-    /// Content tokens accumulated for the turn, before calibration.
+    /// Content tokens and decode time of the step that has not reported usage yet.
+    ///
+    /// Item completion folds a segment in here rather than into the turn totals, so
+    /// a retried or restarted step can still be discarded as a whole.
+    step_tokens: f64,
+    step_active: Duration,
+    /// Committed content tokens accumulated for the turn, before calibration.
     turn_tokens: f64,
-    /// Decode time accumulated for the turn.
+    /// Committed decode time accumulated for the turn.
     turn_active: Duration,
     /// Whether the live window is worth maintaining for the status line.
     live_enabled: bool,
@@ -148,6 +154,8 @@ impl TokenSpeedTracker {
         self.window.clear();
         self.segment.reset();
         self.step_estimated_tokens = 0.0;
+        self.step_tokens = 0.0;
+        self.step_active = Duration::ZERO;
         self.turn_tokens = 0.0;
         self.turn_active = Duration::ZERO;
         self.pending = None;
@@ -226,6 +234,7 @@ impl TokenSpeedTracker {
         self.partial_step = true;
         self.segment.reset();
         self.window.clear();
+        self.discard_step();
         self.step_estimated_tokens = 0.0;
         self.step_tool_call = false;
     }
@@ -253,6 +262,7 @@ impl TokenSpeedTracker {
             // A new session starts from lower totals; nothing here belongs to the
             // step that was streaming.
             self.close_segment();
+            self.discard_step();
             self.pending = None;
             self.pending_tool_call = false;
             self.step_tool_call = false;
@@ -270,6 +280,7 @@ impl TokenSpeedTracker {
         self.close_segment();
         // Attribute the step that was pending before this one replaces it.
         self.commit_pending_step();
+        self.commit_step();
         let output_tokens = total_output_tokens - self.last_total_output_tokens;
         let reasoning_tokens = total_reasoning_tokens
             .saturating_sub(self.last_total_reasoning_tokens)
@@ -292,6 +303,7 @@ impl TokenSpeedTracker {
     pub(super) fn finish_turn(&mut self) -> Option<f64> {
         self.close_segment();
         self.commit_pending_step();
+        self.commit_step();
         self.window.clear();
         self.turn_rate()
     }
@@ -321,14 +333,28 @@ impl TokenSpeedTracker {
         Some(tokens / active.as_secs_f64() * self.calibration.unwrap_or(1.0))
     }
 
-    /// Fold the in-flight segment into the turn totals and drop its samples.
+    /// Fold the in-flight segment into the current step and drop its samples.
     fn close_segment(&mut self) {
         let segment = std::mem::take(&mut self.segment);
         if let Some(active) = segment.active_time() {
-            self.turn_tokens += segment.estimated_tokens;
-            self.turn_active += active;
+            self.step_tokens += segment.estimated_tokens;
+            self.step_active += active;
         }
         self.window.clear();
+    }
+
+    /// Move the finished step's measurements into the turn totals.
+    fn commit_step(&mut self) {
+        self.turn_tokens += self.step_tokens;
+        self.turn_active += self.step_active;
+        self.step_tokens = 0.0;
+        self.step_active = Duration::ZERO;
+    }
+
+    /// Drop the measurements of a step that will not report usage.
+    fn discard_step(&mut self) {
+        self.step_tokens = 0.0;
+        self.step_active = Duration::ZERO;
     }
 
     /// Turn reported usage into a calibration ratio for later steps.
@@ -751,6 +777,9 @@ mod tests {
             &"a".repeat(400),
             start + Duration::from_secs(1),
         );
+        // Its commentary item completes before the stream breaks, so the attempt
+        // already closed one segment.
+        tracker.end_segment();
         tracker.discard_partial_step();
         // After a 20s backoff the retry streams 200 estimated tokens and reports them.
         let retry = start + Duration::from_secs(20);
