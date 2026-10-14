@@ -23,14 +23,17 @@ Linux x64 和 ARM macOS runner 分别验证本机安装契约和真实 CLI；仅
 分析耗时时读取各 job 的日志和 `fork-build-timings-*`、`fork-test-timings-*` artifact，
 用 Cargo 报告区分 crate 编译和并发等待，不把日志末尾的整段耗时直接归为链接。
 
-Rust 编译由 mbx 1.23.0 包装 Cargo，使用 GitHub Actions 的 `objects` 缓存模式。
-只导出本次构建使用或生成的对象；Cargo registry 和 Git 依赖下载由独立 rust-cache 保存，
-该下载缓存关闭 target 和 bin 缓存，不与 mbx 重复保存编译产物。
-构建与测试按平台和 profile 使用独立 cache generation，避免并行 job 争用同一条目。
-设置 `MBX_TARGET_VIEWS=0` 保留上游 package builder 和耗时报告使用的 workspace target 路径。
+Rust 编译由 sccache 0.18.0 通过 `RUSTC_WRAPPER` 接管，使用 GitHub Actions 缓存后端按对象写入，
+不产生单个数 GB 的整体归档；条目按内容寻址，构建和测试 job 共用同一份对象命名空间。
+Cargo registry 和 Git 依赖下载由独立 rust-cache 保存，该下载缓存关闭 target 和 bin 缓存，
+不与 sccache 重复保存编译产物。
+sccache 不缓存 incremental 产物，两个 job 都关闭 `CARGO_INCREMENTAL`，否则 ci-test profile 完全绕过缓存。
+缓存命名空间由 sccache 版本派生（`sccache-v0.18.0`），升级版本即自然弃用旧条目，
+需要额外清理时设置 `SCCACHE_GHA_VERSION`；设置 `SCCACHE_BASEDIRS` 和 `SCCACHE_IDLE_TIMEOUT=0`。
+0.18.0 未包含上游 `.rmeta` 流式通知修复，未命中时 Cargo 流水线略弱；修复进入稳定版后升级并复查。
+安装 sccache 失败时不导出 `RUSTC_WRAPPER`，退回原生 Cargo 编译。
+package builder 和耗时报告沿用 `codex-rs/target`，不需要 mbx 时代的 target 视图开关。
 V8、rg 继续由上游下载器校验和获取，不额外缓存下载资源。
-使用 mbx Action 默认的对象库布局，避免隔离模式清理只读 build-script 输出时的权限错误。
-每次导出只包含该 job 的构建闭包，不归档整个历史对象库；runner 在 job 结束后销毁。
 
 在默认分支 `fork` 预热和保存正式缓存。
 `fork.yml` 接受 `fork` 的 push 和手动触发；提交直接在 `fork` 维护，
@@ -41,7 +44,7 @@ V8、rg 继续由上游下载器校验和获取，不额外缓存下载资源。
 显式 skill 回归可通过 `core_test_filter` 定向运行，采用相同的跳过规则。
 手动实验和自动发布使用不同并发组，避免耗时实验占用自动发布队列。
 比较迁移前完整版本、首次预热和热缓存完整版本，分别记录构建、测试 job 的执行时间、
-缓存恢复/保存时间和排队时间；读取 `fork-*-mbx-*` 统计及 Cargo 耗时报告。
+缓存恢复/保存时间和排队时间；读取 `fork-*-sccache-*` 统计及 Cargo 耗时报告。
 不能用冷缓存一次运行或单独的编译加速数字判断最终收益；持续超过 10% 的耗时增长应复查再接入。
 
 修改发布流程时检查：版本与选定 alpha 一致、源码属于完整 fork 分支、签名后的资源摘要正确、

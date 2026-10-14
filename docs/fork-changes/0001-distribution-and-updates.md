@@ -14,7 +14,7 @@
 版本使用上游 alpha 加 `.fork.N`，不覆盖已发布版本；平台包和 SHA-256 由 `fork-release.json` 描述。
 安装器校验下载、保留上一包供回退；用系统文件锁避免崩溃遗留锁阻断更新。
 启动检查只显示一次后台提示，不自动安装；`codex update` 主动更新，daemon 默认关闭自动升级。
-Rust 编译使用 mbx 对象缓存，下载缓存独立维护。
+Rust 编译由 sccache 逐个对象缓存到 GitHub Actions Cache，下载缓存独立维护。
 
 ## 入口和验证
 

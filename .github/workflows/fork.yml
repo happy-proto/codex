@@ -70,9 +70,12 @@ jobs:
     env:
       CODEX_FORK_VERSION: ${{ needs.scripts.outputs.version }}
       CARGO_BUILD_JOBS: '3'
-      # 保留上游 package builder 和 Cargo 耗时报告约定的 target 路径。
-      MBX_TARGET_VIEWS: '0'
-      CODEX_FORK_CARGO: mbx
+      # sccache 不缓存 incremental 产物，关闭后依赖跨运行的对象复用。
+      CARGO_INCREMENTAL: '0'
+      # 逐个对象写入 Actions Cache，命名空间由 sccache 版本派生（sccache-v0.18.0）。
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_BASEDIRS: ${{ github.workspace }}
+      SCCACHE_IDLE_TIMEOUT: '0'
       CARGO_PROFILE_RELEASE_DEBUG: '0'
       CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'off'
       CARGO_PROFILE_RELEASE_LTO: 'false'
@@ -111,15 +114,15 @@ jobs:
           cache-bin: false
           shared-key: ${{ matrix.cache }}-downloads
           save-if: ${{ github.ref == 'refs/heads/fork' || github.event_name == 'workflow_dispatch' }}
-      - name: 配置 mbx 编译缓存
-        id: mbx
-        uses: jdx/mr-boxington-action@d0825fbaf3cc36ca2609aa38e71046265a1f1e37 # v1
+      - name: 配置 sccache 编译缓存
+        id: sccache
+        # 0.18.0 未包含 .rmeta 流式通知修复，未命中时流水线略弱；稳定版可用后升级。
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
-          version: '1.23.0'
-          working-directory: codex-rs
-          github-cache-mode: objects
-          cache-generation: ${{ matrix.cache }}
-          save-on-workflow-dispatch: true
+          version: v0.18.0
+      - name: 启用 sccache 编译缓存
+        if: steps.sccache.outcome == 'success'
+        run: echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
       - name: Install version-management tool
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
@@ -156,17 +159,18 @@ jobs:
           path: codex-rs/target/cargo-timings/
           if-no-files-found: ignore
       - name: 保存产物编译缓存统计
-        if: always() && steps.mbx.outcome == 'success'
+        if: always() && steps.sccache.outcome == 'success'
+        continue-on-error: true
         run: |
-          mkdir -p fork-mbx
-          mbx stats --json > fork-mbx/build-savings.json
-          mbx cache stats --json > fork-mbx/build-cache.json
+          mkdir -p fork-sccache
+          sccache --show-stats --stats-format json > fork-sccache/build.json
+          sccache --show-stats | tee fork-sccache/build.txt >> "$GITHUB_STEP_SUMMARY"
       - name: 上传产物编译缓存统计
-        if: always() && steps.mbx.outcome == 'success'
+        if: always() && steps.sccache.outcome == 'success'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
-          name: fork-build-mbx-${{ matrix.target }}-${{ github.sha }}
-          path: fork-mbx/
+          name: fork-build-sccache-${{ matrix.target }}-${{ github.sha }}
+          path: fork-sccache/
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: ${{ always() && steps.package.outcome == 'success' }}
         with:
@@ -184,9 +188,12 @@ jobs:
     env:
       CODEX_FORK_VERSION: ${{ needs.scripts.outputs.version }}
       CARGO_BUILD_JOBS: '3'
-      # 保留上游 package builder 和 Cargo 耗时报告约定的 target 路径。
-      MBX_TARGET_VIEWS: '0'
-      CODEX_FORK_CARGO: mbx
+      # sccache 不缓存 incremental 产物，ci-test profile 默认开启 incremental。
+      CARGO_INCREMENTAL: '0'
+      # 与产物 job 共用同一份对象命名空间，逐对象恢复与保存。
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_BASEDIRS: ${{ github.workspace }}
+      SCCACHE_IDLE_TIMEOUT: '0'
       # Preserve release-only code and disabled debug assertions without
       # spending release-package optimization time on the test harness.
       CARGO_PROFILE_RELEASE_OPT_LEVEL: '0'
@@ -223,15 +230,15 @@ jobs:
           cache-bin: false
           shared-key: fork-tests-v1-downloads
           save-if: ${{ github.ref == 'refs/heads/fork' || github.event_name == 'workflow_dispatch' }}
-      - name: 配置 mbx 编译缓存
-        id: mbx
-        uses: jdx/mr-boxington-action@d0825fbaf3cc36ca2609aa38e71046265a1f1e37 # v1
+      - name: 配置 sccache 编译缓存
+        id: sccache
+        # 0.18.0 未包含 .rmeta 流式通知修复，未命中时流水线略弱；稳定版可用后升级。
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
-          version: '1.23.0'
-          working-directory: codex-rs
-          github-cache-mode: objects
-          cache-generation: fork-tests-v1
-          save-on-workflow-dispatch: true
+          version: v0.18.0
+      - name: 启用 sccache 编译缓存
+        if: steps.sccache.outcome == 'success'
+        run: echo "RUSTC_WRAPPER=$SCCACHE_PATH" >> "$GITHUB_ENV"
       - name: Install version-management tool
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
@@ -246,17 +253,17 @@ jobs:
           CORE_TEST_FILTER: ${{ inputs.core_test_filter }}
         run: |
           if [ -n "$CORE_TEST_FILTER" ]; then
-            mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all "$CORE_TEST_FILTER" -- --test-threads=1
+            cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all "$CORE_TEST_FILTER" -- --test-threads=1
             exit 0
           fi
           if [ -n "$TUI_TEST_FILTER" ]; then
-            mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib "$TUI_TEST_FILTER"
+            cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib "$TUI_TEST_FILTER"
             exit 0
           fi
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates_cache::tests
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates::tests
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_action::tests
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib working_directory
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates_cache::tests
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates::tests
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_action::tests
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib working_directory
       - name: Verify fork update presentation
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
@@ -264,53 +271,53 @@ jobs:
           INSTA_UPDATE: new
         run: |
           result=0
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_available_history_cell_snapshot || result=1
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_available_history_cell_snapshot || result=1
           exit "$result"
       - name: 验证 Markdown 渲染、流式输出及选择复制
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
-        run: mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib markdown_render
+        run: cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib markdown_render
       - name: Test daemon update defaults
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
-        run: mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-app-server-daemon --lib settings::tests
+        run: cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-app-server-daemon --lib settings::tests
       - name: 验证功能列表的输出格式与配置状态
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --bin codex features_list::tests
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test features features_list_
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --bin codex features_list::tests
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test features features_list_
       - name: 验证 MCP 列表展示与旧格式兼容
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --bin codex mcp_list_output
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test mcp_list
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --bin codex mcp_list_output
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test mcp_list
       - name: 验证显式 skill 的初始调用与 steer 注入
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           # The history-injection test captures thread-local tracing; keep its
           # subscriber isolated from the other skill tests.
-          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::skills:: -- --test-threads=1
-          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all steered_explicit_only_skill_respects_blocked_queued_prompt
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::skills:: -- --test-threads=1
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all steered_explicit_only_skill_respects_blocked_queued_prompt
       - name: 验证已打开会话的名称同步
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib thread_name_refresh
-          mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib refreshed_thread_name
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib thread_name_refresh
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib refreshed_thread_name
       - name: 验证模型容量错误的无限退避重试
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
-          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-api --lib telemetry::tests
-          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib responses_retry::tests
-          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib guardian_review_retries_transient_session_failure_then_approves
-          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::retry_after:: -- --test-threads=1
-          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all pre_sampling_compact_advised_errors_fall_back_then_retry_on_selected_model
-          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all manual_remote_compact_advice_respects_retry_limit
-          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all review_terminal_error_preserves_lifecycle_order
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-api --lib telemetry::tests
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib responses_retry::tests
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib guardian_review_retries_transient_session_failure_then_approves
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::retry_after:: -- --test-threads=1
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all pre_sampling_compact_advised_errors_fall_back_then_retry_on_selected_model
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all manual_remote_compact_advice_respects_retry_limit
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all review_terminal_error_preserves_lifecycle_order
       - name: 上传测试构建耗时报告
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: always()
@@ -319,17 +326,18 @@ jobs:
           path: codex-rs/target/cargo-timings/
           if-no-files-found: ignore
       - name: 保存测试编译缓存统计
-        if: always() && steps.mbx.outcome == 'success'
+        if: always() && steps.sccache.outcome == 'success'
+        continue-on-error: true
         run: |
-          mkdir -p fork-mbx
-          mbx stats --json > fork-mbx/test-savings.json
-          mbx cache stats --json > fork-mbx/test-cache.json
+          mkdir -p fork-sccache
+          sccache --show-stats --stats-format json > fork-sccache/test.json
+          sccache --show-stats | tee fork-sccache/test.txt >> "$GITHUB_STEP_SUMMARY"
       - name: 上传测试编译缓存统计
-        if: always() && steps.mbx.outcome == 'success'
+        if: always() && steps.sccache.outcome == 'success'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
-          name: fork-test-mbx-${{ github.sha }}
-          path: fork-mbx/
+          name: fork-test-sccache-${{ github.sha }}
+          path: fork-sccache/
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         if: failure()
         with:
