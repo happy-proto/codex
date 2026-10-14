@@ -350,6 +350,9 @@ impl ChatWidget {
     }
 
     pub(super) fn on_agent_reasoning_final(&mut self) {
+        // The reasoning item is done streaming, so its segment ends here; the wait
+        // before the next item must not be charged as generation time.
+        self.end_generation_segment();
         // At the end of a reasoning block, record transcript-only content.
         if !self.reasoning_buffer.is_empty() {
             self.reasoning_summary_parts
@@ -396,6 +399,9 @@ impl ChatWidget {
     }
 
     pub(super) fn on_stream_error(&mut self, message: String, additional_details: Option<String>) {
+        // A retry repeats the request, so whatever streamed before the break is
+        // only part of the step that eventually reports usage.
+        self.note_retried_step();
         self.status_state.remember_retry_status_header();
         self.bottom_pane.ensure_status_indicator();
         self.status_state.terminal_title_status_kind = TerminalTitleStatusKind::Thinking;

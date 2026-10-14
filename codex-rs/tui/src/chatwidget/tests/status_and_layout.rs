@@ -5915,6 +5915,21 @@ fn shows_token_speed(chat: &mut ChatWidget) -> bool {
 }
 
 #[tokio::test]
+async fn reasoning_completion_retracts_the_live_rate() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.local_settings.tui.status_line = Some(vec!["tokens-per-second".to_string()]);
+    chat.refresh_status_surfaces();
+
+    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Reasoning);
+    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Reasoning);
+    assert!(shows_token_speed(&mut chat));
+
+    chat.on_agent_reasoning_final();
+
+    assert!(!shows_token_speed(&mut chat));
+}
+
+#[tokio::test]
 async fn live_token_speed_keeps_an_expiry_frame_pending() {
     let (frame_requester, mut frames) = FrameRequester::test_channel();
     let (mut chat, _rx, _op_rx) = super::helpers::make_chatwidget_manual_with_auth(

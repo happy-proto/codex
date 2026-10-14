@@ -399,6 +399,15 @@ impl ChatWidget {
         self.token_speed.note_partially_observed_step();
     }
 
+    /// Drop a partly streamed step after a retryable stream error.
+    ///
+    /// The retry restarts the request, so the earlier deltas neither belong to the
+    /// step that will report usage nor to its decode time.
+    pub(super) fn note_retried_step(&mut self) {
+        self.token_speed.note_partially_observed_step();
+        self.end_generation_segment();
+    }
+
     /// Track the live window only while the status line shows the speed item.
     pub(super) fn set_token_speed_live_enabled(&mut self, enabled: bool) {
         self.token_speed.set_live_enabled(enabled);
@@ -711,6 +720,33 @@ mod tests {
 
         // Calibrating the partial step would have reported 400 instead.
         assert!((rate - 100.0).abs() < 0.001, "rate was {rate}");
+    }
+
+    #[test]
+    fn a_retried_step_drops_its_partial_output_and_backoff() {
+        let mut tracker = live_tracker();
+        let start = Instant::now();
+        tracker.start_turn();
+        // The first attempt streams 100 estimated tokens and then breaks.
+        delta(&mut tracker, &"a".repeat(400), start);
+        tracker.note_partially_observed_step();
+        tracker.end_segment();
+        // After a 20s backoff the retry streams 200 estimated tokens and reports them.
+        let retry = start + Duration::from_secs(20);
+        delta(&mut tracker, &"a".repeat(400), retry);
+        delta(
+            &mut tracker,
+            &"a".repeat(400),
+            retry + Duration::from_secs(4),
+        );
+        tracker.note_step_usage(
+            /*total_output_tokens*/ 200, /*total_reasoning_tokens*/ 0,
+        );
+
+        let average = tracker.finish_turn().expect("turn average");
+
+        // Counting the abandoned attempt or the backoff would report 25 or 12.5.
+        assert!((average - 50.0).abs() < 0.001, "average was {average}");
     }
 
     #[test]
