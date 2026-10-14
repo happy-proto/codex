@@ -889,15 +889,20 @@ mod tests {
         // Switching threads restarts the totals, which must not look like a step
         // whose reported usage is the whole previous session.
         tracker.start_turn();
-        let next = start + Duration::from_secs(2);
-        delta(&mut tracker, &"a".repeat(400), next);
+        delta(
+            &mut tracker,
+            &"a".repeat(400),
+            start + Duration::from_secs(2),
+        );
         tracker.note_step_usage(
             /*total_output_tokens*/ 100, /*total_reasoning_tokens*/ 0,
         );
+        let next = start + Duration::from_secs(4);
+        delta(&mut tracker, &"a".repeat(400), next);
         let rate = delta(
             &mut tracker,
             &"a".repeat(400),
-            next + Duration::from_secs(4),
+            next + Duration::from_secs(2),
         )
         .expect("live rate");
 
