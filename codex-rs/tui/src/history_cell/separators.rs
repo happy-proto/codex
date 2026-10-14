@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::clock_format::ClockFormat;
+use crate::token_usage::format_token_rate;
 use chrono::DateTime;
 use chrono::Datelike;
 use chrono::Local;
@@ -19,6 +20,7 @@ use chrono::NaiveDate;
 pub struct FinalMessageSeparator {
     elapsed_seconds: Option<u64>,
     runtime_metrics: Option<RuntimeMetricsSummary>,
+    token_speed: Option<f64>,
     completed_at: Option<DateTime<Local>>,
     display_date: NaiveDate,
     clock_format: ClockFormat,
@@ -32,6 +34,7 @@ impl FinalMessageSeparator {
         Self {
             elapsed_seconds,
             runtime_metrics,
+            token_speed: None,
             completed_at: None,
             display_date: Local::now().date_naive(),
             clock_format: ClockFormat::TwelveHour,
@@ -53,6 +56,12 @@ impl FinalMessageSeparator {
         runtime_metrics: Option<RuntimeMetricsSummary>,
     ) -> Self {
         self.runtime_metrics = runtime_metrics;
+        self
+    }
+
+    /// Attaches the generation speed measured for the turn that just finished.
+    pub(crate) fn with_token_speed(mut self, token_speed: Option<f64>) -> Self {
+        self.token_speed = token_speed;
         self
     }
 
@@ -89,6 +98,9 @@ impl FinalMessageSeparator {
         }
         if let Some(metrics_label) = self.runtime_metrics.and_then(runtime_metrics_label) {
             label_parts.push(metrics_label);
+        }
+        if let Some(token_speed) = self.token_speed {
+            label_parts.push(format!("avg {} tok/s", format_token_rate(token_speed)));
         }
         (!label_parts.is_empty()).then(|| label_parts.join(" • "))
     }

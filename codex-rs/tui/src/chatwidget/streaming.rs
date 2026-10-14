@@ -567,6 +567,8 @@ impl ChatWidget {
     }
 
     pub(super) fn handle_stream_finished(&mut self) {
+        // No further deltas belong to the completed item, so the live rate ends here.
+        self.end_generation_segment();
         if self.task_complete_pending {
             self.bottom_pane.hide_status_indicator();
             self.task_complete_pending = false;

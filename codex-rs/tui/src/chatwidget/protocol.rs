@@ -1,3 +1,4 @@
+use super::token_speed::item_starts_tool_call;
 use super::*;
 
 impl ChatWidget {
@@ -59,6 +60,10 @@ impl ChatWidget {
                 }
             }
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
+                self.note_reported_token_usage(
+                    notification.token_usage.last.output_tokens,
+                    notification.token_usage.last.reasoning_output_tokens,
+                );
                 self.set_token_info(Some(token_usage_info_from_app_server(
                     notification.token_usage,
                 )));
@@ -124,11 +129,17 @@ impl ChatWidget {
                             &notification.item_id,
                         ))
                 {
+                    if replay_kind.is_none() {
+                        self.note_generation_delta(&notification.delta, DeltaKind::Content);
+                    }
                     self.on_agent_message_delta(notification.delta);
                 }
             }
             ServerNotification::PlanDelta(notification) => {
                 self.restore_realtime_transcripts_before_turn(&notification.turn_id);
+                if replay_kind.is_none() {
+                    self.note_generation_delta(&notification.delta, DeltaKind::Content);
+                }
                 self.on_plan_delta(notification.delta);
             }
             ServerNotification::ReasoningSummaryTextDelta(notification) => {
@@ -138,6 +149,9 @@ impl ChatWidget {
                 ) && self.status_state.reasoning_item_id.as_deref()
                     == Some(&notification.item_id)
                 {
+                    if replay_kind.is_none() {
+                        self.note_generation_delta(&notification.delta, DeltaKind::Reasoning);
+                    }
                     self.on_agent_reasoning_delta(notification.delta);
                 }
             }
@@ -149,6 +163,9 @@ impl ChatWidget {
                     )
                     && self.status_state.reasoning_item_id.as_deref() == Some(&notification.item_id)
                 {
+                    if replay_kind.is_none() {
+                        self.note_generation_delta(&notification.delta, DeltaKind::Reasoning);
+                    }
                     self.on_agent_reasoning_delta(notification.delta);
                 }
             }
@@ -551,6 +568,9 @@ impl ChatWidget {
         replay_kind: Option<ReplayKind>,
     ) {
         self.restore_realtime_transcripts_before_turn(&notification.turn_id);
+        if replay_kind.is_none() && item_starts_tool_call(&notification.item) {
+            self.note_tool_call_started();
+        }
         match notification.item {
             ThreadItem::UserMessage { content, .. } if replay_kind.is_none() => {
                 self.note_realtime_user_item_started(&notification.turn_id, &content);

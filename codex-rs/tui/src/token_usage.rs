@@ -8,6 +8,21 @@ use serde::Serialize;
 
 const BASELINE_TOKENS: i64 = 12000;
 
+/// Formats a generation rate for the status line and completion metadata.
+///
+/// Callers only pass rates they measured, so the precision follows the
+/// magnitude: tens of tokens per second keep one decimal, faster streams round
+/// to whole tokens.
+pub(crate) fn format_token_rate(rate: f64) -> String {
+    if rate >= 100.0 {
+        format!("{}", rate.round() as u64)
+    } else if rate >= 10.0 {
+        format!("{rate:.1}")
+    } else {
+        format!("{rate:.2}")
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub input_tokens: i64,

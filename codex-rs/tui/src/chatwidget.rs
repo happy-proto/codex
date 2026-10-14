@@ -393,6 +393,9 @@ use self::status_surfaces::CachedProjectRootName;
 mod thread_title_status;
 mod thread_usage;
 pub(crate) use self::thread_usage::ThreadUsageOutcome;
+mod token_speed;
+use self::token_speed::DeltaKind;
+use self::token_speed::TokenSpeedTracker;
 mod tool_lifecycle;
 mod tool_requests;
 mod transcript;
@@ -561,6 +564,7 @@ pub(crate) struct ChatWidget {
     pub(crate) windows_sandbox_elevated_setup_complete: bool,
     token_info: Option<TokenUsageInfo>,
     token_usage_pending: bool,
+    token_speed: TokenSpeedTracker,
     // Status and polling use account usage reads; response streams may identify meters differently.
     rate_limit_snapshots_by_limit_id: BTreeMap<String, RateLimitSnapshotDisplay>,
     refreshing_status_outputs: Vec<(u64, StatusHistoryHandle)>,

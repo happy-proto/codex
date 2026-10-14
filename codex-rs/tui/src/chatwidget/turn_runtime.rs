@@ -77,6 +77,7 @@ impl ChatWidget {
     pub(super) fn on_task_started(&mut self) {
         self.bottom_pane.dismiss_composer_sparkle();
         self.clear_context_compaction();
+        self.start_token_speed_turn();
         self.input_queue.user_turn_pending_start = false;
         self.reset_safety_buffering_for_turn_start();
         self.turn_lifecycle.start(Instant::now());
@@ -151,10 +152,17 @@ impl ChatWidget {
         if !from_replay {
             self.collect_runtime_metrics_delta();
         }
+        let token_speed = (!from_replay)
+            .then(|| self.finish_token_speed_turn())
+            .flatten();
         let runtime_metrics = (!from_replay && !self.turn_runtime_metrics.is_empty())
             .then_some(self.turn_runtime_metrics);
         if let Some(completion) = completion {
-            self.add_to_history(completion.with_runtime_metrics(runtime_metrics));
+            self.add_to_history(
+                completion
+                    .with_runtime_metrics(runtime_metrics)
+                    .with_token_speed(token_speed),
+            );
         } else if let Some(runtime_metrics) = runtime_metrics {
             self.add_to_history(history_cell::FinalMessageSeparator::new(
                 /*elapsed_seconds*/ None,
@@ -316,6 +324,7 @@ impl ChatWidget {
         self.flush_answer_and_plan_streams();
         self.flush_interrupt_activity();
         self.finish_dynamic_activity();
+        self.end_generation_segment();
         if self.status_state.reasoning_resume_turn_id.is_some() {
             self.on_agent_reasoning_final();
         }

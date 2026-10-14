@@ -128,6 +128,10 @@ pub(crate) enum StatusLineItem {
     /// Total output tokens generated.
     TotalOutputTokens,
 
+    /// Live generation speed of the active turn.
+    #[strum(to_string = "tokens-per-second", serialize = "tps")]
+    TokensPerSecond,
+
     /// Estimated credits attributed directly to the current enterprise thread.
     ThreadCredits,
 
@@ -199,6 +203,9 @@ impl StatusLineItem {
             StatusLineItem::UsedTokens => "Total tokens used in session (omitted when zero)",
             StatusLineItem::TotalInputTokens => "Total input tokens used in session",
             StatusLineItem::TotalOutputTokens => "Total output tokens used in session",
+            StatusLineItem::TokensPerSecond => {
+                "Live generation speed while a turn is streaming (omitted when idle)"
+            }
             StatusLineItem::ThreadCredits => {
                 "Estimated current-thread credits (Enterprise workspaces only; omitted when unavailable)"
             }
@@ -245,6 +252,7 @@ impl StatusLineItem {
             StatusLineItem::UsedTokens => StatusSurfacePreviewItem::UsedTokens,
             StatusLineItem::TotalInputTokens => StatusSurfacePreviewItem::TotalInputTokens,
             StatusLineItem::TotalOutputTokens => StatusSurfacePreviewItem::TotalOutputTokens,
+            StatusLineItem::TokensPerSecond => StatusSurfacePreviewItem::TokensPerSecond,
             StatusLineItem::ThreadCredits => StatusSurfacePreviewItem::ThreadCredits,
             StatusLineItem::EstimatedThreadCost => StatusSurfacePreviewItem::EstimatedThreadCost,
             StatusLineItem::SessionId => StatusSurfacePreviewItem::SessionId,

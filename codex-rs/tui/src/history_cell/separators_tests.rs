@@ -51,6 +51,26 @@ fn completion_label_shows_known_durations_including_short_turns() {
 }
 
 #[test]
+fn completion_label_reports_average_generation_speed() {
+    let today = Local::now().date_naive();
+    let labels = [8.5, 41.5, 128.4]
+        .into_iter()
+        .map(|token_speed| {
+            FinalMessageSeparator::new(/*elapsed_seconds*/ None, /*runtime_metrics*/ None)
+                .with_token_speed(Some(token_speed))
+                .label(today)
+                .expect("completion label")
+        })
+        .collect::<Vec<_>>();
+
+    insta::assert_snapshot!(labels.join("\n"), @"
+    avg 8.50 tok/s
+    avg 41.5 tok/s
+    avg 128 tok/s
+    ");
+}
+
+#[test]
 fn completion_label_includes_date_when_viewed_on_another_day() {
     let completed_at = completed_at();
     let cell = FinalMessageSeparator::new(
