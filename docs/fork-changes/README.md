@@ -2,7 +2,7 @@
 
 `main` 是选定上游 alpha 的原始提交，`fork` 维护全部自有改动。
 实际差异以 `git diff main..fork` 为准；本目录解释为什么改、如何改和长期维护边界。
-记录中的“维护中”表示当前代码仍有此改造，不替代最新 CI、Release 或安装验收。
+记录存在即表示改造仍在维护；文档不替代最新 CI、Release 或安装验收。
 
 | 编号 | 改造点 |
 | --- | --- |
@@ -15,8 +15,9 @@
 | 0007 | [工作中显式 skill 正文注入](0007-steered-skills.md) |
 | 0008 | [容量错误无限退避重试](0008-capacity-retries.md) |
 | 0009 | [已打开会话的名称同步](0009-thread-name-refresh.md) |
+| 0010 | [生成速度显示](0010-token-speed.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
-修改已有改造时更新原记录，新改造使用下一个编号；编号不重用，不对应 PR 或固定 commit SHA。
-上游吸收或删除改造时保留原文件，更新状态、吸收版本和残留差异。
+修改已有改造时更新原记录，新改造使用下一个编号；编号不对应 PR 或固定 commit SHA。
+上游吸收或删除改造时删除对应记录、更新索引并重新编号。
 历史 PR 链接仅供追溯讨论，日常维护直接在 `fork` 完成。
