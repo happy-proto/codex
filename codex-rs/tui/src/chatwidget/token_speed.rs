@@ -4,9 +4,13 @@
 //! rate has to be derived from the streamed content deltas. Deltas are measured
 //! with the same byte heuristic upstream uses to estimate context, then rescaled
 //! by the ratio observed on steps whose reported usage covers exactly the
-//! streamed content. Steps that stream tool-call arguments (never forwarded to
-//! the client) or hidden reasoning would inflate that ratio, so they are
-//! excluded from calibration.
+//! streamed content.
+//!
+//! Calibration compares the step's non-reasoning output tokens against the
+//! streamed message and plan deltas. Reasoning is excluded from both sides
+//! because its tokens are reported even when its text never reaches the client,
+//! and steps that streamed a tool call are skipped because tool arguments are
+//! output tokens the client never sees.
 //!
 //! Rates therefore describe the speed of the delta stream, not the billed token
 //! count. The turn average additionally excludes boundaries such as tool
@@ -54,14 +58,10 @@ const CALIBRATION_RANGE: RangeInclusive<f64> = 0.25..=4.0;
 /// Which stream a delta belongs to.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum DeltaKind {
+    /// Message or plan text, which calibration compares against reported usage.
     Content,
+    /// Reasoning text, which is reported as a subset of the output tokens.
     Reasoning,
-}
-
-impl DeltaKind {
-    fn is_reasoning(self) -> bool {
-        self == Self::Reasoning
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -105,9 +105,8 @@ impl Segment {
 #[derive(Clone, Copy, Debug)]
 struct PendingStep {
     estimated_tokens: f64,
-    reported_tokens: u64,
-    reasoning_tokens: u64,
-    reasoning_deltas: bool,
+    /// Output tokens that were not reasoning tokens.
+    visible_tokens: u64,
 }
 
 /// Measures generation speed from streamed deltas.
@@ -115,9 +114,8 @@ struct PendingStep {
 pub(super) struct TokenSpeedTracker {
     window: VecDeque<Sample>,
     segment: Segment,
-    /// Deltas seen since the last reported step, across item boundaries.
+    /// Message and plan deltas seen since the last reported step, across item boundaries.
     step_estimated_tokens: f64,
-    step_reasoning_deltas: bool,
     /// Content tokens accumulated for the turn, before calibration.
     turn_tokens: f64,
     /// Decode time accumulated for the turn.
@@ -127,8 +125,13 @@ pub(super) struct TokenSpeedTracker {
     tool_call_after_step: bool,
     /// Reported-to-estimated ratio learned from clean steps.
     calibration: Option<f64>,
-    /// Reported tokens of the last attributed step, used to ignore repeats.
-    last_reported_tokens: Option<u64>,
+    /// Cumulative output tokens of the last attributed step.
+    ///
+    /// Totals only grow, so comparing them separates a finished step from the
+    /// repeated usage notifications that rate-limit refreshes carry mid-step.
+    last_total_output_tokens: u64,
+    /// Cumulative reasoning tokens of the last attributed step.
+    last_total_reasoning_tokens: u64,
 }
 
 impl TokenSpeedTracker {
@@ -137,12 +140,10 @@ impl TokenSpeedTracker {
         self.window.clear();
         self.segment.reset();
         self.step_estimated_tokens = 0.0;
-        self.step_reasoning_deltas = false;
         self.turn_tokens = 0.0;
         self.turn_active = Duration::ZERO;
         self.pending = None;
         self.tool_call_after_step = false;
-        self.last_reported_tokens = None;
     }
 
     /// Record one streamed delta; returns the live rate when one can be reported.
@@ -163,8 +164,9 @@ impl TokenSpeedTracker {
             self.segment.first_at.get_or_insert(now);
             self.segment.last_at = Some(now);
             self.segment.deltas = self.segment.deltas.saturating_add(1);
-            self.step_estimated_tokens += tokens;
-            self.step_reasoning_deltas |= kind.is_reasoning();
+            if kind == DeltaKind::Content {
+                self.step_estimated_tokens += tokens;
+            }
             self.drop_expired_samples(now);
         }
 
@@ -189,22 +191,39 @@ impl TokenSpeedTracker {
         }
     }
 
-    /// Attribute the usage the app server reported for one finished step.
-    pub(super) fn note_step_usage(&mut self, output_tokens: u64, reasoning_tokens: u64) {
+    /// Attribute the cumulative usage the app server reported for one finished step.
+    ///
+    /// The session totals only grow, which separates a finished step from the
+    /// repeated notifications that rate-limit refreshes carry mid-step. Lower
+    /// totals mean a new session replaced this one, so the baseline is reset
+    /// without attributing anything.
+    pub(super) fn note_step_usage(
+        &mut self,
+        total_output_tokens: u64,
+        total_reasoning_tokens: u64,
+    ) {
         self.close_segment();
-        let reported_tokens = output_tokens.saturating_add(reasoning_tokens);
-        if reported_tokens == 0 || Some(reported_tokens) == self.last_reported_tokens {
+        if total_output_tokens < self.last_total_output_tokens {
+            self.pending = None;
+            self.step_estimated_tokens = 0.0;
+            self.last_total_output_tokens = total_output_tokens;
+            self.last_total_reasoning_tokens = total_reasoning_tokens;
             return;
         }
-        self.last_reported_tokens = Some(reported_tokens);
+        if total_output_tokens == self.last_total_output_tokens {
+            return;
+        }
+        let output_tokens = total_output_tokens - self.last_total_output_tokens;
+        let reasoning_tokens = total_reasoning_tokens
+            .saturating_sub(self.last_total_reasoning_tokens)
+            .min(output_tokens);
+        self.last_total_output_tokens = total_output_tokens;
+        self.last_total_reasoning_tokens = total_reasoning_tokens;
         self.pending = Some(PendingStep {
             estimated_tokens: self.step_estimated_tokens,
-            reported_tokens,
-            reasoning_tokens,
-            reasoning_deltas: self.step_reasoning_deltas,
+            visible_tokens: output_tokens - reasoning_tokens,
         });
         self.step_estimated_tokens = 0.0;
-        self.step_reasoning_deltas = false;
     }
 
     /// Finish the turn and return its average rate.
@@ -217,6 +236,11 @@ impl TokenSpeedTracker {
 
     /// Rate over the recent delta window, or `None` while nothing is streaming.
     pub(super) fn live_rate(&self, now: Instant) -> Option<f64> {
+        // A single delta cannot measure a rate: it would report the whole burst
+        // against the assumed short-burst duration.
+        if self.window.len() < 2 {
+            return None;
+        }
         let newest_at = self.window.back()?.at;
         if now.saturating_duration_since(newest_at) > LIVE_STALE {
             return None;
@@ -252,14 +276,10 @@ impl TokenSpeedTracker {
             // Tool arguments were generated as output tokens but never streamed here.
             return;
         }
-        if pending.reasoning_tokens > 0 && !pending.reasoning_deltas {
-            // Hidden reasoning is reported but not streamed.
+        if pending.visible_tokens == 0 || pending.estimated_tokens <= 0.0 {
             return;
         }
-        if pending.estimated_tokens <= 0.0 {
-            return;
-        }
-        let observed = (pending.reported_tokens as f64 / pending.estimated_tokens)
+        let observed = (pending.visible_tokens as f64 / pending.estimated_tokens)
             .clamp(*CALIBRATION_RANGE.start(), *CALIBRATION_RANGE.end());
         self.calibration = Some(match self.calibration {
             Some(previous) => (previous + observed) / 2.0,
@@ -280,15 +300,11 @@ impl TokenSpeedTracker {
     /// Gaps between kept samples count as decode time, so a stalled stream reports
     /// a lower rate instead of keeping the last burst rate. Bursts shorter than a
     /// second report the rate of their first second instead of an unbounded peak.
+    /// Callers pass at least two samples.
     fn window_active_time(&self, now: Instant) -> Duration {
-        let (Some(first), Some(last)) = (self.window.front(), self.window.back()) else {
+        let Some(last) = self.window.back() else {
             return Duration::ZERO;
         };
-        if self.window.len() == 1 {
-            return now
-                .saturating_duration_since(first.at)
-                .clamp(MIN_ACTIVE_TIME, SHORT_BURST_TIME);
-        }
         let mut active = now.saturating_duration_since(last.at);
         let mut previous: Option<Instant> = None;
         for sample in &self.window {
@@ -315,31 +331,31 @@ impl ChatWidget {
     /// Start measuring a new turn.
     pub(super) fn start_token_speed_turn(&mut self) {
         self.token_speed.start_turn();
-        self.refresh_status_line();
+        self.refresh_live_token_speed();
     }
 
     /// Record a streamed delta and refresh the live rate on the status line.
     pub(super) fn note_generation_delta(&mut self, delta: &str, kind: DeltaKind) {
         self.token_speed.record_delta(delta, kind, Instant::now());
-        self.refresh_status_line();
+        self.refresh_live_token_speed();
     }
 
-    /// Record the usage the app server reported for a finished step.
+    /// Record the cumulative usage the app server reported for a finished step.
     pub(super) fn note_reported_token_usage(
         &mut self,
-        output_tokens: i64,
-        reasoning_output_tokens: i64,
+        total_output_tokens: i64,
+        total_reasoning_output_tokens: i64,
     ) {
         self.token_speed.note_step_usage(
-            u64::try_from(output_tokens).unwrap_or_default(),
-            u64::try_from(reasoning_output_tokens).unwrap_or_default(),
+            u64::try_from(total_output_tokens).unwrap_or_default(),
+            u64::try_from(total_reasoning_output_tokens).unwrap_or_default(),
         );
     }
 
     /// Stop the live rate at a generation boundary.
     pub(super) fn end_generation_segment(&mut self) {
         self.token_speed.end_segment();
-        self.refresh_status_line();
+        self.refresh_live_token_speed();
     }
 
     /// Mark a tool call, whose arguments are not streamed to the client.
@@ -350,20 +366,40 @@ impl ChatWidget {
     /// Finish the turn, returning the average rate for the completion metadata.
     pub(super) fn finish_token_speed_turn(&mut self) -> Option<f64> {
         let average = self.token_speed.finish_turn();
-        self.refresh_status_line();
+        self.refresh_live_token_speed();
         average
     }
 
-    /// Live rate rendered for the configurable status line.
-    ///
-    /// Returns `None` whenever no deltas are streaming, so the item disappears
-    /// instead of showing a stale number.
+    /// Value of the `tokens-per-second` status-line item.
     pub(super) fn live_token_speed_label(&self) -> Option<String> {
         let rate = self.token_speed.live_rate(Instant::now())?;
         Some(format!(
             "{} tok/s",
             crate::token_usage::format_token_rate(rate)
         ))
+    }
+
+    /// Publish the live rate to the status line, or retract it once it is stale.
+    ///
+    /// The status line stores rendered text, so the value has to be pushed again
+    /// whenever it changes and retracted when deltas stop. Retraction is driven
+    /// by a scheduled frame that re-enters here through `pre_draw_tick`; the same
+    /// guard keeps the per-delta path free when the item is not configured.
+    pub(super) fn refresh_live_token_speed(&mut self) {
+        if !self.status_line_uses_token_speed {
+            self.token_speed_label = None;
+            return;
+        }
+        let label = self.live_token_speed_label();
+        if label == self.token_speed_label {
+            return;
+        }
+        let rate_is_live = label.is_some();
+        self.token_speed_label = label;
+        self.refresh_status_line_only();
+        if rate_is_live {
+            self.frame_requester.schedule_frame_in(LIVE_STALE);
+        }
     }
 }
 
@@ -453,8 +489,8 @@ mod tests {
             &"a".repeat(400),
             start + Duration::from_secs(4),
         );
-        // 200 estimated tokens streamed across both items, 400 reported.
-        tracker.note_step_usage(/*output_tokens*/ 400, /*reasoning_tokens*/ 0);
+        // 300 estimated tokens streamed across both items, 600 reported.
+        tracker.note_step_usage(/*output_tokens*/ 600, /*reasoning_tokens*/ 0);
         let next = start + Duration::from_secs(5);
         delta(&mut tracker, &"a".repeat(200), next);
         let rate = delta(
@@ -493,7 +529,7 @@ mod tests {
     }
 
     #[test]
-    fn hidden_reasoning_does_not_calibrate_generation_speed() {
+    fn reasoning_tokens_are_excluded_from_calibration() {
         let mut tracker = TokenSpeedTracker::default();
         let start = Instant::now();
         delta(&mut tracker, &"a".repeat(200), start);
@@ -502,7 +538,11 @@ mod tests {
             &"a".repeat(200),
             start + Duration::from_secs(2),
         );
-        tracker.note_step_usage(/*output_tokens*/ 100, /*reasoning_tokens*/ 800);
+        // The step reported 200 output tokens, 100 of which were reasoning; only
+        // the 100 streamed tokens are comparable to the estimate.
+        tracker.note_step_usage(
+            /*total_output_tokens*/ 200, /*total_reasoning_tokens*/ 100,
+        );
         let next = start + Duration::from_secs(3);
         delta(&mut tracker, &"a".repeat(200), next);
         let rate = delta(
@@ -512,7 +552,79 @@ mod tests {
         )
         .expect("live rate");
 
+        // The estimate was never rescaled, so the raw rate stands.
         assert!((rate - 50.0).abs() < 0.001, "rate was {rate}");
+    }
+
+    #[test]
+    fn repeated_usage_notifications_do_not_reset_the_step() {
+        let mut tracker = TokenSpeedTracker::default();
+        let start = Instant::now();
+        // First step: 100 estimated tokens, 100 reported.
+        delta(&mut tracker, &"a".repeat(400), start);
+        tracker.note_step_usage(
+            /*total_output_tokens*/ 100, /*total_reasoning_tokens*/ 0,
+        );
+        // A rate-limit refresh re-reports the same totals while the next step streams.
+        delta(
+            &mut tracker,
+            &"a".repeat(400),
+            start + Duration::from_secs(2),
+        );
+        tracker.note_step_usage(
+            /*total_output_tokens*/ 100, /*total_reasoning_tokens*/ 0,
+        );
+        // The second step streams another 200 estimated tokens and reports them.
+        delta(
+            &mut tracker,
+            &"a".repeat(400),
+            start + Duration::from_secs(4),
+        );
+        tracker.note_step_usage(
+            /*total_output_tokens*/ 300, /*total_reasoning_tokens*/ 0,
+        );
+
+        let next = start + Duration::from_secs(6);
+        delta(&mut tracker, &"a".repeat(400), next);
+        let rate = delta(
+            &mut tracker,
+            &"a".repeat(400),
+            next + Duration::from_secs(2),
+        )
+        .expect("live rate");
+
+        // Both steps reported one token per estimated token, so the estimate is
+        // unchanged: a refresh that reset the step would have doubled it.
+        assert!((rate - 100.0).abs() < 0.001, "rate was {rate}");
+    }
+
+    #[test]
+    fn a_restarted_session_resets_the_reported_baseline() {
+        let mut tracker = TokenSpeedTracker::default();
+        let start = Instant::now();
+        delta(&mut tracker, &"a".repeat(400), start);
+        tracker.note_step_usage(
+            /*total_output_tokens*/ 5_000, /*total_reasoning_tokens*/ 0,
+        );
+
+        // Switching threads restarts the totals, which must not look like a step
+        // whose reported usage is the whole previous session.
+        tracker.start_turn();
+        let next = start + Duration::from_secs(2);
+        delta(&mut tracker, &"a".repeat(400), next);
+        tracker.note_step_usage(
+            /*total_output_tokens*/ 100, /*total_reasoning_tokens*/ 0,
+        );
+        let rate = delta(
+            &mut tracker,
+            &"a".repeat(400),
+            next + Duration::from_secs(4),
+        )
+        .expect("live rate");
+
+        // The previous session's totals never reach the estimate, so no scaling
+        // is applied: 200 estimated tokens over 2s.
+        assert!((rate - 100.0).abs() < 0.001, "rate was {rate}");
     }
 
     #[test]

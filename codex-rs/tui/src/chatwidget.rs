@@ -565,6 +565,10 @@ pub(crate) struct ChatWidget {
     token_info: Option<TokenUsageInfo>,
     token_usage_pending: bool,
     token_speed: TokenSpeedTracker,
+    /// Live generation speed last written to the status line.
+    token_speed_label: Option<String>,
+    /// Whether the configured status line shows the generation-speed item.
+    status_line_uses_token_speed: bool,
     // Status and polling use account usage reads; response streams may identify meters differently.
     rate_limit_snapshots_by_limit_id: BTreeMap<String, RateLimitSnapshotDisplay>,
     refreshing_status_outputs: Vec<(u64, StatusHistoryHandle)>,
@@ -1177,6 +1181,8 @@ impl ChatWidget {
     pub(crate) fn pre_draw_tick(&mut self) {
         self.update_due_hook_visibility();
         self.schedule_hook_timer_if_needed();
+        // Retracts a stale generation speed once its scheduled frame arrives.
+        self.refresh_live_token_speed();
         self.bottom_pane.pre_draw_tick();
         self.flush_realtime_transcript_history();
         self.refresh_realtime_microphone_level();

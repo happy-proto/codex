@@ -175,6 +175,12 @@ impl ChatWidget {
     }
 
     fn sync_status_surface_shared_state(&mut self, selections: &StatusSurfaceSelections) {
+        // Cached for the per-delta generation-speed refresh, which must not parse
+        // the status-line configuration or rebuild the line when the item is off.
+        self.status_line_uses_token_speed = selections
+            .status_line_items
+            .contains(&StatusLineItem::TokensPerSecond);
+
         if !selections.uses_git_branch() {
             self.status_line_branch = None;
             self.status_line_branch_pending = false;
@@ -242,6 +248,16 @@ impl ChatWidget {
             .then(|| self.status_line_pull_request_url())
             .flatten();
         self.set_status_line_hyperlink(hyperlink_url);
+    }
+
+    /// Rebuild only the footer status line, without the terminal title or the
+    /// shared-state sync that a full refresh performs.
+    ///
+    /// Hot paths that update a single value (per streamed delta) use this so they
+    /// do not re-run git-branch lookups or rewrite the terminal title.
+    pub(super) fn refresh_status_line_only(&mut self) {
+        let selections = self.status_surface_selections();
+        self.refresh_status_line_from_selections(&selections);
     }
 
     /// Clears the terminal title Codex most recently wrote, if any.

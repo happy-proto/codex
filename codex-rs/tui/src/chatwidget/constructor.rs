@@ -149,6 +149,8 @@ impl ChatWidget {
             token_info: None,
             token_usage_pending: false,
             token_speed: TokenSpeedTracker::default(),
+            token_speed_label: None,
+            status_line_uses_token_speed: false,
             rate_limit_snapshots_by_limit_id: BTreeMap::new(),
             refreshing_status_outputs: Vec::new(),
             next_status_refresh_request_id: 0,

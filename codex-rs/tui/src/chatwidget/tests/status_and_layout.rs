@@ -5906,6 +5906,35 @@ async fn live_token_speed_is_only_shown_while_deltas_stream() {
 }
 
 #[tokio::test]
+async fn live_token_speed_retracts_from_the_status_line() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.local_settings.tui.status_line = Some(vec!["tokens-per-second".to_string()]);
+    chat.refresh_status_surfaces();
+
+    assert!(!shows_token_speed(&mut chat));
+
+    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
+    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
+
+    let status_line = chat
+        .status_line_text()
+        .expect("status line with live speed");
+    assert!(
+        status_line.contains("tok/s"),
+        "unexpected status line: {status_line}"
+    );
+
+    chat.end_generation_segment();
+
+    assert!(!shows_token_speed(&mut chat));
+}
+
+fn shows_token_speed(chat: &mut ChatWidget) -> bool {
+    chat.status_line_text()
+        .is_some_and(|line| line.contains("tok/s"))
+}
+
+#[tokio::test]
 async fn turn_completion_reports_average_generation_speed() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 

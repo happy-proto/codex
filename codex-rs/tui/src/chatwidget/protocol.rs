@@ -61,8 +61,8 @@ impl ChatWidget {
             }
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
                 self.note_reported_token_usage(
-                    notification.token_usage.last.output_tokens,
-                    notification.token_usage.last.reasoning_output_tokens,
+                    notification.token_usage.total.output_tokens,
+                    notification.token_usage.total.reasoning_output_tokens,
                 );
                 self.set_token_info(Some(token_usage_info_from_app_server(
                     notification.token_usage,
