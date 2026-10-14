@@ -5986,3 +5986,28 @@ async fn turn_completion_reports_average_generation_speed() {
         "expected completion metadata to report generation speed, got {rendered:?}"
     );
 }
+
+#[tokio::test]
+async fn snapshot_replay_marks_the_resumed_step_as_partial() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.replay_thread_turns(
+        vec![app_server_turn(
+            "turn-1",
+            AppServerTurnStatus::InProgress,
+            /*duration_ms*/ None,
+            /*error*/ None,
+        )],
+        ReplayKind::ThreadSnapshot,
+    );
+
+    // Only the tail of the resumed step is observable, so its reported usage must
+    // not rescale the estimate.
+    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
+    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
+    chat.note_reported_token_usage(
+        /*total_output_tokens*/ 400, /*total_reasoning_tokens*/ 0,
+    );
+
+    assert_eq!(chat.token_speed.calibration(), None);
+}

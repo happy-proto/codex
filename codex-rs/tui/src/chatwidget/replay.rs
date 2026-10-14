@@ -147,6 +147,9 @@ impl ChatWidget {
                 self.turn_lifecycle.last_turn_id = Some(turn_id.clone());
                 self.last_non_retry_error = None;
                 self.on_task_started();
+                // The resumed step streamed its earlier deltas before this session
+                // attached, so only its tail is observable.
+                self.note_partially_observed_step();
             }
             let trailing_reasoning_id = (status == TurnStatus::InProgress)
                 .then(|| items.last())

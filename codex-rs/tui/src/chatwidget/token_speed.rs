@@ -218,6 +218,18 @@ impl TokenSpeedTracker {
         self.partial_step = true;
     }
 
+    /// Drop everything streamed for a step that was abandoned mid-flight.
+    ///
+    /// The retry restarts the request, so the earlier deltas neither belong to the
+    /// step that will report usage nor to its decode time.
+    pub(super) fn discard_partial_step(&mut self) {
+        self.partial_step = true;
+        self.segment.reset();
+        self.window.clear();
+        self.step_estimated_tokens = 0.0;
+        self.step_tool_call = false;
+    }
+
     /// Enable or disable live-rate tracking for the status line.
     pub(super) fn set_live_enabled(&mut self, enabled: bool) {
         self.live_enabled = enabled;
@@ -379,6 +391,11 @@ impl TokenSpeedTracker {
             self.window.pop_front();
         }
     }
+
+    #[cfg(test)]
+    pub(super) fn calibration(&self) -> Option<f64> {
+        self.calibration
+    }
 }
 
 impl ChatWidget {
@@ -404,8 +421,8 @@ impl ChatWidget {
     /// The retry restarts the request, so the earlier deltas neither belong to the
     /// step that will report usage nor to its decode time.
     pub(super) fn note_retried_step(&mut self) {
-        self.token_speed.note_partially_observed_step();
-        self.end_generation_segment();
+        self.token_speed.discard_partial_step();
+        self.refresh_live_token_speed();
     }
 
     /// Track the live window only while the status line shows the speed item.
@@ -727,10 +744,14 @@ mod tests {
         let mut tracker = live_tracker();
         let start = Instant::now();
         tracker.start_turn();
-        // The first attempt streams 100 estimated tokens and then breaks.
+        // The first attempt streams 200 estimated tokens over 1s and then breaks.
         delta(&mut tracker, &"a".repeat(400), start);
-        tracker.note_partially_observed_step();
-        tracker.end_segment();
+        delta(
+            &mut tracker,
+            &"a".repeat(400),
+            start + Duration::from_secs(1),
+        );
+        tracker.discard_partial_step();
         // After a 20s backoff the retry streams 200 estimated tokens and reports them.
         let retry = start + Duration::from_secs(20);
         delta(&mut tracker, &"a".repeat(400), retry);
@@ -745,7 +766,8 @@ mod tests {
 
         let average = tracker.finish_turn().expect("turn average");
 
-        // Counting the abandoned attempt or the backoff would report 25 or 12.5.
+        // Counting the abandoned attempt would report 80, and counting the backoff
+        // as well would report about 18.
         assert!((average - 50.0).abs() < 0.001, "average was {average}");
     }
 
