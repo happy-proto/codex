@@ -1,0 +1,103 @@
+//! Optional local throughput; remote connections never consult the local database.
+
+use super::*;
+
+impl App {
+    pub(super) async fn refresh_generation_speeds(&mut self, thread_id: ThreadId) {
+        self.chat_widget.generation_speeds.clear();
+        if self.app_server_target.uses_remote_workspace() {
+            return;
+        }
+        let Some(state_db) = self.state_db.as_ref() else {
+            return;
+        };
+        // Optional metadata must not hold up transcript completion on a busy database.
+        match tokio::time::timeout(
+            Duration::from_millis(100),
+            state_db.generation_speeds(thread_id),
+        )
+        .await
+        {
+            Ok(Ok(speeds)) => {
+                self.chat_widget.generation_speeds = speeds
+                    .into_iter()
+                    .map(|(turn_id, speed)| ((thread_id, turn_id), speed))
+                    .collect();
+            }
+            Ok(Err(err)) => tracing::debug!(%err, "generation speed read skipped"),
+            Err(_) => tracing::debug!("generation speed read timed out"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::test_support::make_test_app;
+    use crate::test_support::boxed_future;
+    use codex_protocol::protocol::SessionSource;
+
+    #[tokio::test]
+    async fn generation_speed_local_daemon_replay_is_isolated_and_remote_is_hidden()
+    -> anyhow::Result<()> {
+        let mut app = boxed_future!(make_test_app()).await;
+        let db = codex_state::StateRuntime::init(app.config.sqlite_config().clone(), "test".into())
+            .await?;
+        let first = ThreadId::new();
+        let second = ThreadId::new();
+        for (thread_id, tokens) in [(first, 100), (second, 300)] {
+            let metadata = codex_state::ThreadMetadataBuilder::new(
+                thread_id,
+                app.config
+                    .codex_home
+                    .join(format!("rollout-{thread_id}.jsonl")),
+                chrono::Utc::now(),
+                SessionSource::Cli,
+            )
+            .build("test");
+            db.upsert_thread(&metadata).await?;
+            db.save_generation_speed(thread_id, "turn", tokens, 1_000_000)
+                .await?;
+        }
+        app.state_db = Some(db);
+        app.refresh_generation_speeds(first).await;
+        assert_eq!(
+            app.chat_widget
+                .generation_speeds
+                .get(&(first, "turn".into())),
+            Some(&100.0)
+        );
+        let endpoint = crate::RemoteAppServerEndpoint::UnixSocket {
+            socket_path: codex_utils_absolute_path::AbsolutePathBuf::try_from(
+                app.config.codex_home.join("daemon.sock"),
+            )?,
+        };
+        app.app_server_target = AppServerTarget::LocalDaemon {
+            endpoint: endpoint.clone(),
+            allow_embedded_fallback: true,
+        };
+        app.refresh_generation_speeds(second).await;
+        assert_eq!(app.chat_widget.generation_speeds.len(), 1);
+        assert_eq!(
+            app.chat_widget
+                .generation_speeds
+                .get(&(second, "turn".into())),
+            Some(&300.0)
+        );
+        app.app_server_target = AppServerTarget::Remote { endpoint };
+        app.refresh_generation_speeds(first).await;
+        assert!(app.chat_widget.generation_speeds.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn generation_speed_unavailable_storage_discards_cached_values() {
+        let mut app = boxed_future!(make_test_app()).await;
+        let thread_id = ThreadId::new();
+        app.chat_widget
+            .generation_speeds
+            .insert((thread_id, "turn".into()), 100.0);
+        app.refresh_generation_speeds(thread_id).await;
+        assert!(app.chat_widget.generation_speeds.is_empty());
+    }
+}

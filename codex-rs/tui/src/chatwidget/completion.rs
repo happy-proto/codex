@@ -40,10 +40,20 @@ impl ChatWidget {
         self.turn_lifecycle
             .rendered_completion_turn_ids
             .insert(turn.id.clone());
+        let generation_speed = (turn.status == TurnStatus::Completed && turn.error.is_none())
+            .then(|| {
+                self.thread_id.and_then(|thread_id| {
+                    self.generation_speeds
+                        .get(&(thread_id, turn.id.clone()))
+                        .copied()
+                })
+            })
+            .flatten();
         let cell = history_cell::FinalMessageSeparator::new(
             elapsed_seconds,
             /*runtime_metrics*/ None,
-        );
+        )
+        .with_generation_speed(generation_speed);
         Some(match completed_at {
             Some(completed_at) => {
                 cell.with_completed_at(completed_at, crate::clock_format::ClockFormat::system())

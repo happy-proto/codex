@@ -875,6 +875,31 @@ impl Session {
         };
         let saved_guardian_completion =
             matches!(event, EventMsg::TurnComplete(_)) && self.is_private_guardian_reviewer().await;
+        if matches!(&event, EventMsg::TurnComplete(completed) if completed.error.is_none())
+            && !matches!(
+                &turn_context.session_source,
+                codex_protocol::protocol::SessionSource::SubAgent(_)
+            )
+            && let Some((output_tokens, request_duration_us)) =
+                turn_context.turn_timing_state.generation_speed_totals()
+            && let Some(state_db) = self.state_db()
+        {
+            let result = tokio::time::timeout(
+                Duration::from_millis(200),
+                state_db.save_generation_speed(
+                    self.thread_id,
+                    &turn_context.sub_id,
+                    output_tokens,
+                    request_duration_us,
+                ),
+            )
+            .await;
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => tracing::debug!(%err, "generation speed persistence skipped"),
+                Err(_) => tracing::debug!("generation speed persistence timed out"),
+            }
+        }
         if !saved_guardian_completion {
             self.send_event(turn_context.as_ref(), event.clone()).await;
         }

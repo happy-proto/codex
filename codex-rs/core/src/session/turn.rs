@@ -2733,6 +2733,10 @@ async fn try_run_sampling_request(
     let effort = sess
         .reasoning_effort_for_request(&step_context.settings, super::RequestEffortUsage::Sampling)
         .await;
+    let generation_measurement = turn_context
+        .turn_timing_state
+        .begin_generation_measurement()
+        .observe_failures(client_session.generation_failure_counter());
     let mut stream = client_session
         .stream(
             prompt,
@@ -3140,6 +3144,10 @@ async fn try_run_sampling_request(
                 usage_metadata,
                 end_turn,
             } => {
+                generation_measurement.complete(
+                    &response_id,
+                    token_usage.as_ref().map(|usage| usage.output_tokens),
+                );
                 sess.services
                     .analytics_events_client
                     .track_code_mode_tool_call(

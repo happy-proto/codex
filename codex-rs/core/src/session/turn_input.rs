@@ -183,6 +183,10 @@ impl PreparedTurnInputSettings {
         let Some((turn_context, settings_snapshot)) = turn_context else {
             return Ok(None);
         };
+        if kind == TurnStartKind::Recovery {
+            // Requests completed before daemon recovery have no live monotonic measurement.
+            turn_context.turn_timing_state.invalidate_generation_speed();
+        }
         if let Some(turn_trigger) = turn_trigger {
             turn_context
                 .turn_metadata_state

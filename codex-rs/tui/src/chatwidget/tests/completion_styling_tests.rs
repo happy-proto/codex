@@ -8,6 +8,43 @@ use pretty_assertions::assert_eq;
 
 const COMPLETED_AT: i64 = 1_700_000_000;
 
+#[tokio::test]
+async fn generation_speed_matches_live_and_replayed_completion_and_thread_identity() {
+    for replay in [false, true] {
+        let (mut chat, mut rx, _) = make_chatwidget_manual().await;
+        let thread_id = ThreadId::new();
+        chat.thread_id = Some(thread_id);
+        chat.generation_speeds
+            .insert((thread_id, "turn-1".into()), 42.34);
+        // A different thread using the same turn ID must not affect the label.
+        chat.generation_speeds
+            .insert((ThreadId::new(), "turn-1".into()), 999.0);
+        let turn = completed_turn(Some(1_000), Some(COMPLETED_AT));
+        if replay {
+            chat.replay_thread_turns(vec![turn], ReplayKind::ResumeInitialMessages);
+        } else {
+            complete_turn(&mut chat, turn);
+        }
+        let label = completion_labels(&mut rx);
+        assert!(label.ends_with(" • 42.3 token/s"), "{label}");
+        assert!(!label.contains("999"));
+    }
+}
+
+#[tokio::test]
+async fn generation_speed_does_not_appear_before_completion_or_on_interruption() {
+    let (mut chat, mut rx, _) = make_chatwidget_manual().await;
+    let thread_id = ThreadId::new();
+    chat.thread_id = Some(thread_id);
+    chat.generation_speeds
+        .insert((thread_id, "turn-1".into()), 42.3);
+    assert!(completion_labels(&mut rx).is_empty());
+    let mut interrupted = completed_turn(Some(1_000), Some(COMPLETED_AT));
+    interrupted.status = AppServerTurnStatus::Interrupted;
+    complete_turn(&mut chat, interrupted);
+    assert!(!completion_labels(&mut rx).contains("token/s"));
+}
+
 fn completed_turn(duration_ms: Option<i64>, completed_at: Option<i64>) -> AppServerTurn {
     AppServerTurn {
         completed_at,

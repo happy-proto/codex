@@ -579,6 +579,12 @@ impl App {
             return;
         }
 
+        if let ServerNotification::TurnCompleted(completed) = &notification
+            && let Ok(thread_id) = ThreadId::from_string(&completed.thread_id)
+            && self.chat_widget.thread_id() == Some(thread_id)
+        {
+            self.refresh_generation_speeds(thread_id).await;
+        }
         self.chat_widget
             .handle_server_notification(notification, /*replay_kind*/ None);
     }
