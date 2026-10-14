@@ -22,7 +22,7 @@ fn generation_speed_record(speed: f64) -> codex_state::GenerationSpeedRecord {
 #[tokio::test]
 async fn generation_speed_matches_live_and_replayed_completion_and_thread_identity() {
     for replay in [false, true] {
-        let (mut chat, mut rx, _) = make_chatwidget_manual().await;
+        let (mut chat, mut rx, _) = make_chatwidget_manual(None).await;
         let thread_id = ThreadId::new();
         chat.thread_id = Some(thread_id);
         chat.generation_speeds
@@ -46,7 +46,7 @@ async fn generation_speed_matches_live_and_replayed_completion_and_thread_identi
 
 #[tokio::test]
 async fn generation_speed_does_not_appear_before_completion_or_on_interruption() {
-    let (mut chat, mut rx, _) = make_chatwidget_manual().await;
+    let (mut chat, mut rx, _) = make_chatwidget_manual(None).await;
     let thread_id = ThreadId::new();
     chat.thread_id = Some(thread_id);
     chat.generation_speeds
@@ -84,7 +84,7 @@ fn completed_turn(duration_ms: Option<i64>, completed_at: Option<i64>) -> AppSer
 #[tokio::test]
 async fn generation_speed_stale_completion_identity_is_hidden_on_live_and_replay() {
     for replay in [false, true] {
-        let (mut chat, mut rx, _) = make_chatwidget_manual().await;
+        let (mut chat, mut rx, _) = make_chatwidget_manual(None).await;
         let thread_id = ThreadId::new();
         chat.thread_id = Some(thread_id);
         chat.generation_speeds

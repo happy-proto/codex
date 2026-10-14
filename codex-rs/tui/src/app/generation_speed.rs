@@ -58,7 +58,8 @@ mod tests {
                 thread_id,
                 app.config
                     .codex_home
-                    .join(format!("rollout-{thread_id}.jsonl")),
+                    .join(format!("rollout-{thread_id}.jsonl"))
+                    .to_path_buf(),
                 chrono::Utc::now(),
                 SessionSource::Cli,
             )
