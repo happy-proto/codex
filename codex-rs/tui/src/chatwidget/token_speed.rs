@@ -121,8 +121,12 @@ pub(super) struct TokenSpeedTracker {
     /// Decode time accumulated for the turn.
     turn_active: Duration,
     pending: Option<PendingStep>,
-    /// A tool call started after the step that is awaiting attribution.
-    tool_call_after_step: bool,
+    /// Whether a tool call belongs to the step awaiting attribution.
+    ///
+    /// A call can be reported before or after that step's usage, and its
+    /// arguments are output tokens that never stream here, so the flag is only
+    /// cleared when the pending step is actually committed or dropped.
+    step_had_tool_call: bool,
     /// Reported-to-estimated ratio learned from clean steps.
     calibration: Option<f64>,
     /// Cumulative output tokens of the last attributed step.
@@ -143,7 +147,7 @@ impl TokenSpeedTracker {
         self.turn_tokens = 0.0;
         self.turn_active = Duration::ZERO;
         self.pending = None;
-        self.tool_call_after_step = false;
+        self.step_had_tool_call = false;
     }
 
     /// Record one streamed delta; returns the live rate when one can be reported.
@@ -186,9 +190,7 @@ impl TokenSpeedTracker {
     /// Note that a tool call started; its streamed arguments never reach us.
     pub(super) fn note_tool_call(&mut self) {
         self.close_segment();
-        if self.pending.is_some() || self.step_estimated_tokens > 0.0 {
-            self.tool_call_after_step = true;
-        }
+        self.step_had_tool_call = true;
     }
 
     /// Attribute the cumulative usage the app server reported for one finished step.
@@ -202,17 +204,23 @@ impl TokenSpeedTracker {
         total_output_tokens: u64,
         total_reasoning_tokens: u64,
     ) {
-        self.close_segment();
         if total_output_tokens < self.last_total_output_tokens {
+            // A new session starts from lower totals; nothing here belongs to the
+            // step that was streaming.
+            self.close_segment();
             self.pending = None;
             self.step_estimated_tokens = 0.0;
+            self.step_had_tool_call = false;
             self.last_total_output_tokens = total_output_tokens;
             self.last_total_reasoning_tokens = total_reasoning_tokens;
             return;
         }
         if total_output_tokens == self.last_total_output_tokens {
+            // Rate-limit refreshes re-report the previous step's totals. The step
+            // that is streaming now keeps its segment and its estimate.
             return;
         }
+        self.close_segment();
         let output_tokens = total_output_tokens - self.last_total_output_tokens;
         let reasoning_tokens = total_reasoning_tokens
             .saturating_sub(self.last_total_reasoning_tokens)
@@ -268,10 +276,12 @@ impl TokenSpeedTracker {
 
     /// Turn reported usage into a calibration ratio for later steps.
     fn commit_pending_step(&mut self) {
-        let invalidated = std::mem::take(&mut self.tool_call_after_step);
+        // Keep the tool flag while no step is pending: a tool call can be reported
+        // before the usage of the step it ends.
         let Some(pending) = self.pending.take() else {
             return;
         };
+        let invalidated = std::mem::take(&mut self.step_had_tool_call);
         if invalidated {
             // Tool arguments were generated as output tokens but never streamed here.
             return;
@@ -383,21 +393,22 @@ impl ChatWidget {
     ///
     /// The status line stores rendered text, so the value has to be pushed again
     /// whenever it changes and retracted when deltas stop. Retraction is driven
-    /// by a scheduled frame that re-enters here through `pre_draw_tick`; the same
-    /// guard keeps the per-delta path free when the item is not configured.
+    /// by a scheduled frame that re-enters here through `pre_draw_tick`. While a
+    /// rate is live a frame always stays pending: drop it for an unchanged value
+    /// and an unrelated redraw could consume the only deadline and leave the
+    /// number on screen. The same guard keeps the per-delta path free when the
+    /// item is not configured.
     pub(super) fn refresh_live_token_speed(&mut self) {
         if !self.status_line_uses_token_speed {
             self.token_speed_label = None;
             return;
         }
         let label = self.live_token_speed_label();
-        if label == self.token_speed_label {
-            return;
+        if label != self.token_speed_label {
+            self.token_speed_label = label;
+            self.refresh_status_line_only();
         }
-        let rate_is_live = label.is_some();
-        self.token_speed_label = label;
-        self.refresh_status_line_only();
-        if rate_is_live {
+        if self.token_speed_label.is_some() {
             self.frame_requester.schedule_frame_in(LIVE_STALE);
         }
     }
@@ -526,6 +537,69 @@ mod tests {
         .expect("live rate");
 
         assert!((rate - 50.0).abs() < 0.001, "rate was {rate}");
+    }
+
+    #[test]
+    fn tool_calls_reported_before_the_rest_of_the_step_still_exclude_it() {
+        let mut tracker = TokenSpeedTracker::default();
+        let start = Instant::now();
+        // The tool call is reported first, then the response streams more text.
+        tracker.note_tool_call();
+        delta(&mut tracker, &"a".repeat(400), start);
+        delta(
+            &mut tracker,
+            &"a".repeat(400),
+            start + Duration::from_secs(2),
+        );
+        tracker.note_step_usage(
+            /*total_output_tokens*/ 900, /*total_reasoning_tokens*/ 0,
+        );
+        let next = start + Duration::from_secs(4);
+        delta(&mut tracker, &"a".repeat(400), next);
+        let rate = delta(
+            &mut tracker,
+            &"a".repeat(400),
+            next + Duration::from_secs(2),
+        )
+        .expect("live rate");
+
+        assert!((rate - 100.0).abs() < 0.001, "rate was {rate}");
+    }
+
+    #[test]
+    fn repeated_usage_notifications_keep_the_segment_together() {
+        let mut tracker = TokenSpeedTracker::default();
+        let start = Instant::now();
+        tracker.start_turn();
+        delta(&mut tracker, &"a".repeat(400), start);
+        delta(
+            &mut tracker,
+            &"a".repeat(400),
+            start + Duration::from_secs(2),
+        );
+        tracker.note_step_usage(
+            /*total_output_tokens*/ 200, /*total_reasoning_tokens*/ 0,
+        );
+        // A refresh reports the same totals while the second step is mid-segment.
+        delta(
+            &mut tracker,
+            &"a".repeat(400),
+            start + Duration::from_secs(4),
+        );
+        tracker.note_step_usage(
+            /*total_output_tokens*/ 200, /*total_reasoning_tokens*/ 0,
+        );
+        delta(
+            &mut tracker,
+            &"a".repeat(400),
+            start + Duration::from_secs(10),
+        );
+
+        let average = tracker.finish_turn().expect("turn average");
+
+        // Both segments keep two deltas: 400 estimated tokens over 8s. Splitting
+        // the second segment would leave single-delta segments and report 100.
+        assert!((average - 50.0).abs() < 0.001, "average was {average}");
     }
 
     #[test]

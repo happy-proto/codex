@@ -5935,6 +5935,32 @@ fn shows_token_speed(chat: &mut ChatWidget) -> bool {
 }
 
 #[tokio::test]
+async fn live_token_speed_keeps_an_expiry_frame_pending() {
+    let (frame_requester, mut frames) = FrameRequester::test_channel();
+    let (mut chat, _rx, _op_rx) = super::helpers::make_chatwidget_manual_with_auth(
+        /*model_override*/ None,
+        /*has_chatgpt_account*/ false,
+        /*has_codex_backend_auth*/ false,
+        frame_requester,
+    )
+    .await;
+    chat.local_settings.tui.status_line = Some(vec!["tokens-per-second".to_string()]);
+    chat.refresh_status_surfaces();
+
+    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
+    chat.note_generation_delta(&"a".repeat(400), DeltaKind::Content);
+
+    // Simulate a redraw that already consumed the deadline scheduled by a delta.
+    while frames.try_recv().is_ok() {}
+    chat.pre_draw_tick();
+
+    assert!(
+        frames.try_recv().is_ok(),
+        "an expiry frame must stay pending while the rate is live"
+    );
+}
+
+#[tokio::test]
 async fn turn_completion_reports_average_generation_speed() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
