@@ -16,6 +16,20 @@ pub(super) async fn initialize(pool: &SqlitePool) -> anyhow::Result<()> {
 }
 
 impl StateRuntime {
+    /// Remove any pre-crash measurement when the same turn resumes or becomes invalid.
+    pub async fn clear_generation_speed(
+        &self,
+        thread_id: ThreadId,
+        turn_id: &str,
+    ) -> anyhow::Result<()> {
+        sqlx::query("DELETE FROM fork_generation_speeds WHERE thread_id = ? AND turn_id = ?")
+            .bind(thread_id.to_string())
+            .bind(turn_id)
+            .execute(self.pool.as_ref())
+            .await?;
+        Ok(())
+    }
+
     /// Persist only a complete, valid local turn before publishing its completion event.
     pub async fn save_generation_speed(
         &self,
@@ -128,6 +142,11 @@ mod tests {
                 .await?
                 .contains_key("legacy")
         );
+        writer.clear_generation_speed(first, "turn").await?;
+        assert!(reader.generation_speeds(first).await?.is_empty());
+        writer
+            .save_generation_speed(first, "turn", 200, 4_000_000)
+            .await?;
         writer.delete_thread(first).await?;
         assert!(reader.generation_speeds(first).await?.is_empty());
         assert_eq!(

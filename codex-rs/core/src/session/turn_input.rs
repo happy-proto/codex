@@ -186,6 +186,20 @@ impl PreparedTurnInputSettings {
         if kind == TurnStartKind::Recovery {
             // Requests completed before daemon recovery have no live monotonic measurement.
             turn_context.turn_timing_state.invalidate_generation_speed();
+            if let Some(state_db) = session.state_db() {
+                match tokio::time::timeout(
+                    std::time::Duration::from_millis(200),
+                    state_db.clear_generation_speed(session.thread_id, &turn_context.sub_id),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => {
+                        tracing::debug!(%err, "recovered generation speed cleanup skipped")
+                    }
+                    Err(_) => tracing::debug!("recovered generation speed cleanup timed out"),
+                }
+            }
         }
         if let Some(turn_trigger) = turn_trigger {
             turn_context

@@ -35,7 +35,9 @@ class GenerationSpeedStorageTests(unittest.TestCase):
         self.writer.execute(
             production_query("INSERT INTO"), (thread, turn, tokens, duration)
         )
-        self.writer.execute(production_query("DELETE FROM"), (thread, thread))
+        self.writer.execute(
+            production_query("DELETE FROM fork_generation_speeds\n"), (thread, thread)
+        )
         self.writer.commit()
 
     def read(self, connection, thread):
@@ -62,6 +64,20 @@ class GenerationSpeedStorageTests(unittest.TestCase):
                 self.save("first", "invalid", tokens, duration)
             self.writer.rollback()
         self.assertEqual(self.read(self.writer, "first"), [])
+
+    def test_recovery_cleanup_removes_only_the_same_turn(self):
+        self.save("first", "recovered", 20, 1_000_000)
+        self.save("first", "other", 30, 1_000_000)
+        self.save("second", "recovered", 40, 1_000_000)
+        self.writer.execute(
+            production_query("DELETE FROM fork_generation_speeds WHERE"),
+            ("first", "recovered"),
+        )
+        self.writer.commit()
+        self.assertEqual(self.read(self.writer, "first"), [("other", 30, 1_000_000)])
+        self.assertEqual(
+            self.read(self.writer, "second"), [("recovered", 40, 1_000_000)]
+        )
 
     def test_retention_and_updates_are_per_thread(self):
         self.save("second", "retained", 30, 1_000_000)

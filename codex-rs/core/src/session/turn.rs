@@ -3146,7 +3146,12 @@ async fn try_run_sampling_request(
             } => {
                 generation_measurement.complete(
                     &response_id,
-                    token_usage.as_ref().map(|usage| usage.output_tokens),
+                    // Interrupted responses also arrive as Completed with end_turn=false.
+                    // The existing event cannot prove completeness in that case.
+                    token_usage
+                        .as_ref()
+                        .filter(|_| end_turn != Some(false))
+                        .map(|usage| usage.output_tokens),
                 );
                 sess.services
                     .analytics_events_client

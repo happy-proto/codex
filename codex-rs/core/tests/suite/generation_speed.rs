@@ -1,9 +1,11 @@
 //! The metric is available when completion is observed, and incomplete usage hides a turn.
 
 use codex_features::Feature;
+use codex_protocol::protocol::EventMsg;
 use core_test_support::responses;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::test_codex;
+use core_test_support::wait_for_event;
 use serde_json::json;
 use wiremock::ResponseTemplate;
 
@@ -94,5 +96,95 @@ async fn generation_speed_is_hidden_after_an_internal_http_retry_succeeds() -> a
             .await?
             .is_empty()
     );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn generation_speed_is_hidden_after_an_interrupted_response_with_usage() -> anyhow::Result<()>
+{
+    skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    responses::mount_sse_sequence(
+        &server,
+        vec![
+            responses::sse(vec![
+                responses::ev_response_created("interrupted"),
+                responses::ev_assistant_message("partial", "partial"),
+                json!({"type": "response.incomplete", "response": {"id": "interrupted",
+                    "incomplete_details": {"reason": "interrupted"},
+                    "usage": {"input_tokens": 10, "output_tokens": 100, "total_tokens": 110}
+                }}),
+            ]),
+            responses::sse(vec![
+                responses::ev_response_created("follow-up"),
+                responses::ev_assistant_message("final", "done"),
+                json!({"type": "response.completed", "response": {"id": "follow-up",
+                    "usage": {"input_tokens": 10, "output_tokens": 100, "total_tokens": 110}
+                }}),
+            ]),
+        ],
+    )
+    .await;
+    let test = test_codex()
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::Sqlite)
+                .expect("enable sqlite");
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    test.submit_turn("continue interrupted output").await?;
+    let db = test.codex.state_db().expect("state db enabled");
+    assert!(
+        db.generation_speeds(test.session_configured.thread_id)
+            .await?
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn generation_speed_recovery_clears_pre_crash_statistics() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("recovered"),
+            responses::ev_assistant_message("message", "done"),
+            json!({"type": "response.completed", "response": {"id": "recovered",
+                "usage": {"input_tokens": 10, "output_tokens": 100, "total_tokens": 110}
+            }}),
+        ]),
+    )
+    .await;
+    let test = test_codex()
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::Sqlite)
+                .expect("enable sqlite");
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    let db = test.codex.state_db().expect("state db enabled");
+    let thread_id = test.session_configured.thread_id;
+    db.save_generation_speed(thread_id, "recovered-turn", 20, 1_000_000)
+        .await?;
+    test.codex
+        .recover_turn_if_idle(codex_core::RecoverTurnRequest {
+            turn_id: "recovered-turn".into(),
+            thread_settings: Default::default(),
+            trace: None,
+            cyber_access_program: None,
+        })
+        .await?;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(completed)
+        if completed.turn_id == "recovered-turn" && completed.error.is_none())
+    })
+    .await;
+    assert!(db.generation_speeds(thread_id).await?.is_empty());
     Ok(())
 }
