@@ -110,7 +110,7 @@ jobs:
           cache-targets: false
           cache-bin: false
           shared-key: ${{ matrix.cache }}-downloads
-          save-if: ${{ github.ref == 'refs/heads/fork' || github.event_name == 'workflow_dispatch' }}
+          save-if: ${{ github.ref == 'refs/heads/fork' }}
       - name: 配置 mbx 编译缓存
         id: mbx
         uses: jdx/mr-boxington-action@d0825fbaf3cc36ca2609aa38e71046265a1f1e37 # v1
@@ -119,7 +119,7 @@ jobs:
           working-directory: codex-rs
           github-cache-mode: objects
           cache-generation: ${{ matrix.cache }}
-          save-on-workflow-dispatch: true
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/fork' }}
       - name: Install version-management tool
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
@@ -222,7 +222,7 @@ jobs:
           cache-targets: false
           cache-bin: false
           shared-key: fork-tests-v1-downloads
-          save-if: ${{ github.ref == 'refs/heads/fork' || github.event_name == 'workflow_dispatch' }}
+          save-if: ${{ github.ref == 'refs/heads/fork' }}
       - name: 配置 mbx 编译缓存
         id: mbx
         uses: jdx/mr-boxington-action@d0825fbaf3cc36ca2609aa38e71046265a1f1e37 # v1
@@ -231,7 +231,7 @@ jobs:
           working-directory: codex-rs
           github-cache-mode: objects
           cache-generation: fork-tests-v1
-          save-on-workflow-dispatch: true
+          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/fork' }}
       - name: Install version-management tool
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
