@@ -32,6 +32,15 @@ impl GenerationSpeedState {
     }
 
     pub(crate) fn totals(&self) -> Option<(u64, u64)> {
+        tracing::info!(
+            event.name = "codex.generation_speed.totals",
+            invalid = self.invalid,
+            active_requests = self.active_requests,
+            completed_responses = self.response_ids.len(),
+            output_tokens = self.output_tokens,
+            request_duration_us = self.request_duration.as_micros() as u64,
+            "generation speed totals evaluated"
+        );
         if self.invalid || self.active_requests != 0 || self.response_ids.is_empty() {
             return None;
         }
@@ -40,21 +49,39 @@ impl GenerationSpeedState {
     }
 
     pub(crate) fn invalidate(&mut self) {
+        self.invalidate_with_reason("daemon_recovery");
+    }
+
+    fn invalidate_with_reason(&mut self, reason: &'static str) {
+        tracing::info!(
+            event.name = "codex.generation_speed.invalidated",
+            reason,
+            already_invalid = self.invalid,
+            "generation speed invalidated"
+        );
         self.invalid = true;
     }
 
     fn record(&mut self, response_id: &str, output_tokens: Option<i64>, duration: Duration) {
         self.active_requests -= 1;
-        let Some(output_tokens) = output_tokens.and_then(|tokens| u64::try_from(tokens).ok())
-        else {
-            self.invalid = true;
+        let Some(tokens) = output_tokens else {
+            self.invalidate_with_reason("missing_usage");
             return;
         };
-        if response_id.is_empty()
-            || !self.response_ids.insert(response_id.to_string())
-            || duration.is_zero()
-        {
-            self.invalid = true;
+        let Ok(output_tokens) = u64::try_from(tokens) else {
+            self.invalidate_with_reason("negative_output_tokens");
+            return;
+        };
+        if response_id.is_empty() {
+            self.invalidate_with_reason("empty_response_id");
+            return;
+        }
+        if !self.response_ids.insert(response_id.to_string()) {
+            self.invalidate_with_reason("duplicate_response_id");
+            return;
+        }
+        if duration.is_zero() {
+            self.invalidate_with_reason("zero_request_duration");
             return;
         }
         match (
@@ -65,7 +92,7 @@ impl GenerationSpeedState {
                 self.output_tokens = tokens;
                 self.request_duration = elapsed;
             }
-            _ => self.invalid = true,
+            _ => self.invalidate_with_reason("totals_overflow"),
         }
     }
 }
@@ -92,6 +119,10 @@ impl GenerationSpeedMeasurement {
             .as_ref()
             .is_some_and(|(counter, baseline)| counter.load(Ordering::Relaxed) != *baseline)
         {
+            self.state
+                .lock()
+                .unwrap_or_else(|err| err.into_inner())
+                .invalidate_with_reason("client_failure_counter_changed");
             None
         } else {
             output_tokens
@@ -109,7 +140,7 @@ impl Drop for GenerationSpeedMeasurement {
         if !self.completed {
             let mut state = self.state.lock().unwrap_or_else(|err| err.into_inner());
             state.active_requests -= 1;
-            state.invalid = true;
+            state.invalidate_with_reason("request_dropped_before_completion");
         }
     }
 }

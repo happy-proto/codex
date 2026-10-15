@@ -892,6 +892,15 @@ impl Session {
                         Some(completed_at),
                         Some(duration_ms),
                     ) => {
+                        tracing::info!(
+                            event.name = "codex.generation_speed.persistence",
+                            thread_id = %self.thread_id,
+                            turn_id = %turn_context.sub_id,
+                            action = "save",
+                            output_tokens,
+                            request_duration_us,
+                            "generation speed persistence started"
+                        );
                         state_db
                             .save_generation_speed(
                                 self.thread_id,
@@ -907,6 +916,17 @@ impl Session {
                             .await
                     }
                     _ => {
+                        tracing::info!(
+                            event.name = "codex.generation_speed.persistence",
+                            thread_id = %self.thread_id,
+                            turn_id = %turn_context.sub_id,
+                            action = "clear",
+                            has_totals = totals.is_some(),
+                            ?started_at,
+                            ?completed_at,
+                            ?duration_ms,
+                            "generation speed persistence started"
+                        );
                         state_db
                             .clear_generation_speed(self.thread_id, &turn_context.sub_id)
                             .await
@@ -915,9 +935,14 @@ impl Session {
             })
             .await;
             match result {
-                Ok(Ok(())) => {}
-                Ok(Err(err)) => tracing::debug!(%err, "generation speed persistence skipped"),
-                Err(_) => tracing::debug!("generation speed persistence timed out"),
+                Ok(Ok(())) => tracing::info!(
+                    event.name = "codex.generation_speed.persistence_completed",
+                    thread_id = %self.thread_id,
+                    turn_id = %turn_context.sub_id,
+                    "generation speed persistence completed"
+                ),
+                Ok(Err(err)) => tracing::info!(%err, "generation speed persistence skipped"),
+                Err(_) => tracing::info!("generation speed persistence timed out"),
             }
         }
         if !saved_guardian_completion {

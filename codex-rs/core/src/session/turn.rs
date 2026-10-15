@@ -2812,6 +2812,11 @@ async fn try_run_sampling_request(
             Ok(Err(_)) => {
                 if let Some(interrupt) = stream.interrupt.take() {
                     if step_context.settings.model_info.use_responses_lite {
+                        tracing::info!(
+                            event.name = "codex.generation_speed.interrupt",
+                            reason = "preempt_drain",
+                            "generation speed request interrupted and draining"
+                        );
                         let _ = interrupt.send(codex_api::ResponseInterrupt::Drain);
                     }
                     // Drain the response normally before reusing its connection and history.
@@ -3144,14 +3149,20 @@ async fn try_run_sampling_request(
                 usage_metadata,
                 end_turn,
             } => {
+                tracing::info!(
+                    event.name = "codex.generation_speed.response",
+                    thread_id = %sess.thread_id,
+                    turn_id = %turn_context.sub_id,
+                    response_id,
+                    ?end_turn,
+                    output_tokens = token_usage.as_ref().map(|usage| usage.output_tokens),
+                    "generation speed response completed"
+                );
                 generation_measurement.complete(
                     &response_id,
-                    // Interrupted responses also arrive as Completed with end_turn=false.
-                    // The existing event cannot prove completeness in that case.
-                    token_usage
-                        .as_ref()
-                        .filter(|_| end_turn != Some(false))
-                        .map(|usage| usage.output_tokens),
+                    // end_turn controls follow-up sampling, not the validity of terminal usage.
+                    // A drained interruption can still provide exact usage for this request.
+                    token_usage.as_ref().map(|usage| usage.output_tokens),
                 );
                 sess.services
                     .analytics_events_client

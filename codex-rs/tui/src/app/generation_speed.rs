@@ -6,9 +6,11 @@ impl App {
     pub(super) async fn refresh_generation_speeds(&mut self, thread_id: ThreadId) {
         self.chat_widget.generation_speeds.clear();
         if self.app_server_target.uses_remote_workspace() {
+            tracing::info!(%thread_id, reason = "remote_workspace", "generation speed read skipped");
             return;
         }
         let Some(state_db) = self.state_db.as_ref() else {
+            tracing::info!(%thread_id, reason = "storage_unavailable", "generation speed read skipped");
             return;
         };
         // Optional metadata must not hold up transcript completion on a busy database.
@@ -19,13 +21,14 @@ impl App {
         .await
         {
             Ok(Ok(speeds)) => {
+                tracing::info!(%thread_id, records = speeds.len(), "generation speed records loaded");
                 self.chat_widget.generation_speeds = speeds
                     .into_iter()
                     .map(|(turn_id, speed)| ((thread_id, turn_id), speed))
                     .collect();
             }
-            Ok(Err(err)) => tracing::debug!(%err, "generation speed read skipped"),
-            Err(_) => tracing::debug!("generation speed read timed out"),
+            Ok(Err(err)) => tracing::info!(%thread_id, %err, "generation speed read skipped"),
+            Err(_) => tracing::info!(%thread_id, "generation speed read timed out"),
         }
     }
 }

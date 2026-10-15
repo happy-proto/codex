@@ -100,19 +100,20 @@ async fn generation_speed_is_hidden_after_an_internal_http_retry_succeeds() -> a
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn generation_speed_is_hidden_after_an_interrupted_response_with_usage() -> anyhow::Result<()>
-{
+async fn generation_speed_uses_terminal_usage_when_sampling_must_continue() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
-    let server = responses::start_mock_server().await;
-    responses::mount_sse_sequence(
+    for event_type in ["response.completed", "response.incomplete"] {
+        for has_usage in [true, false] {
+            let server = responses::start_mock_server().await;
+            responses::mount_sse_sequence(
         &server,
         vec![
             responses::sse(vec![
                 responses::ev_response_created("interrupted"),
                 responses::ev_assistant_message("partial", "partial"),
-                json!({"type": "response.incomplete", "response": {"id": "interrupted",
+                json!({"type": event_type, "response": {"id": "interrupted", "end_turn": false,
                     "incomplete_details": {"reason": "interrupted"},
-                    "usage": {"input_tokens": 10, "output_tokens": 100, "total_tokens": 110}
+                    "usage": has_usage.then(|| json!({"input_tokens": 10, "output_tokens": 100, "total_tokens": 110}))
                 }}),
             ]),
             responses::sse(vec![
@@ -125,22 +126,37 @@ async fn generation_speed_is_hidden_after_an_interrupted_response_with_usage() -
         ],
     )
     .await;
-    let test = test_codex()
-        .with_config(|config| {
-            config
-                .features
-                .enable(Feature::Sqlite)
-                .expect("enable sqlite");
-        })
-        .build_with_auto_env(&server)
-        .await?;
-    test.submit_turn("continue interrupted output").await?;
-    let db = test.codex.state_db().expect("state db enabled");
-    assert!(
-        db.generation_speeds(test.session_configured.thread_id)
-            .await?
-            .is_empty()
-    );
+            let test = test_codex()
+                .with_config(|config| {
+                    config
+                        .features
+                        .enable(Feature::Sqlite)
+                        .expect("enable sqlite");
+                })
+                .build_with_auto_env(&server)
+                .await?;
+            test.submit_turn("continue interrupted output").await?;
+            let db = test.codex.state_db().expect("state db enabled");
+            let speeds = db
+                .generation_speeds(test.session_configured.thread_id)
+                .await?;
+            assert_eq!(
+                speeds.len(),
+                usize::from(has_usage),
+                "{event_type}, has_usage={has_usage}"
+            );
+            if has_usage {
+                assert!(
+                    speeds
+                        .values()
+                        .next()
+                        .expect("turn speed")
+                        .tokens_per_second()
+                        > 0.0
+                );
+            }
+        }
+    }
     Ok(())
 }
 

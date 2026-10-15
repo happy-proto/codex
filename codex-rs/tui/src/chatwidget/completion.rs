@@ -55,6 +55,35 @@ impl ChatWidget {
                 })
             })
             .flatten();
+        let has_record = self.thread_id.is_some_and(|thread_id| {
+            self.generation_speeds
+                .contains_key(&(thread_id, turn.id.clone()))
+        });
+        let reason = if turn.status != TurnStatus::Completed || turn.error.is_some() {
+            "turn_not_successful"
+        } else if !has_record {
+            "record_unavailable"
+        } else if generation_speed.is_none() {
+            "completion_identity_mismatch"
+        } else if !generation_speed.is_some_and(|speed| speed.is_finite() && speed >= 0.05) {
+            "below_display_threshold_or_invalid"
+        } else {
+            "displayed"
+        };
+        tracing::info!(
+            event.name = "codex.generation_speed.display",
+            thread_id = ?self.thread_id,
+            turn_id = %turn.id,
+            status = ?turn.status,
+            has_error = turn.error.is_some(),
+            has_record,
+            reason,
+            started_at = ?turn.started_at,
+            completed_at = ?turn.completed_at,
+            duration_ms = ?turn.duration_ms,
+            ?generation_speed,
+            "generation speed display evaluated"
+        );
         let cell = history_cell::FinalMessageSeparator::new(
             elapsed_seconds,
             /*runtime_metrics*/ None,

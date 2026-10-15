@@ -37,10 +37,22 @@ impl GenerationSpeedRecord {
         completed_at: Option<i64>,
         duration_ms: Option<i64>,
     ) -> Option<f64> {
-        (started_at == Some(self.completion.started_at)
+        let matches = started_at == Some(self.completion.started_at)
             && completed_at == Some(self.completion.completed_at)
-            && duration_ms == Some(self.completion.duration_ms))
-        .then_some(self.speed)
+            && duration_ms == Some(self.completion.duration_ms);
+        if !matches {
+            tracing::info!(
+                event.name = "codex.generation_speed.completion_mismatch",
+                expected_started_at = self.completion.started_at,
+                expected_completed_at = self.completion.completed_at,
+                expected_duration_ms = self.completion.duration_ms,
+                ?started_at,
+                ?completed_at,
+                ?duration_ms,
+                "generation speed completion identity mismatch"
+            );
+        }
+        matches.then_some(self.speed)
     }
 }
 
