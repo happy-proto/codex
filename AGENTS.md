@@ -4,10 +4,11 @@
 发布或安装时，使用 [维护 skill](.agents/skills/codex-fork-maintenance/SKILL.md)。
 
 - `origin` 指向 `happy-proto/codex`，`upstream` 指向 `openai/codex`。
-- `main` 保持选定上游 alpha Release 的原始提交，不包含 fork 修改。
-- `fork` 是默认分支，保存全部自有改动；直接在此维护，不建立长期功能分支、PR 或 stack。
-  远端只保留 `main` 和 `fork`；确需临时验证分支或 worktree 时，完成后清理。
-- 用 `git diff main..fork` 核对实际改动，维护索引见 [编号改造记录](docs/fork-changes/README.md)。
+- `main` 是唯一长期分支和默认分支，保存上游基线与全部自有改动；直接在此维护，
+  不建立长期功能分支、PR 或 stack。确需临时验证分支或 worktree 时，完成后清理。
+- `scripts/fork/upstream-tag` 记录选定的已发布上游 alpha；同步时将自有提交 rebase 到新 tag，
+  不使用 GitHub 的 Sync fork 合并上游，也不直接跟进移动的 `upstream/main`。
+- 用 `git diff "$(cat scripts/fork/upstream-tag)" HEAD` 核对实际改动，维护索引见 [编号改造记录](docs/fork-changes/README.md)。
   每个改造点对应一个 `NNNN-主题.md`，说明动机、实现、代码入口、验证和同步上游的注意事项。
   修改现有改造时同步更新对应记录；新增改造使用下一个编号，编号不重用。
   上游吸收或移除改造时保留记录并标明状态，不让文档误报仍有差异。
@@ -22,6 +23,8 @@
   不为少量耗时收益大范围删除上游功能或增加复杂条件分支。
 - 沿用 Rust/Cargo/just 工具链。本机性能有限，只做格式、静态检查、定向脚本测试和已构建产物验收。
   编译、release 构建、全量或其它重型测试交给 GitHub Actions，未经用户明确要求不在本地执行。
+- 仅默认分支允许保存编译和下载缓存、发布产物；其它分支手动验证只读取缓存。
+  上游完整 CI 与历史实验 workflow 保持禁用，只启用自有发布工作流。
 - Fork 自有维护说明使用中文；用户另行要求 PR 时，标题和正文用中文，commit message 用英文。
 
 ## 维护本文件与 skill

@@ -17,6 +17,34 @@ import release
 
 
 class VersionTests(unittest.TestCase):
+    def test_plan_uses_the_recorded_alpha_without_an_upstream_mirror_branch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            tag = "rust-v0.163.0-alpha.11"
+            (root / "scripts/fork").mkdir(parents=True)
+            (root / "scripts/fork/upstream-tag").write_text(tag + "\n")
+            with mock.patch.object(release, "ROOT", root):
+                release.run("git", "init", "-b", "main")
+                release.run("git", "config", "user.name", "Test")
+                release.run("git", "config", "user.email", "test@example.com")
+                release.run("git", "add", ".")
+                release.run("git", "commit", "-m", "Upstream baseline")
+                baseline = release.output("git", "rev-parse", "HEAD")
+                release.run("git", "tag", tag)
+                release.run("git", "commit", "--allow-empty", "-m", "Personal changes")
+                source = release.output("git", "rev-parse", "HEAD")
+                with mock.patch.object(
+                    release, "selected_version", return_value="0.163.0-alpha.11.fork.1"
+                ):
+                    metadata = release.plan()
+                    self.assertEqual(metadata["upstream_commit"], baseline)
+                    self.assertEqual(metadata["source_commit"], source)
+                    # A recorded tag outside the source ancestry must still fail.
+                    release.run("git", "checkout", "--orphan", "unrelated")
+                    release.run("git", "commit", "-m", "Unrelated history")
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        release.plan()
+
     def test_xz_package_preserves_binary_contents_and_executable_mode(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -235,7 +263,9 @@ class PublicationTests(unittest.TestCase):
             calls = []
 
             def api(path, *args):
-                if path.endswith("heads/fork"):
+                if path == f"repos/{release.REPO}":
+                    return {"default_branch": "main"}
+                if path.endswith("heads/main"):
                     return {"object": {"sha": metadata["source_commit"]}}
                 if "POST" in args and path.endswith("git/refs"):
                     tags[metadata["tag"]] = metadata["source_commit"]
@@ -292,7 +322,12 @@ class PublicationTests(unittest.TestCase):
             with (
                 mock.patch.object(release, "ROOT", root),
                 mock.patch.object(
-                    release, "api", return_value={"object": {"sha": "a" * 40}}
+                    release,
+                    "api",
+                    side_effect=[
+                        {"default_branch": "main"},
+                        {"object": {"sha": "a" * 40}},
+                    ],
                 ),
                 mock.patch.object(release, "run") as write,
                 mock.patch.object(
@@ -374,7 +409,12 @@ class PublicationTests(unittest.TestCase):
             with (
                 mock.patch.object(release, "ROOT", root),
                 mock.patch.object(
-                    release, "api", return_value={"object": {"sha": "b" * 40}}
+                    release,
+                    "api",
+                    side_effect=[
+                        {"default_branch": "main"},
+                        {"object": {"sha": "b" * 40}},
+                    ],
                 ),
                 mock.patch.object(release, "run") as write,
                 mock.patch.object(release.subprocess, "run") as query,

@@ -84,8 +84,6 @@ def plan(target=TARGET):
     version = selected_version()
     upstream_commit = output("git", "rev-parse", f"{upstream_tag}^{{commit}}")
     source_commit = output("git", "rev-parse", "HEAD")
-    if output("git", "rev-parse", "origin/main") != upstream_commit:
-        raise ValueError("origin/main is not the selected upstream alpha commit")
     run("git", "merge-base", "--is-ancestor", upstream_commit, source_commit)
     return {
         "schema_version": 1,
@@ -284,8 +282,9 @@ def publish():
     dist = ROOT / "fork-dist"
     metadata = collect_packages(dist)
     source = metadata["source_commit"]
+    branch = api(f"repos/{REPO}")["default_branch"]
     # A queued older run must never publish over a newer branch head.
-    current = api(f"repos/{REPO}/git/ref/heads/fork")["object"]["sha"]
+    current = api(f"repos/{REPO}/git/ref/heads/{branch}")["object"]["sha"]
     if source != current:
         print("Skipping superseded fork build.")
         return
@@ -359,7 +358,7 @@ def publish():
             )
             if sha256(Path(directory) / package["asset"]) != package["sha256"]:
                 raise ValueError("Uploaded package failed verification")
-    current = api(f"repos/{REPO}/git/ref/heads/fork")["object"]["sha"]
+    current = api(f"repos/{REPO}/git/ref/heads/{branch}")["object"]["sha"]
     if source != current:
         print("Skipping publication of superseded fork build.")
         return

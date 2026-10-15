@@ -2,7 +2,7 @@ name: Fork CI and release
 
 on:
   push:
-    branches: [fork]
+    branches: [main]
   workflow_dispatch:
     inputs:
       tui_test_filter:
@@ -23,7 +23,7 @@ permissions:
 
 concurrency:
   group: fork-${{ github.ref }}-${{ github.event_name }}
-  # fork 新推送自动取消旧构建，优先验证和发布最新提交。
+  # main 新推送自动取消旧构建，优先验证和发布最新提交。
   # 手动耗时实验使用独立队列，不自动取消正在运行的实验。
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
@@ -90,7 +90,6 @@ jobs:
         run: |
           tag=$(cat scripts/fork/upstream-tag)
           git fetch https://github.com/openai/codex.git "refs/tags/$tag:refs/tags/$tag"
-          git fetch origin main
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: '3.12'
@@ -110,7 +109,7 @@ jobs:
           cache-targets: false
           cache-bin: false
           shared-key: ${{ matrix.cache }}-downloads
-          save-if: ${{ github.ref == 'refs/heads/fork' }}
+          save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
       - name: 配置 mbx 编译缓存
         id: mbx
         uses: jdx/mr-boxington-action@d0825fbaf3cc36ca2609aa38e71046265a1f1e37 # v1
@@ -119,7 +118,7 @@ jobs:
           working-directory: codex-rs
           github-cache-mode: objects
           cache-generation: ${{ matrix.cache }}
-          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/fork' }}
+          save-on-workflow-dispatch: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
       - name: Install version-management tool
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
@@ -206,7 +205,6 @@ jobs:
         run: |
           tag=$(cat scripts/fork/upstream-tag)
           git fetch https://github.com/openai/codex.git "refs/tags/$tag:refs/tags/$tag"
-          git fetch origin main
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: '3.12'
@@ -222,7 +220,7 @@ jobs:
           cache-targets: false
           cache-bin: false
           shared-key: fork-tests-v1-downloads
-          save-if: ${{ github.ref == 'refs/heads/fork' }}
+          save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
       - name: 配置 mbx 编译缓存
         id: mbx
         uses: jdx/mr-boxington-action@d0825fbaf3cc36ca2609aa38e71046265a1f1e37 # v1
@@ -231,7 +229,7 @@ jobs:
           working-directory: codex-rs
           github-cache-mode: objects
           cache-generation: fork-tests-v1
-          save-on-workflow-dispatch: ${{ github.ref == 'refs/heads/fork' }}
+          save-on-workflow-dispatch: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
       - name: Install version-management tool
         uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532
         with:
@@ -350,7 +348,7 @@ jobs:
     concurrency:
       group: fork-publication
       cancel-in-progress: false
-    if: github.repository == 'happy-proto/codex' && github.ref == 'refs/heads/fork' && !inputs.tui_test_filter && !inputs.core_test_filter && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    if: github.repository == 'happy-proto/codex' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && !inputs.tui_test_filter && !inputs.core_test_filter && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     needs: [build, tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 20

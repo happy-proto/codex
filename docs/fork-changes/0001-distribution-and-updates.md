@@ -9,13 +9,14 @@
 
 ## 如何改
 
-`main` 保存选定上游 alpha 的原始提交，`fork` 直接维护全部改造。
+`main` 是唯一长期分支，直接维护全部改造；`scripts/fork/upstream-tag` 记录上游基线，定期 rebase 到新 alpha。
 `fork.yml` 并行执行 Linux Rust 测试、Linux AMD64 和 ARM macOS 完整包构建，通过后自动发布。
 版本使用上游 alpha 加 `.fork.N`，不覆盖已发布版本；平台包和 SHA-256 由 `fork-release.json` 描述。
 安装器校验下载、保留上一包供回退；用系统文件锁避免崩溃遗留锁阻断更新。
 启动检查只显示一次后台提示，不自动安装；`codex update` 主动更新，daemon 默认关闭自动升级。
 Rust 编译使用 mbx 对象缓存，下载缓存独立维护。
-两类缓存仅允许 `fork` 分支写入；其它分支的手动运行只恢复缓存，避免实验构建挤占正式缓存。
+两类缓存仅允许默认分支写入；其它分支的手动运行只恢复缓存，避免实验构建挤占正式缓存。
+发布前校验记录的上游 tag 是源码祖先，两次核对默认分支头，避免旧构建覆盖新版本。
 
 ## 入口和验证
 
@@ -27,6 +28,8 @@ Rust 编译使用 mbx 对象缓存，下载缓存独立维护。
 
 **Breaking change**：新包采用 tar.xz，下载脚本须读取清单而不是拼 tar.gz 文件名；历史 gzip 包仍可安装。
 启动时不再弹更新选择框，使用 `codex update`；需要 daemon 自动更新时显式开启设置。
+默认分支迁移到 `main` 后删除旧 `fork` 分支；旧版 CLI 内置的分支安装 URL 随之失效，
+需使用 README 中的 `main` 安装命令更新一次，之后继续使用 `codex update`。
 根 README 只保留使用入口，[上游英文说明](../upstream-readme.md) 独立保存；同步上游时更新该说明并核对相对链接。
 同步时核对上游 package builder、资源布局、签名和更新入口。macOS 包为 ad-hoc 签名，Linux 包依赖 glibc。
 验证必须区分 CI、发布产物和本机实际安装，不能仅凭版本输出判断完整包可用。

@@ -72,7 +72,7 @@ const INSTALLER_STDERR_TAIL_BYTES: usize = 2 * 1024;
 const INSTALLER_STDERR_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
 #[cfg(unix)]
 const INSTALL_URL: &str =
-    "https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork/install.sh";
+    "https://raw.githubusercontent.com/happy-proto/codex/main/scripts/fork/install.sh";
 #[cfg(windows)]
 const INSTALL_URL: &str = "https://chatgpt.com/codex/install.ps1";
 

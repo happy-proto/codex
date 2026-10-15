@@ -66,7 +66,7 @@ impl UpdateAction {
                 "sh",
                 &[
                     "-c",
-                    "curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork/install.sh | sh",
+                    "curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/main/scripts/fork/install.sh | sh",
                 ],
             ),
             UpdateAction::StandaloneWindows => (
@@ -173,7 +173,7 @@ mod tests {
                 "sh",
                 &[
                     "-c",
-                    "curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/fork/scripts/fork/install.sh | sh"
+                    "curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/main/scripts/fork/install.sh | sh"
                 ][..],
             )
         );
