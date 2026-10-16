@@ -265,6 +265,7 @@ mod resume_preparation;
 mod right_click_paste;
 pub(crate) use right_click_paste::PasteEnvironment;
 mod pane_motion;
+mod generation_speed;
 mod safety_buffering;
 mod safety_recourse;
 mod server_version_notice;
