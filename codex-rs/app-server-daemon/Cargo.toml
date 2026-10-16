@@ -41,6 +41,7 @@ tempfile = { workspace = true }
 tokio-tungstenite = { workspace = true }
 tracing = { workspace = true }
 tracing-appender = { workspace = true }
+codex-build-info.workspace = true
 
 [dev-dependencies]
 codex-utils-cargo-bin = { workspace = true }
