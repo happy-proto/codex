@@ -29,6 +29,16 @@ pub enum UpdateAction {
 impl UpdateAction {
     #[cfg(any(not(debug_assertions), test))]
     pub(crate) fn from_install_context(context: &InstallContext) -> Option<Self> {
+        if context.package_manifest().is_some_and(|manifest| {
+            manifest
+                .version
+                .pre
+                .as_str()
+                .split('.')
+                .any(|part| part == "fork")
+        }) {
+            return Some(UpdateAction::StandaloneUnix);
+        }
         match &context.method {
             InstallMethod::Npm => Some(UpdateAction::NpmGlobalLatest),
             InstallMethod::Bun => Some(UpdateAction::BunGlobalLatest),
@@ -56,7 +66,7 @@ impl UpdateAction {
                 "sh",
                 &[
                     "-c",
-                    r#"s=$(curl -fsSL https://chatgpt.com/codex/install.sh) && CODEX_NON_INTERACTIVE=1 eval "$s""#,
+                    r#"s=$(curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/main/scripts/fork/install.sh) && sh -c "$s""#,
                 ],
             ),
             UpdateAction::StandaloneWindows => (
@@ -175,7 +185,8 @@ mod tests {
     #[test]
     fn standalone_unix_update_fails_when_installer_download_fails() {
         let (command, args) = UpdateAction::StandaloneUnix.command_args();
-        let offline_command = args[1].replace("https://chatgpt.com", "file:///dev/null");
+        let offline_command =
+            args[1].replace("https://raw.githubusercontent.com", "file:///dev/null");
         assert_ne!(offline_command, args[1], "installer URL must be replaced");
         let output = std::process::Command::new(command)
             .args([args[0], &offline_command])
