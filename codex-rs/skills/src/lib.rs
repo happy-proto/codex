@@ -56,8 +56,9 @@ use std::hash::Hasher;
 use thiserror::Error;
 
 const SYSTEM_SKILLS_DIR: Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets/samples");
+const FORK_SKILLS_DIR: Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets/fork");
 
-const SYSTEM_SKILLS_DIR_NAME: &str = ".system";
+const SYSTEM_SKILLS_DIR_NAME: &str = ".fork";
 const SKILLS_DIR_NAME: &str = "skills";
 const SYSTEM_SKILLS_MARKER_FILENAME: &str = ".codex-system-skills.marker";
 const SYSTEM_SKILLS_MARKER_SALT: &str = "v1";
@@ -65,11 +66,12 @@ const SYSTEM_SKILLS_MARKER_SALT: &str = "v1";
 /// Returns the on-disk cache location for embedded system skills from an absolute CODEX_HOME.
 pub fn system_cache_root_dir(codex_home: &AbsolutePathBuf) -> AbsolutePathBuf {
     codex_home
-        .join(SKILLS_DIR_NAME)
         .join(SYSTEM_SKILLS_DIR_NAME)
+        .join(SKILLS_DIR_NAME)
 }
 
-/// Installs embedded system skills into `CODEX_HOME/skills/.system`.
+/// Installs embedded system skills into `CODEX_HOME/.fork/skills`.
+/// The fork cache stays outside the official Desktop's skill discovery roots.
 ///
 /// Clears any existing system skills directory first and then writes the embedded
 /// skills directory into place.
@@ -78,10 +80,6 @@ pub fn system_cache_root_dir(codex_home: &AbsolutePathBuf) -> AbsolutePathBuf {
 /// with a fingerprint of the embedded directory. When the marker matches, the
 /// install is skipped.
 pub fn install_system_skills(codex_home: &AbsolutePathBuf) -> Result<(), SystemSkillsError> {
-    let skills_root_dir = codex_home.join(SKILLS_DIR_NAME);
-    fs::create_dir_all(skills_root_dir.as_path())
-        .map_err(|source| SystemSkillsError::io("create skills root dir", source))?;
-
     let dest_system = system_cache_root_dir(codex_home);
 
     let marker_path = dest_system.join(SYSTEM_SKILLS_MARKER_FILENAME);
@@ -98,6 +96,7 @@ pub fn install_system_skills(codex_home: &AbsolutePathBuf) -> Result<(), SystemS
     }
 
     write_embedded_dir(&SYSTEM_SKILLS_DIR, &dest_system)?;
+    write_embedded_dir(&FORK_SKILLS_DIR, &dest_system)?;
     fs::write(marker_path.as_path(), format!("{expected_fingerprint}\n"))
         .map_err(|source| SystemSkillsError::io("write system skills marker", source))?;
     Ok(())
@@ -113,6 +112,7 @@ fn read_marker(path: &AbsolutePathBuf) -> Result<String, SystemSkillsError> {
 fn embedded_system_skills_fingerprint() -> String {
     let mut items = Vec::new();
     collect_fingerprint_items(&SYSTEM_SKILLS_DIR, &mut items);
+    collect_fingerprint_items(&FORK_SKILLS_DIR, &mut items);
     items.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
 
     let mut hasher = DefaultHasher::new();
@@ -193,8 +193,31 @@ impl SystemSkillsError {
 
 #[cfg(test)]
 mod tests {
+    use super::FORK_SKILLS_DIR;
     use super::SYSTEM_SKILLS_DIR;
     use super::collect_fingerprint_items;
+    use super::system_cache_root_dir;
+    use codex_utils_absolute_path::AbsolutePathBuf;
+
+    #[test]
+    fn fork_skills_are_embedded_and_isolated_from_desktop() {
+        let home = AbsolutePathBuf::from_absolute_path(std::env::temp_dir()).unwrap();
+        let cache = system_cache_root_dir(&home);
+        assert_eq!(cache, home.join(".fork/skills"));
+        assert!(!cache.starts_with(home.join("skills")));
+        for name in ["open-browser-use", "open-computer-use"] {
+            assert!(
+                FORK_SKILLS_DIR
+                    .get_file(format!("{name}/SKILL.md"))
+                    .is_some()
+            );
+            assert!(
+                FORK_SKILLS_DIR
+                    .get_file(format!("{name}/LICENSE"))
+                    .is_some()
+            );
+        }
+    }
 
     #[test]
     fn fingerprint_traverses_nested_entries() {
