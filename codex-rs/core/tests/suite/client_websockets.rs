@@ -67,6 +67,7 @@ use core_test_support::test_codex::RecordingUserInstructionsProvider;
 use core_test_support::test_codex::test_codex;
 use core_test_support::tracing::install_test_tracing;
 use core_test_support::wait_for_event;
+use futures::SinkExt;
 use futures::StreamExt;
 use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use pretty_assertions::assert_eq;
@@ -2106,7 +2107,11 @@ async fn responses_websocket_rotation_preserves_context(age_seconds: u64, next_t
             serde_json::to_value(&follow_up.input[2..]).unwrap()
         );
     }
-    // A fresh connection must itself remain reusable after rotation.
+    // Activity must not reset the age of a young connection. A newly rotated
+    // connection, on the other hand, must remain reusable on the next request.
+    if !rotated {
+        advance_websocket_age(60).await;
+    }
     stream_until_complete_with_model_info(
         &mut session,
         &harness,
@@ -2116,10 +2121,18 @@ async fn responses_websocket_rotation_preserves_context(age_seconds: u64, next_t
     )
     .await;
     let connections = server.connections();
-    assert_eq!(connections.len(), if rotated { 2 } else { 1 });
+    assert_eq!(connections.len(), 2);
     let last = connections.last().unwrap().last().unwrap().body_json();
-    assert_eq!(last["previous_response_id"], "resp-2");
-    assert_eq!(last["input"], json!([]));
+    if rotated {
+        assert_eq!(last["previous_response_id"], "resp-2");
+        assert_eq!(last["input"], json!([]));
+    } else {
+        assert!(last.get("previous_response_id").is_none());
+        assert_eq!(
+            last["input"],
+            serde_json::to_value(&follow_up.input).unwrap()
+        );
+    }
     server.shutdown().await;
 }
 
@@ -2210,6 +2223,138 @@ async fn responses_websocket_rotation_refreshes_prepared_connections(warmup: boo
         );
     }
     server.shutdown().await;
+}
+
+#[tokio::test]
+async fn responses_websocket_rotation_leaves_in_flight_response_intact() {
+    skip_if_no_network!();
+
+    // Gate completion independently of the clock: crossing the age threshold
+    // must neither close the socket nor require a timer task to finish.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (release, released) = tokio::sync::oneshot::channel();
+    let server_task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        socket.next().await.unwrap().unwrap();
+        socket
+            .send(tokio_tungstenite::tungstenite::Message::Text(
+                ev_response_created("resp-1").to_string().into(),
+            ))
+            .await
+            .unwrap();
+        released.await.unwrap();
+        for event in [
+            ev_assistant_message("msg_1", "finished after threshold"),
+            ev_completed("resp-1"),
+        ] {
+            socket
+                .send(tokio_tungstenite::tungstenite::Message::Text(
+                    event.to_string().into(),
+                ))
+                .await
+                .unwrap();
+        }
+        // Client retirement, rather than a server close, must cause reconnect.
+        while let Some(Ok(message)) = socket.next().await {
+            assert!(
+                !message.is_text(),
+                "expired socket received another request"
+            );
+            if message.is_close() {
+                break;
+            }
+        }
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        let request = socket.next().await.unwrap().unwrap();
+        let body: serde_json::Value = serde_json::from_str(request.to_text().unwrap()).unwrap();
+        for event in [ev_response_created("resp-2"), ev_completed("resp-2")] {
+            socket
+                .send(tokio_tungstenite::tungstenite::Message::Text(
+                    event.to_string().into(),
+                ))
+                .await
+                .unwrap();
+        }
+        body
+    });
+    let placeholder = start_websocket_server(vec![]).await;
+    let mut provider = websocket_provider(&placeholder);
+    provider.base_url = Some(format!("ws://{address}/v1"));
+    provider.stream_idle_timeout_ms = Some(60 * 60 * 1_000);
+    let harness = websocket_harness_with_provider_options(provider, false, false, &[]).await;
+    let mut session = harness.client.new_session();
+    let metadata = turn_metadata(&harness, None);
+    session
+        .preconnect_websocket(
+            &harness.model_info,
+            None,
+            &harness.session_telemetry,
+            &metadata,
+        )
+        .await
+        .unwrap();
+    advance_websocket_age(29 * 60).await;
+    let prompt = prompt_with_input(vec![message_item("hello")]);
+    let mut stream = session
+        .stream(
+            &prompt,
+            &harness.model_info,
+            &harness.session_telemetry,
+            harness.effort.clone(),
+            harness.summary,
+            None,
+            &metadata,
+            &InferenceTraceContext::disabled(),
+        )
+        .await
+        .unwrap();
+    while !matches!(
+        stream.next().await.unwrap().unwrap(),
+        ResponseEvent::Created { .. }
+    ) {}
+    advance_websocket_age(2 * 60).await;
+    release.send(()).unwrap();
+    let mut saw_output = false;
+    let mut completed = false;
+    while let Some(event) = stream.next().await {
+        match event.unwrap() {
+            ResponseEvent::OutputItemDone(_) => saw_output = true,
+            ResponseEvent::Completed { response_id, .. } => {
+                assert_eq!(response_id, "resp-1");
+                completed = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_output && completed);
+    let follow_up = prompt_with_input(vec![
+        message_item("hello"),
+        assistant_message_item("1", "finished after threshold"),
+        message_item("continue"),
+    ]);
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        stream_until_complete_with_model_info(
+            &mut session,
+            &harness,
+            &follow_up,
+            &harness.model_info,
+            "resp-2",
+        ),
+    )
+    .await
+    .expect("rotation must not wait for a close handshake");
+    let body = server_task.await.unwrap();
+    assert!(body.get("previous_response_id").is_none());
+    assert_eq!(
+        body["input"],
+        serde_json::to_value(&follow_up.input).unwrap()
+    );
+    placeholder.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
