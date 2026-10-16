@@ -259,6 +259,7 @@ mod resize_reflow;
 mod resume_config;
 mod right_click_paste;
 pub(crate) use right_click_paste::PasteEnvironment;
+mod generation_speed;
 mod safety_buffering;
 mod server_version_notice;
 mod session_lifecycle;

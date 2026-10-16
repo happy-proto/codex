@@ -357,6 +357,7 @@ mod recap;
 mod reset_credits;
 pub(crate) use self::rate_limits::limit_label_for_window;
 mod completion;
+pub(crate) use completion::LiveGenerationSpeedTarget;
 mod realtime;
 mod realtime_settings;
 mod realtime_split_flap;
@@ -723,6 +724,7 @@ pub(crate) struct ChatWidget {
     quit_shortcut_key: Option<KeyBinding>,
     // Runtime metrics accumulated across delta snapshots for the active turn.
     turn_runtime_metrics: RuntimeMetricsSummary,
+    pub(crate) generation_speeds: HashMap<(ThreadId, String), codex_state::GenerationSpeedRecord>,
     last_rendered_width: std::cell::Cell<Option<u16>>,
     // Feedback sink for /feedback
     feedback: codex_feedback::CodexFeedback,
