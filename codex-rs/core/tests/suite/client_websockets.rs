@@ -259,6 +259,65 @@ async fn responses_websocket_preserves_raw_tool_metadata_for_openai_custom_endpo
     server.shutdown().await;
 }
 
+#[test_case::test_case(false, true; "standard_openai")]
+#[test_case::test_case(true, true; "responses_lite_openai")]
+#[test_case::test_case(false, false; "standard_custom_provider")]
+#[test_case::test_case(true, false; "responses_lite_custom_provider")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn responses_websocket_omits_content_attribution_without_mutating_history(
+    responses_lite: bool,
+    openai: bool,
+) {
+    skip_if_no_network!();
+
+    let server = start_websocket_server(vec![vec![vec![
+        ev_response_created("resp-1"),
+        ev_completed("resp-1"),
+    ]]])
+    .await;
+    let harness = if openai {
+        websocket_harness_for_codex_backend(&server).await
+    } else {
+        websocket_harness(&server).await
+    };
+    let mut model_info = harness.model_info.clone();
+    model_info.use_responses_lite = responses_lite;
+    let item: ResponseItem = serde_json::from_value(json!({
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": "hello"}],
+        "internal_chat_message_metadata_passthrough": {
+            "turn_id": "kept-turn",
+            "content_item_kinds": ["user.text"],
+            "content_item_metadata": [{"provenance": {"type": "user"}}],
+        },
+    }))
+    .expect("message with local attribution");
+    let prompt = prompt_with_input(vec![item.clone()]);
+    let mut expected = serde_json::to_value(&item).unwrap();
+    if openai {
+        expected["internal_chat_message_metadata_passthrough"] = json!({
+            "turn_id": "kept-turn",
+            "content_item_kinds": ["user.text"],
+        });
+    } else {
+        expected
+            .as_object_mut()
+            .unwrap()
+            .remove("internal_chat_message_metadata_passthrough");
+    }
+
+    let mut session = harness.client.new_session();
+    stream_until_complete_with_model_info(&mut session, &harness, &prompt, &model_info, "resp-1")
+        .await;
+
+    let connection = server.single_connection();
+    assert_eq!(connection.len(), 1);
+    assert_eq!(connection[0].body_json()["input"], json!([expected]));
+    assert_eq!(prompt.input, vec![item]);
+    server.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_websocket_streams_request() {
     skip_if_no_network!();
