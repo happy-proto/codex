@@ -43,6 +43,9 @@ impl ChatWidget {
     /// The bottom pane only has one running flag, but this module treats it as a derived state of
     /// both the agent turn lifecycle and MCP startup lifecycle.
     pub(super) fn update_task_running_state(&mut self) {
+        if !self.turn_lifecycle.agent_turn_running {
+            self.bottom_pane.set_recent_generation_speed(None);
+        }
         self.bottom_pane.set_task_running(
             self.turn_lifecycle.agent_turn_running
                 || self.review.is_review_mode
@@ -86,6 +89,7 @@ impl ChatWidget {
     // Raw reasoning uses the same flow as summarized reasoning
 
     pub(super) fn on_task_started(&mut self) {
+        self.bottom_pane.set_recent_generation_speed(None);
         self.status_state.program_status_after_turn =
             crate::terminal_program_status::ProgramStatus::Idle;
         self.bottom_pane.dismiss_composer_sparkle();

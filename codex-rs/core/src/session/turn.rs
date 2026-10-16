@@ -2827,6 +2827,12 @@ async fn try_run_sampling_request(
     let mut response_completed = false;
     let mut request_token_usage = None;
     let mut includes_reasoning = step_context.settings.model_info.use_responses_lite;
+    let mut generation_measurement = Some(
+        turn_context
+            .turn_timing_state
+            .begin_generation_measurement()
+            .observe_failures(client_session.generation_failure_counter()),
+    );
     let stream = client_session
         .stream(
             &prompt,
@@ -2928,6 +2934,11 @@ async fn try_run_sampling_request(
                 }
                 if let Some(interrupt) = stream.interrupt.take() {
                     if step_context.settings.model_info.use_responses_lite {
+                        tracing::info!(
+                            event.name = "codex.generation_speed.interrupt",
+                            reason = "preempt_drain",
+                            "generation speed request interrupted and draining"
+                        );
                         let _ = interrupt.send(codex_api::ResponseInterrupt::Drain);
                     }
                     // Drain the response normally before reusing its connection and history.
@@ -3303,6 +3314,24 @@ async fn try_run_sampling_request(
             } => {
                 response_completed = true;
                 request_token_usage = token_usage.clone();
+                tracing::info!(
+                    event.name = "codex.generation_speed.response",
+                    thread_id = %sess.thread_id,
+                    turn_id = %turn_context.sub_id,
+                    response_id,
+                    ?end_turn,
+                    output_tokens = token_usage.as_ref().map(|usage| usage.output_tokens),
+                    "generation speed response completed"
+                );
+                generation_measurement
+                    .take()
+                    .expect("response measurement is active")
+                    .complete(
+                        &response_id,
+                        // end_turn controls follow-up sampling, not the validity of terminal usage.
+                        // A drained interruption can still provide exact usage for this request.
+                        token_usage.as_ref().map(|usage| usage.output_tokens),
+                    );
                 sess.services
                     .analytics_events_client
                     .track_code_mode_tool_call(
@@ -3497,6 +3526,8 @@ async fn try_run_sampling_request(
             }
         }
     };
+    // A failed/closed/preempted stream must stop the clock before tool or user waits.
+    drop(generation_measurement);
     drop(sampling_span);
     drop(sampling_timing_guard);
     if let Some(finish_post_request) = finish_post_request {
