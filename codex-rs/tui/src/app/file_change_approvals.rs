@@ -22,6 +22,13 @@ impl App {
         &mut self,
         event: ThreadBufferedEvent,
     ) {
+        if let ThreadBufferedEvent::Notification(notification) = &event
+            && let ServerNotification::TurnCompleted(completed) = notification.as_ref()
+            && let Ok(thread_id) = ThreadId::from_string(&completed.thread_id)
+            && self.chat_widget.thread_id() == Some(thread_id)
+        {
+            self.refresh_generation_speeds(thread_id).await;
+        }
         let changes = match (&event, self.active_thread_id) {
             (ThreadBufferedEvent::Request(request), Some(thread_id)) => match request.as_ref() {
                 ServerRequest::FileChangeRequestApproval { params, .. } => {
