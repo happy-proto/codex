@@ -1797,7 +1797,7 @@ async fn stream_recovery_restores_previous_status_header() {
     drain_insert_history(&mut rx);
     handle_stream_error(
         &mut chat,
-        "Reconnecting... 1/5",
+        "Reconnecting... 1/5 (retrying in 115s)",
         /*additional_details*/ None,
     );
     drain_insert_history(&mut rx);
