@@ -876,6 +876,76 @@ impl Session {
         };
         let saved_guardian_completion =
             matches!(event, EventMsg::TurnComplete(_)) && self.is_private_guardian_reviewer().await;
+        if !matches!(
+            &turn_context.session_source,
+            codex_protocol::protocol::SessionSource::SubAgent(_)
+        ) && let Some(state_db) = self.state_db()
+        {
+            let totals =
+                matches!(&event, EventMsg::TurnComplete(completed) if completed.error.is_none())
+                    .then(|| turn_context.turn_timing_state.generation_speed_totals())
+                    .flatten();
+            let result = tokio::time::timeout(Duration::from_millis(200), async {
+                match (totals, started_at, completed_at, duration_ms) {
+                    (
+                        Some((output_tokens, request_duration_us)),
+                        Some(started_at),
+                        Some(completed_at),
+                        Some(duration_ms),
+                    ) => {
+                        tracing::info!(
+                            event.name = "codex.generation_speed.persistence",
+                            thread_id = %self.thread_id,
+                            turn_id = %turn_context.sub_id,
+                            action = "save",
+                            output_tokens,
+                            request_duration_us,
+                            "generation speed persistence started"
+                        );
+                        state_db
+                            .save_generation_speed(
+                                self.thread_id,
+                                &turn_context.sub_id,
+                                output_tokens,
+                                request_duration_us,
+                                codex_state::GenerationSpeedCompletion {
+                                    started_at,
+                                    completed_at,
+                                    duration_ms,
+                                },
+                            )
+                            .await
+                    }
+                    _ => {
+                        tracing::info!(
+                            event.name = "codex.generation_speed.persistence",
+                            thread_id = %self.thread_id,
+                            turn_id = %turn_context.sub_id,
+                            action = "clear",
+                            has_totals = totals.is_some(),
+                            ?started_at,
+                            ?completed_at,
+                            ?duration_ms,
+                            "generation speed persistence started"
+                        );
+                        state_db
+                            .clear_generation_speed(self.thread_id, &turn_context.sub_id)
+                            .await
+                    }
+                }
+            })
+            .await;
+            match result {
+                Ok(Ok(())) => tracing::info!(
+                    event.name = "codex.generation_speed.persistence_completed",
+                    thread_id = %self.thread_id,
+                    turn_id = %turn_context.sub_id,
+                    "generation speed persistence completed"
+                ),
+                Ok(Err(err)) => tracing::info!(%err, "generation speed persistence skipped"),
+                Err(_) => tracing::info!("generation speed persistence timed out"),
+            }
+        }
         if !saved_guardian_completion {
             self.send_event(turn_context.as_ref(), event.clone()).await;
         }

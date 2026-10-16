@@ -299,6 +299,14 @@ jobs:
         run: |
           cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib thread_name_refresh
           cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib refreshed_thread_name
+      - name: 验证回合生成速度与本地持久化
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: |
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib generation_speed
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::generation_speed:: -- --test-threads=1
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-state --lib generation_speed
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib generation_speed
       - name: 验证模型容量错误的无限退避重试
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
