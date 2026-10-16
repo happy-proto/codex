@@ -2961,33 +2961,33 @@ async fn blocked_user_prompt_submit_persists_additional_context_for_next_turn() 
     Ok(())
 }
 
+#[derive(Default)]
+struct FirstMessageGate {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+impl codex_extension_api::TurnLifecycleContributor for FirstMessageGate {
+    fn on_item_completed<'a>(
+        &'a self,
+        _thread_store: &'a codex_extension_api::ExtensionData,
+        _turn_store: &'a codex_extension_api::ExtensionData,
+        item: &'a codex_protocol::items::TurnItem,
+    ) -> codex_extension_api::ExtensionFuture<'a, ()> {
+        Box::pin(async move {
+            if item.id() == "msg-1" {
+                self.entered.notify_one();
+                self.release.notified().await;
+            }
+        })
+    }
+}
+
 /// Queued input is logged exactly once after acceptance; a later blocked prompt cannot leak or strand it.
 #[tokio::test]
 #[traced_test]
 async fn blocked_queued_prompt_does_not_strand_earlier_accepted_prompt() -> Result<()> {
     skip_if_no_network!(Ok(()));
-
-    #[derive(Default)]
-    struct FirstMessageGate {
-        entered: tokio::sync::Notify,
-        release: tokio::sync::Notify,
-    }
-
-    impl codex_extension_api::TurnLifecycleContributor for FirstMessageGate {
-        fn on_item_completed<'a>(
-            &'a self,
-            _thread_store: &'a codex_extension_api::ExtensionData,
-            _turn_store: &'a codex_extension_api::ExtensionData,
-            item: &'a codex_protocol::items::TurnItem,
-        ) -> codex_extension_api::ExtensionFuture<'a, ()> {
-            Box::pin(async move {
-                if item.id() == "msg-1" {
-                    self.entered.notify_one();
-                    self.release.notified().await;
-                }
-            })
-        }
-    }
 
     let gate = Arc::new(FirstMessageGate::default());
     let mut extensions = codex_extension_api::ExtensionRegistryBuilder::new();
@@ -6763,5 +6763,214 @@ async fn memory_consolidation_skips_user_model_request_hooks() -> Result<()> {
     for event in ["PreModelRequest", "PostModelRequest"] {
         assert!(!home.join(format!("{event}.jsonl")).exists(), "{event} ran");
     }
+    Ok(())
+}
+
+#[tokio::test]
+#[traced_test]
+async fn steered_explicit_only_skill_respects_blocked_queued_prompt() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let gate = Arc::new(FirstMessageGate::default());
+    let mut extensions = codex_extension_api::ExtensionRegistryBuilder::new();
+    extensions.turn_lifecycle_contributor(gate.clone());
+    let server = start_mock_server().await;
+    let responses = mount_sse_sequence(
+        &server,
+        vec![
+            sse(vec![
+                ev_response_created("resp-1"),
+                ev_message_item_added("msg-1", ""),
+                ev_output_text_delta("first "),
+                ev_message_item_done("msg-1", "first response"),
+                ev_completed("resp-1"),
+            ]),
+            sse(vec![
+                ev_response_created("resp-2"),
+                ev_assistant_message("msg-2", "accepted queued prompt handled"),
+                ev_completed("resp-2"),
+            ]),
+        ],
+    )
+    .await;
+
+    let mut builder = test_codex()
+        .with_extensions(Arc::new(extensions.build()))
+        .with_model("gpt-5.4")
+        .with_pre_build_hook(|home| {
+            write_user_prompt_submit_hook(
+                home,
+                "blocked queued prompt $blocked-demo",
+                BLOCKED_PROMPT_CONTEXT,
+            )
+            .expect("failed to write user prompt submit hook test fixture");
+        })
+        .with_config(move |config| {
+            trust_discovered_hooks(config);
+            config.otel.log_user_prompt = true;
+        })
+        .with_workspace_setup(|cwd, _| async move {
+            for (name, body) in [
+                ("accepted-demo", "ACCEPTED_SKILL_BODY"),
+                ("blocked-demo", "BLOCKED_SKILL_BODY"),
+            ] {
+                let skill_dir = cwd.join(".agents/skills").join(name);
+                fs::create_dir_all(skill_dir.join("agents"))?;
+                fs::write(
+                    skill_dir.join("SKILL.md"),
+                    format!("---\nname: {name}\ndescription: Explicit-only test\n---\n{body}\n"),
+                )?;
+                fs::write(
+                    skill_dir.join("agents/openai.yaml"),
+                    "policy:\n  allow_implicit_invocation: false\n",
+                )?;
+            }
+            Ok(())
+        });
+    let test = builder.build(&server).await?;
+
+    test.codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "initial prompt".to_string(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+
+    timeout(Duration::from_secs(30), gate.entered.notified()).await?;
+
+    for text in [
+        "accepted queued prompt $accepted-demo",
+        "blocked queued prompt $blocked-demo",
+    ] {
+        test.codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: text.to_string(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+    }
+
+    gate.release.notify_one();
+
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+
+    let requests = responses.requests();
+    assert_eq!(requests.len(), 2);
+
+    logs_assert(|lines| {
+        let prompts: Vec<_> = lines
+            .iter()
+            .filter(|line| line.contains("codex.user_prompt") && line.contains(" prompt="))
+            .collect();
+        if prompts.len() == 2
+            && prompts[0].contains("prompt=initial prompt")
+            && prompts[1].contains("prompt=accepted queued prompt")
+        {
+            Ok(())
+        } else {
+            Err(format!(
+                "expected only accepted prompts in telemetry: {prompts:?}"
+            ))
+        }
+    });
+    let rollout = fs::read_to_string(test.codex.rollout_path().expect("rollout path"))?;
+    assert!(!rollout.contains("blocked queued prompt"));
+    assert!(rollout.contains("accepted queued prompt"));
+
+    let second_user_texts = requests[1].message_input_texts("user");
+    assert!(
+        second_user_texts.contains(&"accepted queued prompt $accepted-demo".to_string()),
+        "second request should include the accepted queued prompt $accepted-demo",
+    );
+    assert!(
+        !second_user_texts.contains(&"blocked queued prompt $blocked-demo".to_string()),
+        "second request should not include the blocked queued prompt $blocked-demo",
+    );
+
+    assert!(
+        second_user_texts
+            .iter()
+            .any(|text| text.contains("ACCEPTED_SKILL_BODY")),
+        "accepted queued skill must be injected"
+    );
+    assert!(
+        !second_user_texts
+            .iter()
+            .any(|text| text.contains("BLOCKED_SKILL_BODY")),
+        "blocked queued skill must not be injected"
+    );
+
+    let history = test.codex.conversation_history_snapshot().await;
+    assert!(history.retained_context().is_some());
+    let retained = serde_json::to_value(history.retained_context().cloned().unwrap_or_default())?;
+    let messages = retained["user_messages"]
+        .as_array()
+        .expect("retained user messages");
+    assert_eq!(
+        messages
+            .iter()
+            .map(|message| message["text"].clone())
+            .collect::<Vec<_>>(),
+        vec![
+            json!("initial prompt"),
+            json!("accepted queued prompt $accepted-demo")
+        ],
+    );
+    assert!(
+        messages
+            .windows(2)
+            .all(|pair| pair[0]["order"].as_u64() < pair[1]["order"].as_u64())
+    );
+    // Three accepted input positions (including the blocked prompt), then
+    // the two completed assistant messages.
+    assert_eq!(retained["next_order"], json!(5));
+
+    let hook_inputs = read_user_prompt_submit_hook_inputs(test.codex_home_path())?;
+    assert_eq!(hook_inputs.len(), 3);
+    assert_eq!(
+        hook_inputs
+            .iter()
+            .map(|input| {
+                input["prompt"]
+                    .as_str()
+                    .expect("queued prompt hook prompt")
+                    .to_string()
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            "initial prompt".to_string(),
+            "accepted queued prompt $accepted-demo".to_string(),
+            "blocked queued prompt $blocked-demo".to_string(),
+        ],
+    );
+    let queued_turn_ids = hook_inputs
+        .iter()
+        .map(|input| {
+            input["turn_id"]
+                .as_str()
+                .expect("queued prompt hook turn_id")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        queued_turn_ids.iter().all(|turn_id| !turn_id.is_empty()),
+        "queued prompt hook turn ids should be non-empty",
+    );
+    let first_queued_turn_id = queued_turn_ids
+        .first()
+        .expect("queued prompt hook inputs should include a first turn id")
+        .clone();
+    assert_eq!(
+        queued_turn_ids,
+        vec![
+            first_queued_turn_id.clone(),
+            first_queued_turn_id.clone(),
+            first_queued_turn_id,
+        ],
+    );
+
     Ok(())
 }
