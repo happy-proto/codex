@@ -107,8 +107,12 @@ pub(crate) async fn handle_response_stream_error(
             ?retry_delay,
             "stream connection failed; waiting to retry"
         );
-        sess.notify_stream_error(turn_context, "Reconnecting... waiting for network", err)
-            .await;
+        sess.notify_stream_error(
+            turn_context,
+            format!("Reconnecting... (retrying in {}s)", retry_delay.as_secs(),),
+            err,
+        )
+        .await;
         retry_state.connection_retries = retry_state.connection_retries.saturating_add(1);
         codex_client::record_retry!(retry_state.connection_retries, retry_delay, operation);
         tokio::time::sleep(retry_delay).await;
@@ -124,17 +128,39 @@ pub(crate) async fn handle_response_stream_error(
             turn_context.model_info(),
         )
     {
-        // Changing transport must not bypass the server's retry deadline.
-        if let Some(retry_after) = retry_after {
-            tokio::time::sleep_until(retry_after.deadline()).await;
-        }
+        let wait = retry_after.map(|advice| {
+            format!(
+                " (retrying in {}s)",
+                advice
+                    .deadline()
+                    .saturating_duration_since(Instant::now())
+                    .as_secs_f64()
+                    .ceil() as u64
+            )
+        });
         sess.send_event(
             turn_context,
             EventMsg::Warning(WarningEvent {
-                message: format!("Falling back from WebSockets to HTTPS transport. {err:#}"),
+                message: format!(
+                    "Falling back from WebSockets to HTTPS transport{}. {err:#}",
+                    wait.unwrap_or_default()
+                ),
             }),
         )
         .await;
+        // Changing transport must not bypass the server's retry deadline.
+        if let Some(retry_after) = retry_after {
+            sess.notify_stream_error(
+                turn_context,
+                format!(
+                    "Reconnecting... (retrying in {}s)",
+                    retry_after.remaining_delay().as_secs_f64().ceil() as u64,
+                ),
+                err,
+            )
+            .await;
+            tokio::time::sleep_until(retry_after.deadline()).await;
+        }
         retry_state.retries = 0;
         return Ok(());
     }
@@ -143,22 +169,19 @@ pub(crate) async fn handle_response_stream_error(
         retry_state.retries = retry_count;
         log_retry(request, turn_context, &err, retry_count, max_retries, delay);
 
-        // In release builds, hide the first websocket retry notification to reduce noisy
-        // transient reconnect messages. In debug builds, keep full visibility for diagnosis.
-        let report_error = retry_count > 1
-            || cfg!(debug_assertions)
-            || !sess.services.model_client.responses_websocket_enabled();
-        if report_error {
-            // Surface retry information to any UI/front-end so the user understands what is
-            // happening instead of staring at a seemingly frozen screen.
-            sess.notify_stream_error(
-                turn_context,
-                format!("Reconnecting... {retry_count}/{max_retries}"),
-                err,
-            )
-            .await;
-        }
-        // Use one clock sample so local backoff telemetry retains the selected delay.
+        let wait =
+            retry_after.map(|advice| advice.deadline().saturating_duration_since(Instant::now()));
+        // 每次重试都先报告原因、次数和等待时间，包括发布版的首次 WebSocket 重连。
+        sess.notify_stream_error(
+            turn_context,
+            format!(
+                "Reconnecting... {retry_count}/{max_retries} (retrying in {}s)",
+                wait.unwrap_or(delay).as_secs_f64().ceil() as u64,
+            ),
+            err,
+        )
+        .await;
+        // 提示耗时计入服务端期限；本地退避仍从提示送达后开始。
         let now = Instant::now();
         let retry_at = retry_after.map(RetryAfter::deadline).unwrap_or(now + delay);
         let delay = retry_at.saturating_duration_since(now);
