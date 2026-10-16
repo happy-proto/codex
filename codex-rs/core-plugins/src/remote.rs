@@ -1127,6 +1127,9 @@ fn recommended_plugins_mode(response: RecommendedPluginsResponse) -> Recommended
             .take(MAX_RECOMMENDED_PLUGIN_DISPLAY_NAME_LEN)
             .collect();
         let config_id = plugin_id.as_key();
+        if crate::fork_policy::replaces_official_automation(&config_id) {
+            continue;
+        }
         plugins
             .entry(config_id.clone())
             .or_insert(RecommendedPlugin {
