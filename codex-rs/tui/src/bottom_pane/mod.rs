@@ -322,6 +322,7 @@ pub(crate) struct BottomPane {
 
     /// Inline status indicator shown above the composer while a task is running.
     status: Option<StatusIndicatorWidget>,
+    recent_generation_speed: Option<String>,
     /// Running-hook summary supplied by the lifecycle owner after its reveal delay.
     hook_status_message: Option<String>,
     inline_banner: Option<actionable_banner::InlineBanner>,
@@ -416,6 +417,7 @@ impl BottomPane {
             disable_paste_burst,
             is_task_running: false,
             status: None,
+            recent_generation_speed: None,
             hook_status_message: None,
             inline_banner: None,
             status_timer: crate::status_indicator_widget::StatusTimer::default(),
@@ -1428,6 +1430,10 @@ impl BottomPane {
 
     /// Hide the status indicator while leaving task-running state untouched.
     pub(crate) fn hide_status_indicator(&mut self) {
+        // Retain the recent completed-request metric while output is streaming.
+        if self.is_task_running && self.recent_generation_speed.is_some() {
+            return;
+        }
         if self.status.take().is_some() {
             self.request_redraw();
         }
@@ -1798,9 +1804,25 @@ impl BottomPane {
     /// standalone unified-exec footer row to be visible.
     fn sync_status_inline_message(&mut self) {
         if let Some(status) = self.status.as_mut() {
+            status.set_recent_generation_speed(self.recent_generation_speed.clone());
             status.update_inline_message(self.unified_exec_footer.summary_text());
             status.update_hook_status_message(self.hook_status_message.clone());
         }
+    }
+
+    pub(crate) fn set_recent_generation_speed(&mut self, speed: Option<f64>) {
+        let label = speed
+            .filter(|speed| speed.is_finite() && *speed >= 0.0)
+            .map(|speed| format!("{speed:.1} token/s"));
+        if self.recent_generation_speed == label {
+            return;
+        }
+        self.recent_generation_speed = label;
+        if self.is_task_running && self.recent_generation_speed.is_some() {
+            self.ensure_status_indicator();
+        }
+        self.sync_status_inline_message();
+        self.request_redraw();
     }
 
     pub(crate) fn composer_is_empty(&self) -> bool {
