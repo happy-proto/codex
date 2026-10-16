@@ -121,10 +121,6 @@ jobs:
           cache-bin: false
           shared-key: ${{ matrix.cache }}-downloads
           save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
-      - name: Install version-management tool
-        uses: taiki-e/install-action@v2.62.49
-        with:
-          tool: cargo-edit
       - name: Share the pinned V8 artifacts between package and tests
         env:
           CODEX_REPO_ROOT: ${{ github.workspace }}
@@ -149,6 +145,10 @@ jobs:
         env:
           CODEX_FORK_TEST_BINARY: ${{ github.workspace }}/fork-dist/package/bin/codex
         run: python3 -m unittest discover -s scripts/fork -p test_terminal_cwd.py -v
+      - name: 验证同一 binary 的发布版本与包清单一致
+        env:
+          CODEX_FORK_TEST_BINARY: ${{ github.workspace }}/fork-dist/package/bin/codex
+        run: python3 -m unittest discover -s scripts/fork -p test_package_version.py -v
       - name: 上传产物构建耗时报告
         uses: actions/upload-artifact@v7.0.0
         if: always()
@@ -231,13 +231,9 @@ jobs:
           cache-bin: false
           shared-key: fork-tests-v1-downloads
           save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
-      - name: Install version-management tool
-        uses: taiki-e/install-action@v2.62.49
-        with:
-          tool: cargo-edit
-      - name: Set the tested fork version
-        run: |
-          cargo set-version --manifest-path codex-rs/Cargo.toml -p codex-cli "$CODEX_FORK_VERSION"
+      - name: 验证包版本解析与源码构建回退
+        working-directory: codex-rs
+        run: cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-build-info --lib
       - name: 执行定向测试或 release 更新验证
         working-directory: codex-rs
         env:
