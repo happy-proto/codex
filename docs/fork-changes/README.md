@@ -18,6 +18,7 @@
 | 0011 | [默认使用开放的浏览器与电脑操作工具](0011-open-automation.md) |
 | 0012 | [Responses Lite 请求来源字段兼容](0012-responses-lite-content-metadata.md) |
 | 0013 | [WebSocket 连接主动轮转](0013-websocket-rotation.md) |
+| 0014 | [后台压缩失败后的接收器清理](0014-async-compaction-closed-receiver.md) |
 | 0015 | [发布版本与编译缓存分离](0015-build-cache-stability.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。

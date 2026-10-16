@@ -149,7 +149,15 @@ pub(super) async fn take_ready(
         return None;
     }
     let mut state = sess.state.lock().await;
-    let candidate = state.async_compaction.result.as_mut()?.try_recv().ok()?;
+    let candidate = match state.async_compaction.result.as_mut()?.try_recv() {
+        Ok(candidate) => candidate,
+        Err(oneshot::error::TryRecvError::Empty) => return None,
+        Err(oneshot::error::TryRecvError::Closed) => {
+            // A closed receiver has completed and must not be awaited again.
+            state.async_compaction.result = None;
+            return None;
+        }
+    };
     state.async_compaction.result = None;
     (candidate.prefix.generation == state.history.history_version()).then_some(candidate)
 }
