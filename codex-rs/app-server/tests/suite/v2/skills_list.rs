@@ -273,12 +273,13 @@ async fn skills_list_uses_each_cwds_bundled_skills_configuration() -> Result<()>
 }
 
 #[tokio::test]
-async fn skills_list_runtime_enable_refreshes_shared_system_skill_cache() -> Result<()> {
+async fn skills_list_runtime_enable_refreshes_fork_system_skill_cache() -> Result<()> {
     let codex_home = TempDir::new()?;
     let cwd = TempDir::new()?;
-    let stale_skill_path = codex_home
-        .path()
-        .join("skills/.system/stale-system-skill/SKILL.md");
+    let stale_skill_path = codex_skills::system_cache_root_dir(
+        &AbsolutePathBuf::from_absolute_path(codex_home.path())?,
+    )
+    .join("stale-system-skill/SKILL.md");
     std::fs::create_dir_all(
         stale_skill_path
             .parent()
