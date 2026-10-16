@@ -1480,7 +1480,7 @@ fn parse_ws_request_body(message: Message) -> Option<Value> {
     }
 }
 
-fn websocket_accept_config() -> WebSocketConfig {
+pub fn websocket_accept_config() -> WebSocketConfig {
     let mut extensions = ExtensionsConfig::default();
     extensions.permessage_deflate = Some(DeflateConfig::default());
 
