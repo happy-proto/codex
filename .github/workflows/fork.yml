@@ -311,6 +311,7 @@ jobs:
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates_cache::tests
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates::tests
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_action::tests
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib working_directory
       - name: Verify fork update presentation
         if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
