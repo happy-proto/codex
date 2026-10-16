@@ -22,6 +22,7 @@ pub struct FinalMessageSeparator {
     completed_at: Option<DateTime<Local>>,
     display_date: NaiveDate,
     clock_format: ClockFormat,
+    generation_speed: Option<f64>,
 }
 impl FinalMessageSeparator {
     /// Creates completion metadata using the protocol turn duration when available.
@@ -35,6 +36,7 @@ impl FinalMessageSeparator {
             completed_at: None,
             display_date: Local::now().date_naive(),
             clock_format: ClockFormat::TwelveHour,
+            generation_speed: None,
         }
     }
 
@@ -53,6 +55,12 @@ impl FinalMessageSeparator {
         runtime_metrics: Option<RuntimeMetricsSummary>,
     ) -> Self {
         self.runtime_metrics = runtime_metrics;
+        self
+    }
+
+    pub(crate) fn with_generation_speed(mut self, speed: Option<f64>) -> Self {
+        // Values that would round to zero must not produce a misleading zero label.
+        self.generation_speed = speed.filter(|speed| speed.is_finite() && *speed >= 0.05);
         self
     }
 
@@ -89,6 +97,9 @@ impl FinalMessageSeparator {
         }
         if let Some(metrics_label) = self.runtime_metrics.and_then(runtime_metrics_label) {
             label_parts.push(metrics_label);
+        }
+        if let Some(speed) = self.generation_speed {
+            label_parts.push(format!("{speed:.1} token/s"));
         }
         (!label_parts.is_empty()).then(|| label_parts.join(" • "))
     }
