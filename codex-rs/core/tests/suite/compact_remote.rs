@@ -254,11 +254,21 @@ fn assert_compacted_user_metadata(path: &Path, retained_text: &str) -> Result<()
             _ => None,
         })
         .context("compacted replacement history missing")?;
+    let retained_user = replacement_history
+        .iter()
+        .find(|envelope| is_retained_user_message(&envelope.item, retained_text))
+        .context("compacted user message missing")?;
+    assert!(retained_user.metadata.is_some());
+    let retained_item = serde_json::to_value(&retained_user.item)?;
+    let metadata = &retained_item["internal_chat_message_metadata_passthrough"];
     assert!(
-        replacement_history.iter().any(|envelope| {
-            is_retained_user_message(&envelope.item, retained_text) && envelope.metadata.is_some()
-        }),
-        "compacted user message should retain its aligned harness metadata"
+        metadata["content_item_kinds"]
+            .as_array()
+            .is_some_and(|kinds| !kinds.is_empty())
+    );
+    assert_eq!(
+        metadata["content_item_metadata"],
+        json!([{"provenance": {"type": "user"}}])
     );
     Ok(())
 }
@@ -272,8 +282,12 @@ fn assert_compact_request_omits_harness_metadata(request: &responses::ResponsesR
     }
 }
 
+#[test_case(false; "standard")]
+#[test_case(true; "responses_lite")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn remote_compact_v2_retains_metadata_from_resumed_history() -> Result<()> {
+async fn remote_compact_v2_retains_metadata_from_resumed_history(
+    responses_lite: bool,
+) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = wiremock::MockServer::start().await;
@@ -300,7 +314,13 @@ async fn remote_compact_v2_retains_metadata_from_resumed_history() -> Result<()>
     )
     .await;
 
-    let builder = || test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
+    let builder = || {
+        test_codex()
+            .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .with_model_info_override("gpt-5.4", move |model_info| {
+                model_info.use_responses_lite = responses_lite;
+            })
+    };
     let initial = builder()
         .with_pre_build_hook(|home| {
             fs::write(
@@ -330,6 +350,13 @@ async fn remote_compact_v2_retains_metadata_from_resumed_history() -> Result<()>
     resumed.codex.shutdown_and_wait().await?;
 
     let requests = response_mock.requests();
+    for request in &requests {
+        assert!(request.input().iter().all(|item| {
+            item["internal_chat_message_metadata_passthrough"]
+                .get("content_item_metadata")
+                .is_none()
+        }));
+    }
     let compact_request = &requests[1];
     assert_eq!(
         compact_request.inputs_of_type("compaction_trigger").len(),
