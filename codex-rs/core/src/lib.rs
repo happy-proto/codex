@@ -245,6 +245,7 @@ mod thread_rollout_truncation;
 pub use thread_rollout_truncation::truncate_rollout_after_turn_id;
 pub use thread_rollout_truncation::truncate_rollout_before_turn_id;
 mod observation_clock;
+mod generation_speed;
 mod tools;
 pub(crate) mod turn_diff_tracker;
 mod turn_metadata;

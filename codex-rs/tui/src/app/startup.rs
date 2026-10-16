@@ -1391,6 +1391,8 @@ See the Codex keymap documentation for supported actions and examples."
         let mut cloud_environment_picker: Option<
             futures::future::LocalBoxFuture<'static, crate::bottom_pane::SelectionViewParams>,
         > = None;
+        let mut generation_speed_poll = tokio::time::interval(Duration::from_secs(1));
+        generation_speed_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut waiting_for_initial_session_configured = wait_for_initial_session_configured;
         let mut waiting_for_initial_session_header = true;
 
