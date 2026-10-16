@@ -11,7 +11,21 @@
 
 `main` 是唯一长期分支，直接维护全部改造；`scripts/fork/upstream-tag` 记录上游基线，定期 rebase 到新 alpha。
 `fork.yml` 并行执行 Linux Rust 测试、Linux AMD64 和 ARM macOS 完整包构建，通过后自动发布。
+macOS 构建显式使用 `macos-latest`，跟随 GitHub 当前稳定 runner 镜像；目标仍为
+`aarch64-apple-darwin`。镜像升级后的完整包由 CI 原生验收，性能对照须区分实际镜像，
+不把不同系统的耗时直接归因于缓存优化。标签对应的系统与架构见
+[GitHub runner 映像说明](https://github.com/actions/runner-images#available-images)。
 版本使用上游 alpha 加 `.fork.N`，不覆盖已发布版本；平台包和 SHA-256 由 `fork-release.json` 描述。
+发布版本写入 `codex-package.json`，CLI、TUI、exec 展示和 daemon 身份在运行时读取。
+发布包使用多线程 xz 等级 8，保留 tar.xz 格式和签名后的完整资源；在压缩耗时与下载
+体积之间取平衡。调整等级前用真实平台包的相同 tar 字节流做对照，校验无损往返，
+再由 CI 验证包内内容、可执行权限、原生运行与安装契约。
+归档显式给 xz 50% 的物理内存预算，在线程数自动选择时避免默认软上限过早减少线程；
+该预算只影响发布时的压缩，不改变 CLI 运行时设置。`-T0` 不保证用满所有 CPU，
+对照时记录 `xz --info-memory`、实际线程数与 swap。调整预算时固定同一 tar 输入做
+前后对照，核对 xz 输出摘要，确认压缩内容没有改变；不同架构的包不视为相同输入。
+内部 crate 保留所选上游 alpha 的版本，不随 `.fork.N` 重写；源码、依赖和编译参数仍参与缓存校验。
+版本解析、commit 注入及防回退约束见 [发布版本与编译缓存分离](0015-build-cache-stability.md)。
 安装器校验下载、保留上一包供回退；用系统文件锁避免崩溃遗留锁阻断更新。
 启动检查只显示一次后台提示，不自动安装；`codex update` 主动更新，daemon 默认关闭自动升级。
 Rust 编译由 Cargo 通过 sccache 的 GitHub Actions 后端缓存，按编译结果独立保存，关闭 incremental；
@@ -25,6 +39,8 @@ Rust 编译由 Cargo 通过 sccache 的 GitHub Actions 后端缓存，按编译�
 ## 入口和验证
 
 - [发布工作流](../../.github/workflows/fork.yml)、[发布脚本](../../scripts/fork/release.py) 与 [脚本测试](../../scripts/fork/test_release.py)。
+- [版本解析](../../codex-rs/build-info/src/lib.rs)、[包版本回归测试](../../scripts/fork/test_package_version.py)：
+  将同一个未修改的 binary 放入不同版本的包，验证 `--version` 随清单变化；两个平台的原生产物都执行此检查。
 - [安装器](../../scripts/fork/install.sh)、[终端产物验收](../../scripts/fork/test_terminal_cwd.py)。
 - [更新入口](../../codex-rs/tui/src/update_action.rs)、[更新检测](../../codex-rs/tui/src/updates_cache.rs)、[daemon 设置](../../codex-rs/app-server-daemon/src/settings.rs)。
 

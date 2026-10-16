@@ -17,6 +17,14 @@ on:
         description: 发布已验证的 fork 构建；耗时实验默认不发布
         type: boolean
         default: false
+      tests_only:
+        description: 仅验证测试分组，跳过平台打包和发布
+        type: boolean
+        default: false
+      macos_cache_probe:
+        description: 仅验证 macOS 小型依赖的可复现构建，不构建或发布 Codex
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -26,6 +34,12 @@ concurrency:
   # main 新推送自动取消旧构建，优先验证和发布最新提交。
   # 手动耗时实验使用独立队列，不自动取消正在运行的实验。
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+env:
+  # ci-test 沿用 test 的 debug assertions，但不生成调试符号。
+  CARGO_PROFILE_CI_TEST_DEBUG: '0'
+  CARGO_PROFILE_CI_TEST_SPLIT_DEBUGINFO: 'off'
+  CARGO_PROFILE_CI_TEST_CODEGEN_UNITS: '256'
 
 jobs:
   scripts:
@@ -53,16 +67,17 @@ jobs:
         run: |
           sh -n scripts/fork/install.sh
           sh -n scripts/fork/cargo-timed.sh
+          sh -n scripts/fork/cargo-observed.sh
 
   build:
-    if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+    if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter && !inputs.macos_cache_probe && !inputs.tests_only }}
     needs: scripts
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: aarch64-apple-darwin
-            runner: macos-15
+            runner: macos-latest
             cache: fork-build-v1
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
@@ -82,10 +97,6 @@ jobs:
       CARGO_PROFILE_RELEASE_DEBUG: '0'
       CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'off'
       CARGO_PROFILE_RELEASE_LTO: 'false'
-      # core 的测试辅助程序需要 debug assertions 才能在临时目录创建调度别名。
-      CARGO_PROFILE_CI_TEST_DEBUG: '0'
-      CARGO_PROFILE_CI_TEST_SPLIT_DEBUGINFO: 'off'
-      CARGO_PROFILE_CI_TEST_CODEGEN_UNITS: '256'
       STABLE_GIT_COMMIT: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v6.0.2
@@ -108,6 +119,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config libcap-dev libasound2-dev
       - uses: dtolnay/rust-toolchain@1.95.0
+      - name: 记录 sccache 缓存键与存储错误
+        run: |
+          mkdir -p "$RUNNER_TEMP/fork-sccache"
+          {
+            echo 'SCCACHE_LOG=sccache::server=debug,sccache::compiler::compiler=debug,sccache::cache::cache=warn,opendal::services=warn'
+            echo "SCCACHE_ERROR_LOG=$RUNNER_TEMP/fork-sccache/daemon.log"
+            echo 'SCCACHE_LOG_MILLIS=1'
+          } >> "$GITHUB_ENV"
       - name: 配置 sccache 编译缓存
         id: sccache
         uses: mozilla-actions/sccache-action@v0.0.11
@@ -121,10 +140,6 @@ jobs:
           cache-bin: false
           shared-key: ${{ matrix.cache }}-downloads
           save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
-      - name: Install version-management tool
-        uses: taiki-e/install-action@v2.62.49
-        with:
-          tool: cargo-edit
       - name: Share the pinned V8 artifacts between package and tests
         env:
           CODEX_REPO_ROOT: ${{ github.workspace }}
@@ -144,11 +159,15 @@ jobs:
         run: cargo clean --manifest-path codex-rs/Cargo.toml --target ${{ matrix.target }} --release -p v8
       - name: Validate source and build complete native package
         id: package
-        run: python3 scripts/fork/release.py build --target ${{ matrix.target }}
+        run: python3 scripts/fork/build_observer.py --output fork-sccache/progress.ndjson -- python3 scripts/fork/release.py build --target ${{ matrix.target }}
       - name: 验证真实 CLI 启动与 resume 的终端目录
         env:
           CODEX_FORK_TEST_BINARY: ${{ github.workspace }}/fork-dist/package/bin/codex
         run: python3 -m unittest discover -s scripts/fork -p test_terminal_cwd.py -v
+      - name: 验证同一 binary 的发布版本与包清单一致
+        env:
+          CODEX_FORK_TEST_BINARY: ${{ github.workspace }}/fork-dist/package/bin/codex
+        run: python3 -m unittest discover -s scripts/fork -p test_package_version.py -v
       - name: 上传产物构建耗时报告
         uses: actions/upload-artifact@v7.0.0
         if: always()
@@ -161,6 +180,8 @@ jobs:
         run: |
           mkdir -p fork-sccache
           sccache --show-stats --stats-format=json > fork-sccache/build.json
+          python3 scripts/fork/cache_diagnostics.py --log "$SCCACHE_ERROR_LOG" --cwd codex-rs --output fork-sccache/diagnostics.json
+          python3 scripts/fork/build_report.py --directory fork-sccache --stats build.json --timings codex-rs/target/cargo-timings
       - name: 上传产物编译缓存统计
         if: always() && steps.sccache.outcome == 'success'
         uses: actions/upload-artifact@v7.0.0
@@ -177,8 +198,49 @@ jobs:
             fork-dist/install.sh
           if-no-files-found: error
 
-  tests:
+  macos-cache-probe:
+    if: ${{ inputs.macos_cache_probe }}
     needs: scripts
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: 恢复 Cargo 下载缓存
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: codex-rs
+          cache-targets: false
+          cache-bin: false
+          shared-key: fork-build-v1-downloads
+          save-if: false
+      - name: 对照 ts-rs 原版与上游确定性修复
+        run: python3 scripts/fork/build_observer.py --output "$RUNNER_TEMP/fork-cache-probe-progress.ndjson" --interval 5 -- python3 scripts/fork/probe_ts_rs_cache.py --output "$RUNNER_TEMP/fork-cache-probe" --patched-macros codex-rs/vendor/ts-rs-macros
+      - name: 保存小型复现与依赖摘要
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: fork-macos-cache-probe-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/fork-cache-probe/*.json
+            ${{ runner.temp }}/fork-cache-probe/*.rmeta
+            ${{ runner.temp }}/fork-cache-probe/*.log
+            ${{ runner.temp }}/fork-cache-probe-progress.ndjson
+          if-no-files-found: ignore
+
+  tests:
+    if: ${{ !inputs.macos_cache_probe }}
+    needs: scripts
+    strategy:
+      fail-fast: false
+      matrix:
+        # 定向验证只启动对应 profile，完整验证并行运行两组。
+        profile: ${{ fromJSON(inputs.core_test_filter && !inputs.tui_test_filter && '["ci-test"]' || inputs.tui_test_filter && !inputs.core_test_filter && '["release"]' || '["ci-test","release"]') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
@@ -218,6 +280,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config libcap-dev libasound2-dev
       - uses: dtolnay/rust-toolchain@1.95.0
+      - name: 记录 sccache 缓存键与存储错误
+        run: |
+          mkdir -p "$RUNNER_TEMP/fork-sccache"
+          {
+            echo 'SCCACHE_LOG=sccache::server=debug,sccache::compiler::compiler=debug,sccache::cache::cache=warn,opendal::services=warn'
+            echo "SCCACHE_ERROR_LOG=$RUNNER_TEMP/fork-sccache/daemon.log"
+            echo 'SCCACHE_LOG_MILLIS=1'
+          } >> "$GITHUB_ENV"
       - name: 配置 sccache 编译缓存
         id: sccache
         uses: mozilla-actions/sccache-action@v0.0.11
@@ -225,122 +295,154 @@ jobs:
           version: v0.18.0
       - name: 恢复 Cargo 下载缓存
         uses: Swatinem/rust-cache@v2.9.2
+        # 此步只恢复源码下载，使用与 Linux 发布构建相同的缓存键。
+        # 测试自己的编译参数仍由 job env 决定，sccache 独立校验实际输入。
+        env:
+          CARGO_PROFILE_RELEASE_OPT_LEVEL: ''
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ''
+          RUST_MIN_STACK: ''
         with:
           workspaces: codex-rs
           cache-targets: false
           cache-bin: false
-          shared-key: fork-tests-v1-downloads
-          save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
-      - name: Install version-management tool
-        uses: taiki-e/install-action@v2.62.49
-        with:
-          tool: cargo-edit
-      - name: Set the tested fork version
-        run: |
-          cargo set-version --manifest-path codex-rs/Cargo.toml -p codex-cli "$CODEX_FORK_VERSION"
+          shared-key: fork-build-linux-v1-downloads
+          save-if: false
+      - name: 验证包版本解析与源码构建回退
+        if: matrix.profile == 'release'
+        working-directory: codex-rs
+        run: ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-build-info --lib
+      - name: 执行定向 core 验证
+        if: matrix.profile == 'ci-test' && inputs.core_test_filter != ''
+        working-directory: codex-rs
+        env:
+          CORE_TEST_FILTER: ${{ inputs.core_test_filter }}
+        run: ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all "$CORE_TEST_FILTER" -- --test-threads=1
       - name: 执行定向测试或 release 更新验证
+        if: matrix.profile == 'release'
         working-directory: codex-rs
         env:
           TUI_TEST_FILTER: ${{ inputs.tui_test_filter }}
           CORE_TEST_FILTER: ${{ inputs.core_test_filter }}
         run: |
           if [ -n "$CORE_TEST_FILTER" ]; then
-            cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all "$CORE_TEST_FILTER" -- --test-threads=1
             exit 0
           fi
           if [ -n "$TUI_TEST_FILTER" ]; then
-            cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib "$TUI_TEST_FILTER"
+            ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib "$TUI_TEST_FILTER"
             exit 0
           fi
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates_cache::tests
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates::tests
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_action::tests
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib working_directory
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates_cache::tests
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates::tests
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_action::tests
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib working_directory
+      - name: 验证会话自动刷新与启动输入响应
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: |
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib startup -- --test-threads=1
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib session_lifecycle_requests -- --test-threads=1
       - name: Verify fork update presentation
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         env:
           INSTA_UPDATE: new
         run: |
           result=0
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_available_history_cell_snapshot || result=1
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_available_history_cell_snapshot || result=1
           exit "$result"
       - name: 验证 Markdown 渲染、流式输出及选择复制
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
-        run: cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib markdown_render
+        run: ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib markdown_render
       - name: Test daemon update defaults
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
-        run: cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-app-server-daemon --lib settings::tests
-      - name: 验证功能列表的输出格式与配置状态
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        run: ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-app-server-daemon --lib settings::tests
+      - name: 验证 CLI 参数、快照、功能列表与配置状态
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --bin codex features_list::tests
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test features features_list_
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --lib
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test features features_list_
       - name: 验证 MCP 列表展示与旧格式兼容
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --bin codex mcp_list_output
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test mcp_list
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test mcp_list
+      - name: 验证 TUI 插件引用
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib app::plugin_mentions::tests
       - name: 验证 fork 自动化工具替换与 Desktop 隔离
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core-plugins --lib fork_automation
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib app::plugin_mentions::tests
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills --lib
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills-extension --lib host_roots::tests
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills-extension --lib host_service::tests
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib config::fork_automation
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-app-server --test all skills_list_runtime_enable_refreshes_fork_system_skill_cache
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core-plugins --lib fork_automation
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills --lib
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills-extension --lib host_roots::tests
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills-extension --lib host_service::tests
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib config::fork_automation
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-app-server --test all skills_list_runtime_enable_refreshes_fork_system_skill_cache
       - name: 验证显式 skill 的初始调用与 steer 注入
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           # The history-injection test captures thread-local tracing; keep its
           # subscriber isolated from the other skill tests.
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::skills:: -- --test-threads=1
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all steered_explicit_only_skill_respects_blocked_queued_prompt
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::skills:: -- --test-threads=1
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all steered_explicit_only_skill_respects_blocked_queued_prompt
       - name: 验证已打开会话的名称同步
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib thread_name_refresh
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib refreshed_thread_name
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib thread_name_refresh
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib refreshed_thread_name
       - name: 验证回合生成速度与本地持久化
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib generation_speed
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::generation_speed:: -- --test-threads=1
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-state --lib generation_speed
-          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib generation_speed
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib generation_speed
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::generation_speed:: -- --test-threads=1
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-state --lib generation_speed
+      - name: 验证 TUI 回合生成速度
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib generation_speed
       - name: 验证 Responses Lite 请求兼容性与本地来源保留
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::responses_lite::base_instructions_use_input_items
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all responses_websocket_omits_content_attribution_without_mutating_history
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all remote_compact_v2_retains_metadata_from_resumed_history
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::responses_lite::base_instructions_use_input_items
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all responses_websocket_omits_content_attribution_without_mutating_history
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all remote_compact_v2_retains_metadata_from_resumed_history
+      - name: 验证 WebSocket 主动轮转、重连与 HTTP fallback
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: |
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::client_websockets:: -- --test-threads=1
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::websocket_fallback:: -- --test-threads=1
+      - name: 验证后台压缩退避重试、结果复用、失败回退与中断
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: |
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib session::async_compaction::tests -- --test-threads=1
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all async_compaction -- --test-threads=1
       - name: 验证模型容量错误的无限退避重试
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-api --lib telemetry::tests
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib responses_retry::tests
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib guardian_review_retries_transient_session_failure_then_approves
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::retry_after:: -- --test-threads=1
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all pre_sampling_compact_advised_errors_fall_back_then_retry_on_selected_model
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all manual_remote_compact_advice_respects_retry_limit
-          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all review_terminal_error_preserves_lifecycle_order
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-api --lib telemetry::tests
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib responses_retry::tests
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib guardian_review_retries_transient_session_failure_then_approves
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::retry_after:: -- --test-threads=1
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all pre_sampling_compact_advised_errors_fall_back_then_retry_on_selected_model
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all manual_remote_compact_advice_respects_retry_limit
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all review_terminal_error_preserves_lifecycle_order
       - name: 上传测试构建耗时报告
         uses: actions/upload-artifact@v7.0.0
         if: always()
         with:
-          name: fork-test-timings-${{ github.sha }}
+          name: fork-test-timings-${{ matrix.profile }}-${{ github.sha }}
           path: codex-rs/target/cargo-timings/
           if-no-files-found: ignore
       - name: 保存测试编译缓存统计
@@ -348,16 +450,18 @@ jobs:
         run: |
           mkdir -p fork-sccache
           sccache --show-stats --stats-format=json > fork-sccache/test.json
+          python3 scripts/fork/cache_diagnostics.py --log "$SCCACHE_ERROR_LOG" --cwd codex-rs --output fork-sccache/diagnostics.json
+          python3 scripts/fork/build_report.py --directory fork-sccache --stats test.json --timings codex-rs/target/cargo-timings
       - name: 上传测试编译缓存统计
         if: always() && steps.sccache.outcome == 'success'
         uses: actions/upload-artifact@v7.0.0
         with:
-          name: fork-test-sccache-${{ github.sha }}
+          name: fork-test-sccache-${{ matrix.profile }}-${{ github.sha }}
           path: fork-sccache/
       - uses: actions/upload-artifact@v7.0.0
         if: failure()
         with:
-          name: fork-snapshot-failures-${{ github.sha }}
+          name: fork-snapshot-failures-${{ matrix.profile }}-${{ github.sha }}
           path: codex-rs/tui/src/**/*.snap.new
           if-no-files-found: ignore
 
@@ -366,7 +470,7 @@ jobs:
     concurrency:
       group: fork-publication
       cancel-in-progress: false
-    if: github.repository == 'happy-proto/codex' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && !inputs.tui_test_filter && !inputs.core_test_filter && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    if: github.repository == 'happy-proto/codex' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && !inputs.tui_test_filter && !inputs.core_test_filter && !inputs.macos_cache_probe && !inputs.tests_only && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     needs: [build, tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
