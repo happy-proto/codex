@@ -274,6 +274,7 @@ mod startup_warnings;
 mod thread_event_buffer;
 mod thread_events;
 mod thread_goal_actions;
+mod thread_name_refresh;
 mod thread_routing;
 mod thread_session_state;
 mod thread_settings;
@@ -675,6 +676,7 @@ pub(crate) struct App {
     account_email_request_id: Option<uuid::Uuid>,
     rate_limit_hard_stop_generation: u64,
     rate_limit_refresh_state: rate_limit_refresh::RateLimitRefreshState,
+    thread_name_refresh: thread_name_refresh::ThreadNameRefreshState,
     pending_mcp_login_start: Option<PendingMcpLoginStart>,
     // Latest accepted attempt per server; stale retry completions must not update the UI.
     active_mcp_login_ids: HashMap<String, String>,
