@@ -9,6 +9,7 @@
 | 0001 | [独立分发、更新和安装](0001-distribution-and-updates.md) |
 | 0002 | [OSC 7 终端工作目录](0002-terminal-working-directory.md) |
 | 0003 | [中文 Markdown 加粗边界](0003-cjk-emphasis.md) |
+| 0004 | [功能列表输出格式](0004-features-list.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 修改已有改造时更新原记录，新改造使用下一个编号；编号不重用，不对应 PR 或固定 commit SHA。
