@@ -349,16 +349,28 @@ async fn list_and_get_render_expected_output() -> Result<()> {
     let list_output = list_cmd.args(["mcp", "list"]).output()?;
     assert!(list_output.status.success());
     let stdout = String::from_utf8(list_output.stdout)?;
-    assert!(stdout.contains("Name"));
+    assert!(stdout.contains("MCP servers · 1 configured"));
     assert!(stdout.contains("docs"));
     assert!(stdout.contains("docs-server"));
     assert!(stdout.contains("TOKEN=*****"));
     assert!(stdout.contains("APP_TOKEN=*****"));
     assert!(stdout.contains("WORKSPACE_ID=*****"));
-    assert!(stdout.contains("Status"));
+    assert!(stdout.contains("Command"));
     assert!(stdout.contains("Auth"));
     assert!(stdout.contains("enabled"));
     assert!(stdout.contains("Unsupported"));
+    assert!(!stdout.contains('\u{1b}'));
+    assert!(!stdout.contains("secret"));
+
+    let plain_output = codex_command(codex_home.path())?
+        .args(["mcp", "list", "--format", "plain"])
+        .output()?;
+    assert!(plain_output.status.success());
+    let plain = String::from_utf8(plain_output.stdout)?;
+    assert!(plain.contains("Name"));
+    assert!(plain.contains("Status"));
+    assert!(plain.contains("docs-server"));
+    assert!(!plain.contains("MCP servers"));
 
     let mut list_json_cmd = codex_command(codex_home.path())?;
     let json_output = list_json_cmd.args(["mcp", "list", "--json"]).output()?;
@@ -417,6 +429,20 @@ async fn list_and_get_render_expected_output() -> Result<()> {
         .success()
         .stdout(contains("\"name\": \"docs\"").and(contains("\"enabled\": true")));
 
+    Ok(())
+}
+
+#[test]
+fn list_rejects_conflicting_and_unknown_formats() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    codex_command(codex_home.path())?
+        .args(["mcp", "list", "--json", "--format", "human"])
+        .assert()
+        .failure();
+    codex_command(codex_home.path())?
+        .args(["mcp", "list", "--format", "yaml"])
+        .assert()
+        .failure();
     Ok(())
 }
 
