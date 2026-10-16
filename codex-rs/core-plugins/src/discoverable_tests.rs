@@ -151,7 +151,7 @@ async fn returns_microsoft_fallback_plugins() {
 }
 
 #[tokio::test]
-async fn omits_openai_curated_but_keeps_configured_marketplaces_for_remote_codex_auth() {
+async fn fork_automation_omits_official_chrome_suggestions_for_remote_codex_auth() {
     let codex_home = tempdir().expect("tempdir should succeed");
     let curated_root = curated_plugins_repo_path(codex_home.path());
     write_openai_curated_marketplace(&curated_root, &["slack"]);
@@ -200,13 +200,7 @@ source = {bundled_marketplace_root:?}
     )
     .await;
 
-    assert_eq!(
-        discoverable_plugins
-            .into_iter()
-            .map(|plugin| plugin.id)
-            .collect::<Vec<_>>(),
-        vec!["chrome@openai-bundled".to_string()]
-    );
+    assert!(discoverable_plugins.is_empty());
 }
 
 #[tokio::test]

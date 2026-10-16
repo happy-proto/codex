@@ -151,7 +151,7 @@ impl SkillsWatcher {
                 let Some(event) = event else {
                     break;
                 };
-                // The legacy user-skills root contains `.system` and is watched recursively.
+                // Ignore internal cache rewrites if delivered by an ancestor watch.
                 if event
                     .paths
                     .iter()
