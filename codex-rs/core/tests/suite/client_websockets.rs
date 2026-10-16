@@ -61,12 +61,14 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::start_websocket_server;
 use core_test_support::responses::start_websocket_server_with_headers;
+use core_test_support::responses::websocket_accept_config;
 use core_test_support::responses_metadata as test_responses_metadata;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::RecordingUserInstructionsProvider;
 use core_test_support::test_codex::test_codex;
 use core_test_support::tracing::install_test_tracing;
 use core_test_support::wait_for_event;
+use futures::SinkExt;
 use futures::StreamExt;
 use opentelemetry_sdk::metrics::InMemoryMetricExporter;
 use pretty_assertions::assert_eq;
@@ -74,6 +76,9 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tracing::Instrument;
 use tracing_test::traced_test;
 
@@ -1958,6 +1963,408 @@ async fn responses_websocket_connection_limit_error_reconnects_and_completes() {
     );
 
     server.shutdown().await;
+}
+
+// Advance only the connection age: keep network I/O on the running clock so the
+// runtime cannot auto-advance unrelated handshake and stream idle deadlines.
+async fn advance_websocket_age(seconds: u64) {
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(seconds)).await;
+    tokio::time::resume();
+}
+
+#[test_case::test_case(29 * 60, false; "young_same_turn")]
+#[test_case::test_case(29 * 60, true; "young_next_turn")]
+#[test_case::test_case(30 * 60, false; "rotate_same_turn")]
+#[test_case::test_case(30 * 60, true; "rotate_next_turn")]
+#[test_case::test_case(90 * 60, true; "rotate_after_long_idle")]
+#[tokio::test]
+async fn responses_websocket_rotation_preserves_context(age_seconds: u64, next_turn: bool) {
+    skip_if_no_network!();
+
+    let tool_call = core_test_support::responses::ev_function_call("call-1", "test_tool", "{}");
+    let completed = vec![ev_response_created("resp-2"), ev_completed("resp-2")];
+    let server = start_websocket_server(vec![
+        vec![
+            vec![
+                ev_response_created("resp-1"),
+                tool_call.clone(),
+                ev_completed("resp-1"),
+            ],
+            completed.clone(),
+            completed.clone(),
+        ],
+        vec![completed.clone(), completed],
+    ])
+    .await;
+    let harness = websocket_harness(&server).await;
+    let mut session = harness.client.new_session();
+    let first = prompt_with_input(vec![message_item("hello")]);
+    stream_until_complete_with_model_info(
+        &mut session,
+        &harness,
+        &first,
+        &harness.model_info,
+        "resp-1",
+    )
+    .await;
+    advance_websocket_age(age_seconds).await;
+    if next_turn {
+        drop(session);
+        session = harness.client.new_session();
+    }
+    let follow_up = prompt_with_input(vec![
+        message_item("hello"),
+        serde_json::from_value(tool_call["item"].clone()).unwrap(),
+        serde_json::from_value(json!({
+            "type": "function_call_output", "call_id": "call-1", "output": "tool result"
+        }))
+        .unwrap(),
+    ]);
+    stream_until_complete_with_model_info(
+        &mut session,
+        &harness,
+        &follow_up,
+        &harness.model_info,
+        "resp-2",
+    )
+    .await;
+
+    let rotated = age_seconds >= 30 * 60;
+    let connections = server.connections();
+    assert_eq!(connections.len(), if rotated { 2 } else { 1 });
+    let request = if rotated {
+        &connections[1][0]
+    } else {
+        &connections[0][1]
+    }
+    .body_json();
+    if rotated {
+        assert!(request.get("previous_response_id").is_none());
+        assert_eq!(
+            request["input"],
+            serde_json::to_value(&follow_up.input).unwrap()
+        );
+    } else {
+        assert_eq!(request["previous_response_id"], "resp-1");
+        assert_eq!(
+            request["input"],
+            serde_json::to_value(&follow_up.input[2..]).unwrap()
+        );
+    }
+    // Activity must not reset the age of a young connection. A newly rotated
+    // connection, on the other hand, must remain reusable on the next request.
+    if !rotated {
+        advance_websocket_age(60).await;
+    }
+    stream_until_complete_with_model_info(
+        &mut session,
+        &harness,
+        &follow_up,
+        &harness.model_info,
+        "resp-2",
+    )
+    .await;
+    let connections = server.connections();
+    assert_eq!(connections.len(), 2);
+    let last = connections.last().unwrap().last().unwrap().body_json();
+    if rotated {
+        assert_eq!(last["previous_response_id"], "resp-2");
+        assert_eq!(last["input"], json!([]));
+    } else {
+        assert!(last.get("previous_response_id").is_none());
+        assert_eq!(
+            last["input"],
+            serde_json::to_value(&follow_up.input).unwrap()
+        );
+    }
+    server.shutdown().await;
+}
+
+#[test_case::test_case(false; "preconnect")]
+#[test_case::test_case(true; "prewarm")]
+#[tokio::test]
+async fn responses_websocket_rotation_refreshes_prepared_connections(warmup: bool) {
+    skip_if_no_network!();
+
+    let completed = vec![ev_response_created("resp-1"), ev_completed("resp-1")];
+    let server = start_websocket_server(vec![
+        vec![completed.clone(), completed.clone(), completed.clone()],
+        vec![completed.clone(), completed.clone(), completed],
+    ])
+    .await;
+    let harness = websocket_harness(&server).await;
+    let mut session = harness.client.new_session();
+    let prompt = prompt_with_input(vec![message_item("hello")]);
+    let metadata = prewarm_metadata(&harness, None);
+    if warmup {
+        session
+            .prewarm_websocket(
+                &prompt,
+                &harness.model_info,
+                &harness.session_telemetry,
+                harness.effort.clone(),
+                harness.summary,
+                None,
+                &metadata,
+            )
+            .await
+            .unwrap();
+    } else {
+        session
+            .preconnect_websocket(
+                &harness.model_info,
+                None,
+                &harness.session_telemetry,
+                &metadata,
+            )
+            .await
+            .unwrap();
+    }
+    advance_websocket_age(30 * 60).await;
+    if warmup {
+        session
+            .prewarm_websocket(
+                &prompt,
+                &harness.model_info,
+                &harness.session_telemetry,
+                harness.effort.clone(),
+                harness.summary,
+                None,
+                &metadata,
+            )
+            .await
+            .unwrap();
+    } else {
+        session
+            .preconnect_websocket(
+                &harness.model_info,
+                None,
+                &harness.session_telemetry,
+                &metadata,
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(server.handshakes().len(), 2);
+    stream_until_complete_with_model_info(
+        &mut session,
+        &harness,
+        &prompt,
+        &harness.model_info,
+        "resp-1",
+    )
+    .await;
+    let connections = server.connections();
+    assert_eq!(connections.len(), 2);
+    let first = connections[1][0].body_json();
+    assert!(first.get("previous_response_id").is_none());
+    assert_eq!(first["input"], serde_json::to_value(&prompt.input).unwrap());
+    if warmup {
+        assert_eq!(first["generate"], false);
+        assert_eq!(
+            connections[1][1].body_json()["previous_response_id"],
+            "resp-1"
+        );
+    }
+    server.shutdown().await;
+}
+
+#[test_case::test_case(false; "reconnect")]
+#[test_case::test_case(true; "fallback_after_failed_handshake")]
+#[tokio::test]
+async fn responses_websocket_rotation_leaves_in_flight_response_intact(fallback: bool) {
+    skip_if_no_network!();
+
+    // Gate completion independently of the clock: crossing the age threshold
+    // must neither close the socket nor require a timer task to finish.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (release, released) = tokio::sync::oneshot::channel();
+    let server_task = tokio::spawn(async move {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let mut socket =
+            tokio_tungstenite::accept_async_with_config(tcp, Some(websocket_accept_config()))
+                .await
+                .unwrap();
+        socket.next().await.unwrap().unwrap();
+        for event in [
+            json!({"type": "response.metadata", "headers": {"x-codex-turn-state": "sticky-rotation"}}),
+            ev_response_created("resp-1"),
+        ] {
+            socket
+                .send(tokio_tungstenite::tungstenite::Message::Text(
+                    event.to_string().into(),
+                ))
+                .await
+                .unwrap();
+        }
+        released.await.unwrap();
+        for event in [
+            ev_assistant_message("msg_1", "finished after threshold"),
+            ev_completed("resp-1"),
+        ] {
+            socket
+                .send(tokio_tungstenite::tungstenite::Message::Text(
+                    event.to_string().into(),
+                ))
+                .await
+                .unwrap();
+        }
+        // Client retirement, rather than a server close, must cause reconnect.
+        while let Some(Ok(message)) = socket.next().await {
+            assert!(
+                !message.is_text(),
+                "expired socket received another request"
+            );
+            if message.is_close() {
+                break;
+            }
+        }
+        let (mut tcp, _) = listener.accept().await.unwrap();
+        if fallback {
+            // Reject only the replacement handshake, after a successful response
+            // on the original socket. HTTP must recover the full current input.
+            let mut reader = tokio::io::BufReader::new(&mut tcp);
+            loop {
+                let mut line = String::new();
+                assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            tcp.write_all(
+                b"HTTP/1.1 426 Upgrade Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+            drop(tcp);
+            let (mut tcp, _) = listener.accept().await.unwrap();
+            let mut reader = tokio::io::BufReader::new(&mut tcp);
+            let mut line = String::new();
+            reader.read_line(&mut line).await.unwrap();
+            assert!(line.starts_with("POST /v1/responses "));
+            let mut content_length = None;
+            let mut turn_state = None;
+            loop {
+                line.clear();
+                assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                if line == "\r\n" {
+                    break;
+                }
+                let (name, value) = line.split_once(':').unwrap();
+                if name.eq_ignore_ascii_case("content-length") {
+                    content_length = Some(value.trim().parse::<usize>().unwrap());
+                } else if name.eq_ignore_ascii_case("x-codex-turn-state") {
+                    turn_state = Some(value.trim().to_string());
+                }
+            }
+            assert_eq!(turn_state.as_deref(), Some("sticky-rotation"));
+            let mut bytes = vec![0; content_length.expect("JSON request content length")];
+            reader.read_exact(&mut bytes).await.unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let events = core_test_support::responses::sse(vec![
+                ev_response_created("resp-2"),
+                ev_completed("resp-2"),
+            ]);
+            tcp.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{events}", events.len()).as_bytes()).await.unwrap();
+            return body;
+        }
+        let mut socket =
+            tokio_tungstenite::accept_async_with_config(tcp, Some(websocket_accept_config()))
+                .await
+                .unwrap();
+        let request = socket.next().await.unwrap().unwrap();
+        let body: serde_json::Value = serde_json::from_str(request.to_text().unwrap()).unwrap();
+        assert_eq!(
+            body["client_metadata"]["x-codex-turn-state"],
+            "sticky-rotation"
+        );
+        for event in [ev_response_created("resp-2"), ev_completed("resp-2")] {
+            socket
+                .send(tokio_tungstenite::tungstenite::Message::Text(
+                    event.to_string().into(),
+                ))
+                .await
+                .unwrap();
+        }
+        body
+    });
+    let placeholder = start_websocket_server(vec![]).await;
+    let mut provider = websocket_provider(&placeholder);
+    provider.base_url = Some(format!("http://{address}/v1"));
+    provider.stream_idle_timeout_ms = Some(60 * 60 * 1_000);
+    let harness = websocket_harness_with_provider_options(provider, false, false, &[]).await;
+    let mut session = harness.client.new_session();
+    let metadata = turn_metadata(&harness, None);
+    session
+        .preconnect_websocket(
+            &harness.model_info,
+            None,
+            &harness.session_telemetry,
+            &metadata,
+        )
+        .await
+        .unwrap();
+    advance_websocket_age(29 * 60).await;
+    let prompt = prompt_with_input(vec![message_item("hello")]);
+    let mut stream = session
+        .stream(
+            &prompt,
+            &harness.model_info,
+            &harness.session_telemetry,
+            harness.effort.clone(),
+            harness.summary,
+            None,
+            &metadata,
+            &InferenceTraceContext::disabled(),
+        )
+        .await
+        .unwrap();
+    while !matches!(
+        stream.next().await.unwrap().unwrap(),
+        ResponseEvent::Created { .. }
+    ) {}
+    advance_websocket_age(2 * 60).await;
+    release.send(()).unwrap();
+    let mut saw_output = false;
+    let mut completed = false;
+    while let Some(event) = stream.next().await {
+        match event.unwrap() {
+            ResponseEvent::OutputItemDone(_) => saw_output = true,
+            ResponseEvent::Completed { response_id, .. } => {
+                assert_eq!(response_id, "resp-1");
+                completed = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_output && completed);
+    let follow_up = prompt_with_input(vec![
+        message_item("hello"),
+        assistant_message_item("1", "finished after threshold"),
+        message_item("continue"),
+    ]);
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        stream_until_complete_with_model_info(
+            &mut session,
+            &harness,
+            &follow_up,
+            &harness.model_info,
+            "resp-2",
+        ),
+    )
+    .await
+    .expect("rotation must not wait for a close handshake");
+    let body = server_task.await.unwrap();
+    assert!(body.get("previous_response_id").is_none());
+    assert_eq!(
+        body["input"],
+        serde_json::to_value(&follow_up.input).unwrap()
+    );
+    placeholder.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
