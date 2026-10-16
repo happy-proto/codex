@@ -12,6 +12,7 @@
 | 0004 | [功能列表输出格式](0004-features-list.md) |
 | 0005 | [MCP 列表展示](0005-mcp-list.md) |
 | 0006 | [工作中显式 skill 正文注入](0006-steered-skills.md) |
+| 0007 | [容量错误无限退避重试](0007-capacity-retries.md)（已移除，恢复上游规则） |
 | 0008 | [已打开会话的名称同步](0008-thread-name-refresh.md) |
 | 0009 | [回合与近期平均生成速度](0009-generation-speed.md) |
 | 0010 | [默认使用开放的浏览器与电脑操作工具](0010-open-automation.md) |
@@ -25,6 +26,7 @@
 | 0018 | [会话动态补全](0018-session-completion.md) |
 | 0019 | [会话列表只展示当前 rollout](0019-current-rollout-listing.md) |
 | 0020 | [OpenAI 模型请求专用代理](0020-openai-proxy.md) |
+| 0021 | [每次重试等待提示](0021-advised-retry-visibility.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 同步上游使用独立的 [上游同步 skill](../../.agents/skills/codex-upstream-sync/SKILL.md)。
