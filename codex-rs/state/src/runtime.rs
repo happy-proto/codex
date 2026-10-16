@@ -42,6 +42,10 @@ use tracing::warn;
 
 mod backfill;
 mod external_agent_config_imports;
+mod generation_speed;
+pub use generation_speed::GenerationSpeedCompletion;
+pub use generation_speed::GenerationSpeedRecord;
+pub use generation_speed::GenerationSpeedWriter;
 mod goals;
 mod guardian_feedback;
 mod logs;
@@ -161,6 +165,9 @@ impl StateRuntime {
             }
         };
         let has_memories_v2 = tokio::fs::try_exists(sqlite.memories_v2_db_path()).await?;
+        if let Err(err) = generation_speed::initialize(pool.as_ref()).await {
+            warn!("generation speed storage unavailable: {err}");
+        }
         let (logs_pool, diagnostic_logs_error) = match sqlite
             .open_logs_db(&logs_migrator, telemetry_override)
             .await
