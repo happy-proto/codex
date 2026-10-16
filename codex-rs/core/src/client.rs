@@ -31,6 +31,7 @@ use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
 #[path = "client_tool_metadata.rs"]
@@ -222,6 +223,7 @@ struct ModelClientState {
     cached_websocket_session: StdMutex<WebsocketSession>,
     /// Last full tool list used for sampling, retained across turns and connection resets.
     last_inference_tools: StdMutex<Option<Arc<[ToolSpec]>>>,
+    failed_requests: Arc<AtomicU64>,
 }
 
 impl std::fmt::Debug for ModelClientState {
@@ -635,6 +637,7 @@ impl ModelClient {
                 agent_identity_session_fallback: AgentIdentitySessionFallback::default(),
                 cached_websocket_session: StdMutex::new(WebsocketSession::default()),
                 last_inference_tools: StdMutex::new(None),
+                failed_requests: Arc::new(AtomicU64::new(0)),
             }),
             agent_identity_policy,
             prompt_cache_key_policy: PromptCacheKey::default(),
@@ -1029,6 +1032,7 @@ impl ModelClient {
             .map_err(|error| self.state.provider.map_api_error(error))?,
             RequestRouteTelemetry::for_endpoint(MEMORIES_SUMMARIZE_ENDPOINT),
             self.state.auth_env_telemetry.clone(),
+            Arc::clone(&self.state.failed_requests),
         );
         let client =
             ApiMemoriesClient::new(transport, client_setup.api_provider, client_setup.api_auth)
@@ -1125,12 +1129,14 @@ impl ModelClient {
         auth_context: AuthRequestTelemetryContext,
         request_route_telemetry: RequestRouteTelemetry,
         auth_env_telemetry: AuthEnvTelemetry,
+        failed_requests: Arc<AtomicU64>,
     ) -> Arc<dyn RequestTelemetry> {
         let telemetry = Arc::new(ApiTelemetry::new(
             session_telemetry.clone(),
             auth_context,
             request_route_telemetry,
             auth_env_telemetry,
+            failed_requests,
         ));
         let request_telemetry: Arc<dyn RequestTelemetry> = telemetry;
         request_telemetry
@@ -1490,6 +1496,7 @@ impl ModelClient {
             auth_context.clone(),
             request_route_telemetry,
             self.state.auth_env_telemetry.clone(),
+            Arc::clone(&self.state.failed_requests),
         );
         let websocket_connect_timeout = self.state.provider.info().websocket_connect_timeout();
         let start = Instant::now();
@@ -1508,6 +1515,9 @@ impl ModelClient {
             Ok(result) => result,
             Err(_) => Err(ApiError::Transport(TransportError::Timeout)),
         };
+        if result.is_err() {
+            self.state.failed_requests.fetch_add(1, Ordering::Relaxed);
+        }
         let error_message = result.as_ref().err().map(telemetry_api_error_message);
         let response_debug = result
             .as_ref()
@@ -2018,6 +2028,7 @@ impl ResponsesHttpExecutor<'_> {
                 request_auth_context,
                 RequestRouteTelemetry::for_endpoint("/responses"),
                 self.client.state.auth_env_telemetry.clone(),
+                Arc::clone(&self.client.state.failed_requests),
             );
             let compression = self.responses_request_compression(client_setup.auth.as_ref());
             let mut options = self
@@ -2518,12 +2529,14 @@ impl ModelClientSession {
         auth_context: AuthRequestTelemetryContext,
         request_route_telemetry: RequestRouteTelemetry,
         auth_env_telemetry: AuthEnvTelemetry,
+        failed_requests: Arc<AtomicU64>,
     ) -> (Arc<dyn RequestTelemetry>, Arc<dyn SseTelemetry>) {
         let telemetry = Arc::new(ApiTelemetry::new(
             session_telemetry.clone(),
             auth_context,
             request_route_telemetry,
             auth_env_telemetry,
+            failed_requests,
         ));
         let request_telemetry: Arc<dyn RequestTelemetry> = telemetry.clone();
         let sse_telemetry: Arc<dyn SseTelemetry> = telemetry;
@@ -2536,12 +2549,14 @@ impl ModelClientSession {
         auth_context: AuthRequestTelemetryContext,
         request_route_telemetry: RequestRouteTelemetry,
         auth_env_telemetry: AuthEnvTelemetry,
+        failed_requests: Arc<AtomicU64>,
     ) -> Arc<dyn WebsocketTelemetry> {
         let telemetry = Arc::new(ApiTelemetry::new(
             session_telemetry.clone(),
             auth_context,
             request_route_telemetry,
             auth_env_telemetry,
+            failed_requests,
         ));
         let websocket_telemetry: Arc<dyn WebsocketTelemetry> = telemetry;
         websocket_telemetry
@@ -2680,6 +2695,10 @@ impl ModelClientSession {
                     .await
             }
         }
+    }
+
+    pub(crate) fn generation_failure_counter(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.client.state.failed_requests)
     }
 
     /// Permanently disables WebSockets for this Codex session and resets WebSocket state.
@@ -3259,6 +3278,7 @@ struct ApiTelemetry {
     auth_context: AuthRequestTelemetryContext,
     request_route_telemetry: RequestRouteTelemetry,
     auth_env_telemetry: AuthEnvTelemetry,
+    failed_requests: Arc<AtomicU64>,
 }
 
 impl ApiTelemetry {
@@ -3267,12 +3287,14 @@ impl ApiTelemetry {
         auth_context: AuthRequestTelemetryContext,
         request_route_telemetry: RequestRouteTelemetry,
         auth_env_telemetry: AuthEnvTelemetry,
+        failed_requests: Arc<AtomicU64>,
     ) -> Self {
         Self {
             session_telemetry,
             auth_context,
             request_route_telemetry,
             auth_env_telemetry,
+            failed_requests,
         }
     }
 }
@@ -3285,6 +3307,9 @@ impl RequestTelemetry for ApiTelemetry {
         error: Option<&TransportError>,
         duration: Duration,
     ) {
+        if error.is_some() {
+            self.failed_requests.fetch_add(1, Ordering::Relaxed);
+        }
         let error_message = error.map(telemetry_transport_error_message);
         let status = status.map(|s| s.as_u16());
         let debug = error
@@ -3351,6 +3376,9 @@ impl SseTelemetry for ApiTelemetry {
 
 impl WebsocketTelemetry for ApiTelemetry {
     fn on_ws_request(&self, duration: Duration, error: Option<&ApiError>, connection_reused: bool) {
+        if error.is_some() {
+            self.failed_requests.fetch_add(1, Ordering::Relaxed);
+        }
         let error_message = error.map(telemetry_api_error_message);
         let status = error.and_then(api_error_http_status);
         let debug = error
@@ -3391,6 +3419,7 @@ impl WebsocketTelemetry for ApiTelemetry {
     }
 
     fn on_ws_receive_failure(&self, duration: Duration) {
+        self.failed_requests.fetch_add(1, Ordering::Relaxed);
         self.session_telemetry
             .record_websocket_receive_failure(duration);
     }
