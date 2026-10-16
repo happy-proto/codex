@@ -9,6 +9,7 @@
 | 0001 | [独立分发、更新和安装](0001-distribution-and-updates.md) |
 | 0002 | [OSC 7 终端工作目录](0002-terminal-working-directory.md) |
 | 0003 | [中文 Markdown 加粗边界](0003-cjk-emphasis.md) |
+| 0004 | [功能列表输出格式](0004-features-list.md) |
 | 0011 | [发布版本与编译缓存分离](0011-build-cache-stability.md) |
 | 0012 | [ts-rs 宏输出与编译元数据稳定性](0012-ts-rs-metadata-stability.md) |
 

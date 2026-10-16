@@ -244,6 +244,7 @@ mod exec_args_tests;
 #[cfg(test)]
 #[path = "exec_server_args_tests.rs"]
 mod exec_server_args_tests;
+mod features_list;
 mod marketplace_cmd;
 mod mcp_cmd;
 mod mcp_login;
@@ -1202,7 +1203,7 @@ struct FeaturesCli {
 #[derive(Debug, Parser)]
 enum FeaturesSubcommand {
     /// List known features with their stage and effective state.
-    List,
+    List(features_list::FeaturesListArgs),
     /// Enable a feature in config.toml.
     Enable(FeatureSetArgs),
     /// Disable a feature in config.toml.
@@ -2164,18 +2165,15 @@ async fn dispatch_cli(
                         .await?;
                 let mut rows = Vec::with_capacity(FEATURES.len());
                 for def in FEATURES {
-                    let name = def.key;
-                    let stage = stage_str(def.stage);
-                    let enabled = config.features.enabled(def.id);
-                    name_width = name_width.max(name.len());
-                    stage_width = stage_width.max(stage.len());
-                    rows.push((name, stage, enabled));
+                    rows.push(features_list::FeaturesListRow {
+                        name: def.key,
+                        stage: stage_str(def.stage),
+                        enabled: config.features.enabled(def.id),
+                    });
                 }
                 rows.sort_unstable_by_key(|row| row.name);
 
-                for (name, stage, enabled) in rows {
-                    println!("{name:<name_width$}  {stage:<stage_width$}  {enabled}");
-                }
+                features_list::write_features_list(std::io::stdout().lock(), &rows, args.format)?;
             }
             FeaturesSubcommand::Enable(FeatureSetArgs { feature }) => {
                 reject_remote_mode_for_subcommand(
