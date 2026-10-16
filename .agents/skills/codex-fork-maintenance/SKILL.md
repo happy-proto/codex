@@ -9,6 +9,7 @@ description: 维护 happy-proto/codex 个人 fork；用于更新编号改造记�
 
 进行 fork 改动时，默认按 [upstream.md](references/upstream.md) 同步最新已发布的上游 alpha，
 将本轮改动和同步结果一起验证、统一推送，以复用完整 CI；适用边界和例外见该参考。
+每次同步同时检查内置第三方 skills，有更新时一并导入并验证；具体步骤见同一参考。
 
 ## 按需读取
 
