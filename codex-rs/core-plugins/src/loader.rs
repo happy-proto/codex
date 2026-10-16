@@ -182,6 +182,8 @@ async fn load_plugins_from_layer_stack_with_scope(
         store,
         remote_global_catalog_active,
     );
+    // Filter after merging remote state too. Never rewrite shared Desktop config/cache.
+    configured_plugins.retain(|key, _| !crate::fork_policy::replaces_official_automation(key));
     for (plugin_id, plugin) in &mut configured_plugins {
         plugin.enabled =
             Some(plugin.enabled.unwrap_or(true) && plugin_policy.allows_plugin(plugin_id));
