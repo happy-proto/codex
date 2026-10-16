@@ -76,6 +76,9 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncReadExt;
+use tokio::io::AsyncWriteExt;
 use tracing::Instrument;
 use tracing_test::traced_test;
 
@@ -2226,8 +2229,10 @@ async fn responses_websocket_rotation_refreshes_prepared_connections(warmup: boo
     server.shutdown().await;
 }
 
+#[test_case::test_case(false; "reconnect")]
+#[test_case::test_case(true; "fallback_after_failed_handshake")]
 #[tokio::test]
-async fn responses_websocket_rotation_leaves_in_flight_response_intact() {
+async fn responses_websocket_rotation_leaves_in_flight_response_intact(fallback: bool) {
     skip_if_no_network!();
 
     // Gate completion independently of the clock: crossing the age threshold
@@ -2242,12 +2247,17 @@ async fn responses_websocket_rotation_leaves_in_flight_response_intact() {
                 .await
                 .unwrap();
         socket.next().await.unwrap().unwrap();
-        socket
-            .send(tokio_tungstenite::tungstenite::Message::Text(
-                ev_response_created("resp-1").to_string().into(),
-            ))
-            .await
-            .unwrap();
+        for event in [
+            json!({"type": "response.metadata", "headers": {"x-codex-turn-state": "sticky-rotation"}}),
+            ev_response_created("resp-1"),
+        ] {
+            socket
+                .send(tokio_tungstenite::tungstenite::Message::Text(
+                    event.to_string().into(),
+                ))
+                .await
+                .unwrap();
+        }
         released.await.unwrap();
         for event in [
             ev_assistant_message("msg_1", "finished after threshold"),
@@ -2270,13 +2280,65 @@ async fn responses_websocket_rotation_leaves_in_flight_response_intact() {
                 break;
             }
         }
-        let (tcp, _) = listener.accept().await.unwrap();
+        let (mut tcp, _) = listener.accept().await.unwrap();
+        if fallback {
+            // Reject only the replacement handshake, after a successful response
+            // on the original socket. HTTP must recover the full current input.
+            let mut reader = tokio::io::BufReader::new(&mut tcp);
+            loop {
+                let mut line = String::new();
+                assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            tcp.write_all(
+                b"HTTP/1.1 426 Upgrade Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .await
+            .unwrap();
+            drop(tcp);
+            let (mut tcp, _) = listener.accept().await.unwrap();
+            let mut reader = tokio::io::BufReader::new(&mut tcp);
+            let mut line = String::new();
+            reader.read_line(&mut line).await.unwrap();
+            assert!(line.starts_with("POST /v1/responses "));
+            let mut content_length = None;
+            let mut turn_state = None;
+            loop {
+                line.clear();
+                assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                if line == "\r\n" {
+                    break;
+                }
+                let (name, value) = line.split_once(':').unwrap();
+                if name.eq_ignore_ascii_case("content-length") {
+                    content_length = Some(value.trim().parse::<usize>().unwrap());
+                } else if name.eq_ignore_ascii_case("x-codex-turn-state") {
+                    turn_state = Some(value.trim().to_string());
+                }
+            }
+            assert_eq!(turn_state.as_deref(), Some("sticky-rotation"));
+            let mut bytes = vec![0; content_length.expect("JSON request content length")];
+            reader.read_exact(&mut bytes).await.unwrap();
+            let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            let events = core_test_support::responses::sse(vec![
+                ev_response_created("resp-2"),
+                ev_completed("resp-2"),
+            ]);
+            tcp.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{events}", events.len()).as_bytes()).await.unwrap();
+            return body;
+        }
         let mut socket =
             tokio_tungstenite::accept_async_with_config(tcp, Some(websocket_accept_config()))
                 .await
                 .unwrap();
         let request = socket.next().await.unwrap().unwrap();
         let body: serde_json::Value = serde_json::from_str(request.to_text().unwrap()).unwrap();
+        assert_eq!(
+            body["client_metadata"]["x-codex-turn-state"],
+            "sticky-rotation"
+        );
         for event in [ev_response_created("resp-2"), ev_completed("resp-2")] {
             socket
                 .send(tokio_tungstenite::tungstenite::Message::Text(
@@ -2289,7 +2351,7 @@ async fn responses_websocket_rotation_leaves_in_flight_response_intact() {
     });
     let placeholder = start_websocket_server(vec![]).await;
     let mut provider = websocket_provider(&placeholder);
-    provider.base_url = Some(format!("ws://{address}/v1"));
+    provider.base_url = Some(format!("http://{address}/v1"));
     provider.stream_idle_timeout_ms = Some(60 * 60 * 1_000);
     let harness = websocket_harness_with_provider_options(provider, false, false, &[]).await;
     let mut session = harness.client.new_session();

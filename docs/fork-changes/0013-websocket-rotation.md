@@ -33,7 +33,8 @@ Responses WebSocket 连接会跨请求和 turn 复用。
 - [WebSocket 回归测试](../../codex-rs/core/tests/suite/client_websockets.rs)：
   `responses_websocket_rotation_*` 使用可控时间验证阈值前复用、达到阈值轮转、
   跨 turn 与长时间空闲、完整消息与工具上下文恢复、轮转后增量续接、
-  预连接和预热，以及跨阈值在途响应完整结束。
+  预连接和预热、跨阈值在途响应完整结束，以及轮转握手被拒绝后
+  HTTP fallback 保留完整上下文和同一 turn 的路由 token。
 - 原有 `responses_websocket_connection_limit_error_reconnects_and_completes`
   验证上游到期错误发生后的重试恢复。
   [自有 CI](../../.github/workflows/fork.yml) 的常规验证运行整个 `client_websockets`
