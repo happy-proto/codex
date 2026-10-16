@@ -19,6 +19,7 @@
 | 0011 | [发布版本与编译缓存分离](0011-build-cache-stability.md) |
 | 0012 | [ts-rs 宏输出与编译元数据稳定性](0012-ts-rs-metadata-stability.md) |
 | 0013 | [异步压缩生命周期诊断](0013-async-compaction-diagnostics.md) |
+| 0014 | [后台压缩失败后的退避重试](0014-async-compaction-retry.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 同步上游按 [同步与发布](../../.agents/skills/codex-fork-maintenance/references/upstream-sync.md) 执行。
