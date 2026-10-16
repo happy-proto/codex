@@ -980,7 +980,7 @@ See the Codex keymap documentation for supported actions and examples."
         });
         let runtime_keymap = startup_try!(runtime_keymap);
         #[cfg(not(debug_assertions))]
-        let upgrade_version = crate::updates::get_upgrade_version(&config);
+        crate::updates::start_update_check(&config, app_event_tx.clone());
 
         let agents_overview =
             agents_overview::AgentsOverviewState::new(local_settings.tui.agents_overview_grouping);
@@ -1289,27 +1289,6 @@ See the Codex keymap documentation for supported actions and examples."
         let mut waiting_for_initial_session_configured = wait_for_initial_session_configured;
         let mut waiting_for_initial_session_header = true;
 
-        #[cfg(not(debug_assertions))]
-        let pre_loop_exit_reason = if let Some(latest_version) = upgrade_version {
-            let control = Box::pin(app.handle_event(
-                tui,
-                &mut app_server,
-                AppEvent::InsertHistoryCell(Box::new(UpdateAvailableHistoryCell::new(
-                    latest_version,
-                    crate::update_action::get_update_action(),
-                ))),
-            ))
-            .await;
-            match startup_try!(control) {
-                AppRunControl::Continue => None,
-                AppRunControl::Exit(exit_reason) => Some(exit_reason),
-            }
-        } else {
-            None
-        };
-        #[cfg(debug_assertions)]
-        let pre_loop_exit_reason: Option<ExitReason> = None;
-
         let mut backends =
             super::backend_sessions::BackendSessions::from_initial(app_server, other_backends);
         if matches!(
@@ -1326,10 +1305,7 @@ See the Codex keymap documentation for supported actions and examples."
         backends.settings = backend_settings;
 
         let mut parked_side_completions = HashMap::<_, Vec<AppEvent>>::new();
-        let exit_reason_result = if let Some(exit_reason) = pre_loop_exit_reason {
-            Ok(exit_reason)
-        } else {
-            loop {
+        let exit_reason_result = loop {
                 let displayed_session = backends.displayed;
                 let displayed_owner = backends.displayed_owner();
                 if let Some(events) = parked_side_completions.remove(&displayed_owner) {
@@ -1781,7 +1757,6 @@ See the Codex keymap documentation for supported actions and examples."
                     }
                     AppRunControl::Exit(reason) => break Ok(reason),
                 }
-            }
         };
         // Let the pending terminal poll unwind while the app server shuts down.
         tui.pause_events();
