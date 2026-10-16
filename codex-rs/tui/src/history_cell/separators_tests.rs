@@ -1,6 +1,26 @@
 //! Completion metadata rendering, date selection, and muted styling coverage.
 
 use super::*;
+
+#[test]
+fn generation_speed_is_one_final_number_and_invalid_values_are_hidden() {
+    let cell = FinalMessageSeparator::new(Some(12), None).with_generation_speed(Some(42.34));
+    assert_eq!(
+        cell.raw_lines()[0].to_string(),
+        "Worked for 12s • 42.3 token/s"
+    );
+    for speed in [
+        None,
+        Some(0.0),
+        Some(-1.0),
+        Some(f64::NAN),
+        Some(f64::INFINITY),
+        Some(0.01),
+    ] {
+        let cell = FinalMessageSeparator::new(Some(12), None).with_generation_speed(speed);
+        assert_eq!(cell.raw_lines()[0].to_string(), "Worked for 12s");
+    }
+}
 use chrono::NaiveDateTime;
 use chrono::TimeZone;
 use chrono::Timelike;

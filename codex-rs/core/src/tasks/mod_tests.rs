@@ -34,6 +34,106 @@ use tokio_util::sync::CancellationToken;
 
 struct PendingTask;
 
+#[tokio::test]
+async fn generation_speed_reporter_stops_before_turn_finalization_can_claim_a_new_snapshot()
+-> anyhow::Result<()> {
+    struct CompleteTask;
+    impl SessionTask for CompleteTask {
+        fn kind(&self) -> TaskKind {
+            TaskKind::Regular
+        }
+        fn span_name(&self) -> &'static str {
+            "session_task.complete"
+        }
+        async fn run(
+            self: Arc<Self>,
+            _session: Arc<Session>,
+            _turn_context: Arc<TurnContext>,
+            _input: Vec<TurnInput>,
+            _cancellation_token: CancellationToken,
+        ) -> SessionTaskResult {
+            // Let the reporter's immediate first retry observe the missing metadata.
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            Ok(None)
+        }
+    }
+    struct ClaimDuringFinalization {
+        db: crate::StateDbHandle,
+        metadata: codex_state::ThreadMetadata,
+        result: tokio::sync::mpsc::UnboundedSender<Option<f64>>,
+    }
+    impl codex_extension_api::TurnLifecycleContributor for ClaimDuringFinalization {
+        fn on_turn_stop<'a>(
+            &'a self,
+            _input: codex_extension_api::TurnStopInput<'a>,
+        ) -> codex_extension_api::ExtensionFuture<'a, ()> {
+            Box::pin(async move {
+                // The old reporter's initial claim failed because metadata did not exist.
+                // Give a replacement ownership while the old task is still in finalization.
+                self.db
+                    .upsert_thread(&self.metadata)
+                    .await
+                    .expect("persist metadata");
+                self.db
+                    .start_live_generation_speed(self.metadata.id, "next", "new")
+                    .await
+                    .expect("claim replacement snapshot");
+                self.db
+                    .update_live_generation_speed(self.metadata.id, "next", "new", Some(42.0))
+                    .await
+                    .expect("publish replacement snapshot");
+                tokio::time::sleep(std::time::Duration::from_millis(1250)).await;
+                let speed = self
+                    .db
+                    .live_generation_speed(self.metadata.id, "next", 0)
+                    .await
+                    .expect("read replacement snapshot");
+                self.result.send(speed).expect("deliver ownership result");
+            })
+        }
+    }
+
+    let (mut session, turn_context, _events) = make_session_and_context_with_rx().await;
+    let db =
+        codex_state::StateRuntime::init(turn_context.config.sqlite_config().clone(), "test".into())
+            .await?;
+    // Keep the metadata absent through task startup to force background initialization retries.
+    assert!(
+        db.start_live_generation_speed(session.thread_id, "probe", "probe")
+            .await
+            .is_err()
+    );
+    let metadata = codex_state::ThreadMetadataBuilder::new(
+        session.thread_id,
+        turn_context
+            .config
+            .codex_home
+            .join("rollout.jsonl")
+            .to_path_buf(),
+        chrono::Utc::now(),
+        SessionSource::Cli,
+    )
+    .build("test");
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut extensions = codex_extension_api::ExtensionRegistryBuilder::new();
+    extensions.turn_lifecycle_contributor(Arc::new(ClaimDuringFinalization {
+        db: Arc::clone(&db),
+        metadata,
+        result: tx,
+    }));
+    let services = &mut Arc::get_mut(&mut session)
+        .expect("unique test session")
+        .services;
+    services.state_db = Some(db);
+    services.extensions = Arc::new(extensions.build());
+    session
+        .spawn_task(turn_context, Vec::new(), CompleteTask)
+        .await;
+    let speed = tokio::time::timeout(std::time::Duration::from_secs(10), rx.recv()).await?;
+    assert_eq!(speed, Some(Some(42.0)));
+    Ok(())
+}
+
 impl SessionTask for PendingTask {
     fn kind(&self) -> TaskKind {
         TaskKind::Regular

@@ -14,6 +14,7 @@
 | 0006 | [工作中显式 skill 正文注入](0006-steered-skills.md) |
 | 0007 | [容量错误无限退避重试](0007-capacity-retries.md) |
 | 0008 | [已打开会话的名称同步](0008-thread-name-refresh.md) |
+| 0009 | [回合与近期平均生成速度](0009-generation-speed.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 修改已有改造时更新原记录，新改造使用下一个编号；编号不重用，不对应 PR 或固定 commit SHA。

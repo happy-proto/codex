@@ -1,0 +1,307 @@
+//! The metric is available at completion and excludes requests with incomplete measurements.
+
+use codex_features::Feature;
+use codex_protocol::protocol::EventMsg;
+use core_test_support::responses;
+use core_test_support::skip_if_no_network;
+use core_test_support::test_codex::test_codex;
+use core_test_support::wait_for_event;
+use serde_json::json;
+use wiremock::ResponseTemplate;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_generation_speed_is_available_while_a_follow_up_call_is_pending() -> anyhow::Result<()>
+{
+    use codex_protocol::user_input::UserInput;
+    use core_test_support::wait_for_event_match;
+    use std::time::Duration;
+
+    skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    responses::mount_response_sequence(
+        &server,
+        vec![
+            responses::sse_response(responses::sse(vec![
+                responses::ev_response_created("first"),
+                responses::ev_assistant_message("partial", "working"),
+                json!({"type": "response.completed", "response": {"id": "first", "end_turn": false,
+                "usage": {"input_tokens": 10, "output_tokens": 100, "total_tokens": 110}}}),
+            ]))
+            .set_delay(Duration::from_secs(10)),
+            responses::sse_response(responses::sse(vec![
+                responses::ev_response_created("second"),
+                responses::ev_assistant_message("final", "done"),
+                json!({"type": "response.completed", "response": {"id": "second",
+                "usage": {"input_tokens": 10, "output_tokens": 200, "total_tokens": 210}}}),
+            ]))
+            .set_delay(Duration::from_secs(5)),
+        ],
+    )
+    .await;
+    let test = test_codex()
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::Sqlite)
+                .expect("enable sqlite");
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    let db = test.codex.state_db().expect("state db enabled");
+    let thread_id = test.session_configured.thread_id;
+    test.codex
+        .start_or_steer_turn(codex_core::TurnInputRequest::user_input(vec![
+            UserInput::Text {
+                text: "continue working".into(),
+                text_elements: Vec::new(),
+            },
+        ]))
+        .await?;
+    let turn_id = wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::TurnStarted(event) => Some(event.turn_id.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(
+        db.live_generation_speed(thread_id, &turn_id, 0).await?,
+        None
+    );
+    let speed = tokio::time::timeout(Duration::from_secs(14), async {
+        loop {
+            if let Some(speed) = db.live_generation_speed(thread_id, &turn_id, 0).await? {
+                break anyhow::Ok(speed);
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await??;
+    assert!(speed.is_finite() && speed > 0.0);
+    assert!(db.generation_speeds(thread_id).await?.is_empty());
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn generation_speed_is_saved_before_completion_and_missing_usage_hides_next_turn()
+-> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    responses::mount_sse_sequence(
+        &server,
+        vec![
+            responses::sse(vec![
+                responses::ev_response_created("first"),
+                responses::ev_assistant_message("message-1", "done"),
+                json!({"type": "response.completed", "response": {"id": "first", "usage": {
+                    "input_tokens": 100, "output_tokens": 200,
+                    "output_tokens_details": {"reasoning_tokens": 150}, "total_tokens": 300
+                }}}),
+            ]),
+            responses::sse(vec![
+                responses::ev_response_created("missing"),
+                responses::ev_assistant_message("message-2", "done"),
+                json!({"type": "response.completed", "response": {"id": "missing"}}),
+            ]),
+        ],
+    )
+    .await;
+    let test = test_codex()
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::Sqlite)
+                .expect("enable sqlite");
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    let db = test.codex.state_db().expect("state db enabled");
+    let thread_id = test.session_configured.thread_id;
+    test.submit_turn("first").await?;
+    let speeds = db.generation_speeds(thread_id).await?;
+    assert_eq!(speeds.len(), 1);
+    assert!(
+        speeds.values().all(
+            |record| record.tokens_per_second().is_finite() && record.tokens_per_second() > 0.0
+        )
+    );
+    test.submit_turn("missing usage").await?;
+    assert_eq!(db.generation_speeds(thread_id).await?, speeds);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn generation_speed_skips_internal_http_retry_and_preserves_follow_up() -> anyhow::Result<()>
+{
+    skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    let request_mock = responses::mount_response_sequence(
+        &server,
+        vec![
+            ResponseTemplate::new(500)
+                .set_body_json(json!({"error": {"code": "internal_server_error"}})),
+            responses::sse_response(responses::sse(vec![
+                responses::ev_response_created("retried"),
+                responses::ev_assistant_message("message", "done"),
+                json!({"type": "response.completed", "response": {"id": "retried", "end_turn": false, "usage": {
+                    "input_tokens": 100, "output_tokens": 200, "total_tokens": 300
+                }}}),
+            ])),
+            responses::sse_response(responses::sse(vec![
+                responses::ev_response_created("follow-up"),
+                responses::ev_assistant_message("final", "done"),
+                json!({"type": "response.completed", "response": {"id": "follow-up", "usage": {
+                    "input_tokens": 100, "output_tokens": 100, "total_tokens": 200
+                }}}),
+            ])),
+        ],
+    )
+    .await;
+    let test = test_codex()
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::Sqlite)
+                .expect("enable sqlite");
+            config.model_provider.supports_websockets = false;
+            config.model_provider.request_max_retries = Some(1);
+            config.model_provider.stream_max_retries = Some(0);
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    let db = test.codex.state_db().expect("state db enabled");
+    test.submit_turn("retry this request").await?;
+    assert_eq!(request_mock.requests().len(), 3);
+    assert_eq!(
+        db.generation_speeds(test.session_configured.thread_id)
+            .await?
+            .len(),
+        1
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn generation_speed_preserves_valid_samples_when_sampling_must_continue() -> anyhow::Result<()>
+{
+    skip_if_no_network!(Ok(()));
+    for event_type in ["response.completed", "response.incomplete"] {
+        for has_usage in [true, false] {
+            let server = responses::start_mock_server().await;
+            responses::mount_sse_sequence(
+        &server,
+        vec![
+            responses::sse(vec![
+                responses::ev_response_created("interrupted"),
+                responses::ev_assistant_message("partial", "partial"),
+                json!({"type": event_type, "response": {"id": "interrupted", "end_turn": false,
+                    "incomplete_details": {"reason": "interrupted"},
+                    "usage": has_usage.then(|| json!({"input_tokens": 10, "output_tokens": 100, "total_tokens": 110}))
+                }}),
+            ]),
+            responses::sse(vec![
+                responses::ev_response_created("follow-up"),
+                responses::ev_assistant_message("final", "done"),
+                json!({"type": "response.completed", "response": {"id": "follow-up",
+                    "usage": {"input_tokens": 10, "output_tokens": 100, "total_tokens": 110}
+                }}),
+            ]),
+        ],
+    )
+    .await;
+            let test = test_codex()
+                .with_config(|config| {
+                    config
+                        .features
+                        .enable(Feature::Sqlite)
+                        .expect("enable sqlite");
+                })
+                .build_with_auto_env(&server)
+                .await?;
+            test.submit_turn("continue interrupted output").await?;
+            let db = test.codex.state_db().expect("state db enabled");
+            let speeds = db
+                .generation_speeds(test.session_configured.thread_id)
+                .await?;
+            assert_eq!(speeds.len(), 1, "{event_type}, has_usage={has_usage}");
+            assert!(
+                speeds
+                    .values()
+                    .next()
+                    .expect("turn speed")
+                    .tokens_per_second()
+                    > 0.0
+            );
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn generation_speed_recovery_clears_pre_crash_statistics() -> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_response_created("recovered"),
+            responses::ev_assistant_message("message", "done"),
+            json!({"type": "response.completed", "response": {"id": "recovered",
+                "usage": {"input_tokens": 10, "output_tokens": 100, "total_tokens": 110}
+            }}),
+        ]),
+    )
+    .await;
+    let test = test_codex()
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::Sqlite)
+                .expect("enable sqlite");
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    let db = test.codex.state_db().expect("state db enabled");
+    let thread_id = test.session_configured.thread_id;
+    // A pre-crash completion necessarily has persisted thread metadata.
+    let metadata = codex_state::ThreadMetadataBuilder::new(
+        thread_id,
+        test.session_configured
+            .rollout_path
+            .clone()
+            .expect("rollout path"),
+        chrono::Utc::now(),
+        codex_protocol::protocol::SessionSource::Cli,
+    )
+    .build(&test.session_configured.model_provider_id);
+    db.upsert_thread(&metadata).await?;
+    db.save_generation_speed(
+        thread_id,
+        "recovered-turn",
+        20,
+        1_000_000,
+        codex_state::GenerationSpeedCompletion {
+            started_at: 10,
+            completed_at: 11,
+            duration_ms: 1000,
+        },
+    )
+    .await?;
+    test.codex
+        .recover_turn_if_idle(codex_core::RecoverTurnRequest {
+            turn_id: "recovered-turn".into(),
+            thread_settings: Default::default(),
+            trace: None,
+            cyber_access_program: None,
+        })
+        .await?;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(completed)
+        if completed.turn_id == "recovered-turn" && completed.error.is_none())
+    })
+    .await;
+    assert!(db.generation_speeds(thread_id).await?.is_empty());
+    Ok(())
+}
