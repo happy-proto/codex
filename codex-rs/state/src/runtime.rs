@@ -42,6 +42,9 @@ use tracing::warn;
 
 mod backfill;
 mod external_agent_config_imports;
+mod generation_speed;
+pub use generation_speed::GenerationSpeedCompletion;
+pub use generation_speed::GenerationSpeedRecord;
 mod goals;
 mod guardian_feedback;
 mod logs;
@@ -159,6 +162,9 @@ impl StateRuntime {
                 return Err(err);
             }
         };
+        if let Err(err) = generation_speed::initialize(pool.as_ref()).await {
+            warn!("generation speed storage unavailable: {err}");
+        }
         let logs_pool = match sqlite
             .open_logs_db(&logs_migrator, telemetry_override)
             .await
