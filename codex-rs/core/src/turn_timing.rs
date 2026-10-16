@@ -44,6 +44,7 @@ pub(crate) async fn record_turn_ttfm_metric(turn_context: &TurnContext, item: &T
 pub(crate) struct TurnTimingState {
     state: Mutex<TurnTimingStateInner>,
     profile: StdMutex<TurnProfileState>,
+    generation_speed: Arc<StdMutex<crate::generation_speed::GenerationSpeedState>>,
 }
 
 #[derive(Debug, Default)]
@@ -88,6 +89,26 @@ pub(crate) struct TurnProfileTimingGuard {
 }
 
 impl TurnTimingState {
+    pub(crate) fn begin_generation_measurement(
+        &self,
+    ) -> crate::generation_speed::GenerationSpeedMeasurement {
+        crate::generation_speed::GenerationSpeedState::measurement(&self.generation_speed)
+    }
+
+    pub(crate) fn generation_speed_totals(&self) -> Option<(u64, u64)> {
+        self.generation_speed
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .totals()
+    }
+
+    pub(crate) fn invalidate_generation_speed(&self) {
+        self.generation_speed
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .invalidate();
+    }
+
     pub(crate) async fn mark_turn_started(&self, started_at: Instant) -> i64 {
         let started_at_unix_ms = now_unix_timestamp_ms();
         let mut state = self.state.lock().await;
