@@ -1605,6 +1605,7 @@ impl App {
         self.recap.seed_from_turns(&turns, now);
         self.schedule_recap_check(thread_id, now);
 
+        self.refresh_generation_speeds(thread_id).await;
         self.chat_widget.replay_backend_thread_turns(
             turns,
             ReplayKind::ResumeInitialMessages,

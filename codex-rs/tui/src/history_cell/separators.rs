@@ -24,6 +24,7 @@ pub struct FinalMessageSeparator {
     completed_at: Option<DateTime<Local>>,
     display_date: NaiveDate,
     clock_format: ClockFormat,
+    generation_speed: Option<f64>,
 }
 impl FinalMessageSeparator {
     /// Full-screen transcripts also use untimed separators to identify completed turns.
@@ -69,6 +70,7 @@ impl FinalMessageSeparator {
             completed_at: None,
             display_date: Local::now().date_naive(),
             clock_format: ClockFormat::TwelveHour,
+            generation_speed: None,
         }
     }
 
@@ -96,6 +98,12 @@ impl FinalMessageSeparator {
 
     pub(crate) fn display_label(&self) -> Option<String> {
         self.label(self.display_date)
+    }
+
+    pub(crate) fn with_generation_speed(mut self, speed: Option<f64>) -> Self {
+        // Values that would round to zero must not produce a misleading zero label.
+        self.generation_speed = speed.filter(|speed| speed.is_finite() && *speed >= 0.05);
+        self
     }
 
     fn label(&self, today: NaiveDate) -> Option<String> {
@@ -131,6 +139,9 @@ impl FinalMessageSeparator {
         }
         if let Some(metrics_label) = self.runtime_metrics.and_then(runtime_metrics_label) {
             label_parts.push(metrics_label);
+        }
+        if let Some(speed) = self.generation_speed {
+            label_parts.push(format!("{speed:.1} token/s"));
         }
         (!label_parts.is_empty()).then(|| label_parts.join(" • "))
     }
