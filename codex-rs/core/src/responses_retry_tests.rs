@@ -5,13 +5,100 @@ use super::log_retry;
 use crate::realtime_history::RealtimeHistoryState;
 use crate::session::step_context::StepContext;
 use crate::session::tests::make_session_and_context;
+use crate::session::tests::make_session_and_context_with_rx;
 use codex_http_client::RetryAfter;
 use codex_protocol::error::CodexErr;
+use codex_protocol::protocol::EventMsg;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tracing_test::internal::MockWriter;
+
+/// 即使没有服务端建议，首次和后续本地退避都报告等待及原始错误。
+#[tokio::test]
+async fn every_local_retry_reports_wait_and_reason() {
+    let (session, turn_context, events) = make_session_and_context_with_rx().await;
+    let step_context = StepContext::for_test(turn_context);
+    let mut client_session = session.services.model_client.new_session();
+    let mut retry_state = ResponsesStreamRetryState::default();
+    tokio::time::pause();
+    for attempt in 1..=2 {
+        let retry = handle_response_stream_error(
+            &mut retry_state,
+            /*max_retries*/ 2,
+            CodexErr::Stream("connection reset".into()),
+            &mut client_session,
+            &session,
+            &step_context,
+            ResponsesStreamRequest::Sampling,
+        );
+        tokio::pin!(retry);
+        assert!(futures::poll!(&mut retry).is_pending());
+        let mut messages = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if let EventMsg::StreamError(error) = event.msg {
+                messages.push(error);
+            }
+        }
+        let [error] = messages.as_slice() else {
+            panic!("expected exactly one notification on attempt {attempt}: {messages:?}");
+        };
+        assert_eq!(
+            error.message,
+            format!("Reconnecting... {attempt}/2 (retrying in 1s)")
+        );
+        assert_eq!(
+            error.additional_details.as_deref(),
+            Some("stream disconnected before completion: connection reset")
+        );
+        tokio::time::advance(Duration::from_secs(1)).await;
+        retry.await.expect("local retry should remain allowed");
+    }
+}
+
+/// 服务端指定的首次重试和传输回退等待必须先通知客户端，再遵守原期限。
+#[tokio::test]
+async fn advised_retry_reports_wait_before_sleeping() {
+    for max_retries in [1, 0] {
+        let (session, turn_context, events) = make_session_and_context_with_rx().await;
+        let step_context = StepContext::for_test(turn_context);
+        let mut client_session = session.services.model_client.new_session();
+        let mut retry_state = ResponsesStreamRetryState::default();
+        tokio::time::pause();
+        let advice = RetryAfter::from_delay(Duration::from_secs(10)).expect("retry deadline");
+        let retry = handle_response_stream_error(
+            &mut retry_state,
+            max_retries,
+            CodexErr::InternalServerError.with_retry_after(advice),
+            &mut client_session,
+            &session,
+            &step_context,
+            ResponsesStreamRequest::Sampling,
+        );
+        tokio::pin!(retry);
+        assert!(futures::poll!(&mut retry).is_pending());
+        let mut messages = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            match event.msg {
+                EventMsg::StreamError(error) => messages.push(error.message),
+                EventMsg::Warning(warning) => messages.push(warning.message),
+                _ => {}
+            }
+        }
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("retrying in 10s")),
+            "missing wait notification before sleep: {messages:?}"
+        );
+        tokio::time::advance(Duration::from_secs(9)).await;
+        assert!(futures::poll!(&mut retry).is_pending());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        retry.await.expect("advised retry should remain allowed");
+        tokio::time::resume();
+    }
+}
 
 #[tokio::test]
 async fn sampling_retry_logs_stream_error_context() {

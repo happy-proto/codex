@@ -1329,6 +1329,12 @@ impl BottomPane {
         false
     }
 
+    pub(crate) fn restart_retry_countdown(&mut self) {
+        if let Some(status) = self.status.as_mut() {
+            status.restart_retry_countdown();
+        }
+    }
+
     /// Show the transient "press again to quit" hint for `key`.
     ///
     /// `ChatWidget` owns the quit shortcut state machine (it decides when quit is
