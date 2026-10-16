@@ -260,6 +260,7 @@ impl ChatWidget {
             quick_dial_menu_key_guard: None,
             quit_shortcut_key: None,
             turn_runtime_metrics: RuntimeMetricsSummary::default(),
+            generation_speeds: HashMap::new(),
             last_rendered_width: std::cell::Cell::new(None),
             feedback,
             current_rollout_path: None,
