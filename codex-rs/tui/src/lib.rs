@@ -234,6 +234,7 @@ mod terminal_probe;
 mod terminal_size_telemetry;
 mod terminal_title;
 mod terminal_visualization_instructions;
+mod terminal_working_directory;
 mod text_formatting;
 mod text_selection;
 mod theme_picker;
