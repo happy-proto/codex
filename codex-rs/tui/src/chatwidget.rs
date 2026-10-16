@@ -677,6 +677,7 @@ pub(crate) struct ChatWidget {
     pet_image_support_override: Option<crate::pets::PetImageSupport>,
     thread_id: Option<ThreadId>,
     thread_name: Option<String>,
+    thread_name_revision: uuid::Uuid,
     thread_rename_block_message: Option<String>,
     active_side_conversation: bool,
     blocks_direct_input: bool,
@@ -1974,6 +1975,10 @@ impl ChatWidget {
 
     pub(crate) fn thread_name(&self) -> Option<String> {
         self.thread_name.clone()
+    }
+
+    pub(crate) fn thread_name_revision(&self) -> uuid::Uuid {
+        self.thread_name_revision
     }
 
     /// Returns the current thread's precomputed rollout path.
