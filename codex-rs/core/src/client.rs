@@ -369,6 +369,7 @@ struct WebsocketSession {
     // Outer None means no successful handshake yet. The inner revision is optional for
     // providers without managed auth. Keep it across resets so retries compare to the last socket.
     last_connected_auth_revision: Option<Option<u64>>,
+    connected_at: Option<tokio::time::Instant>,
     responses_headers: ApiHeaderMap,
     parent_routing_affinity: Option<codex_http_client::ChatGptRoutingAffinity>,
     runtime_id: Option<String>,
@@ -522,6 +523,13 @@ fn response_items_equal_ignoring_internal_metadata(
 }
 
 impl WebsocketSession {
+    // Rotate at request boundaries, leaving ample headroom below the upstream
+    // 60-minute lifetime. This age follows the socket across turn cache handoffs.
+    fn needs_rotation(&self) -> bool {
+        self.connected_at
+            .is_some_and(|started| started.elapsed() >= Duration::from_secs(30 * 60))
+    }
+
     fn reset(&mut self, reason: Option<&'static str>) {
         // Per-socket backend metrics call a resend after reconnect "initial".
         // Retain the loss reason across reconnects/turns until the next send.
@@ -1888,6 +1896,7 @@ impl ModelClientSession {
             {
                 Some("other")
             }
+            Some(_) if self.websocket_session.needs_rotation() => Some("connection_age"),
             Some(conn) if conn.is_closed().await => Some("connection_closed"),
             Some(_) | None => None,
         };
@@ -1927,6 +1936,7 @@ impl ModelClientSession {
             self.websocket_session.connection = Some(new_conn);
             self.websocket_session.last_connected_auth_revision = Some(auth_revision);
             self.websocket_session.parent_routing_affinity = parent_routing_affinity;
+            self.websocket_session.connected_at = Some(tokio::time::Instant::now());
             self.websocket_session.responses_headers = responses_headers.clone();
             self.websocket_session.runtime_id = runtime_id;
             self.websocket_session.auth_owner = auth_owner;
@@ -2545,7 +2555,7 @@ impl ModelClientSession {
         if self.websocket_session.last_request.is_some()
             && let Some(connection) = self.websocket_session.connection.as_ref()
         {
-            !connection.is_closed().await
+            !self.websocket_session.needs_rotation() && !connection.is_closed().await
         } else {
             false
         }
