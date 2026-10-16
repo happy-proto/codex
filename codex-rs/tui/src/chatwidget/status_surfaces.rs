@@ -105,6 +105,21 @@ pub(super) struct CachedProjectRootName {
 }
 
 impl ChatWidget {
+    pub(crate) fn displays_thread_name(&self) -> bool {
+        let selections = self.status_surface_selections();
+        selections.status_line_items.iter().any(|item| {
+            matches!(
+                item,
+                StatusLineItem::ThreadName | StatusLineItem::ThreadTitle
+            )
+        }) || selections.terminal_title_items.iter().any(|item| {
+            matches!(
+                item,
+                TerminalTitleItem::ThreadName | TerminalTitleItem::Thread
+            )
+        })
+    }
+
     fn status_surface_selections(&self) -> StatusSurfaceSelections {
         let (status_line_items, invalid_status_line_items) = self.status_line_items_with_invalids();
         let (terminal_title_items, invalid_terminal_title_items) =
