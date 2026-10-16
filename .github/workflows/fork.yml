@@ -42,6 +42,8 @@ jobs:
           python-version: '3.12'
       - name: Test portable fork version and publication contracts
         run: python3 -m unittest discover -s scripts/fork -p 'test_*.py' -v
+      - name: 校验内置第三方 skill 快照
+        run: python3 scripts/fork/sync_skills.py check
       - name: Choose one fork revision for both platforms and tests
         id: version
         env:
@@ -284,6 +286,16 @@ jobs:
         run: |
           mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --bin codex mcp_list_output
           mbx test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test mcp_list
+      - name: 验证 fork 自动化工具替换与 Desktop 隔离
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: |
+          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core-plugins --lib fork_automation
+          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills --lib
+          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills-extension --lib host_roots::tests
+          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills-extension --lib host_service::tests
+          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib config::fork_automation
+          mbx test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-app-server --test all skills_list_runtime_enable_refreshes_fork_system_skill_cache
       - name: 验证显式 skill 的初始调用与 steer 注入
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs

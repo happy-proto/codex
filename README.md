@@ -7,6 +7,10 @@
 显式 skill 调用、容量错误无限重试，以及会话名称同步。
 完整说明见 [编号改造记录](docs/fork-changes/README.md)。
 
+浏览器与电脑操作默认使用 [Open Browser Use 和 Open Computer Use](docs/fork-changes/0011-open-automation.md)。
+内置对应 skills，使用本机已安装的运行程序；仅在 fork 内过滤官方自动化插件，
+不修改与官方 Desktop 共用的插件配置。
+
 ## 安装
 
 支持 macOS Apple Silicon 和 Linux AMD64（glibc）。

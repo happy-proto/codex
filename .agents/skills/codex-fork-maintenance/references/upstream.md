@@ -5,9 +5,23 @@
 仅限本地修改的任务也只在本地准备同步；提交、推送、发布和安装仍遵循当前任务的授权范围。
 Actions 不自行 rebase 或强推分支。
 
-本轮开始时确定已发布的候选；`scripts/fork/upstream-tag` 已对应该候选时，报告已是最新并跳过同步。
+本轮开始时确定已发布的候选；`scripts/fork/upstream-tag` 已对应该候选时，报告已是最新并跳过 alpha rebase，
+仍须完成下面的内置 skill 更新检查。
 将本轮改动与上游同步都准备、验证完毕后，一次推送 `main`，避免重复触发完整 CI。
 本轮确定候选后不反复追逐新发行版。
+
+## 内置第三方 skills
+
+每次同步上游时执行 `python3 scripts/fork/sync_skills.py check --upstream`，
+按 `scripts/fork/skills.lock.json` 中各来源的跟踪 ref 检查更新；检查失败不能视为没有更新。
+有更新时，用 `python3 scripts/fork/sync_skills.py update <skill> --ref <ref>` 更新对应快照和 lock，
+保留原有跟踪 ref，避免改为固定 commit 后失去后续更新发现能力。
+审查 skill 指令、引用文件和许可证差异，确认仍适用于 fork 的接入方式及运行程序；
+执行离线 `check` 和 `test_sync_skills.py`，将快照及 lock 与 alpha 同步结果一起验证、交付。
+来源及维护边界见 [0011 改造记录](../../../../docs/fork-changes/0011-open-automation.md)。
+最终回复简述哪些 skill 已更新、哪些没有更新；兼容性或检查失败时明确说明未完成项。
+
+## Alpha 同步步骤
 
 1. 确认工作树、授权和远端状态；只 fetch 所需的 origin 分支与 upstream 候选 tag，
    不拉取上游全部功能分支。记录旧 `main`、记录文件中的旧 tag、解析后的基线 SHA 和远端期望 SHA。
