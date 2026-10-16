@@ -128,10 +128,10 @@ def smoke(package):
         run(str(package / "codex-path/rg"), "--version", env=env)
         if (package / "codex-resources/bwrap").exists():
             run(str(package / "codex-resources/bwrap"), "--version", env=env)
-        initialize_app_server(cli, env)
+        initialize_app_server(cli, env, version)
 
 
-def initialize_app_server(cli, env):
+def initialize_app_server(cli, env, expected_version):
     request = {
         "id": 1,
         "method": "initialize",
@@ -173,6 +173,13 @@ def initialize_app_server(cli, env):
                             line, stdout = stdout.split(b"\n", 1)
                             response = json.loads(line)
                             if response.get("id") == 1 and "result" in response:
+                                user_agent = response["result"].get("userAgent", "")
+                                product = user_agent.split(" ", 1)[0]
+                                actual = product.rpartition("/")[2]
+                                if actual != expected_version:
+                                    raise ValueError(
+                                        f"app-server version mismatch: {user_agent}"
+                                    )
                                 initialized = True
         # EOF starts server shutdown, so send it only after initialization.
         server.stdin.close()
@@ -194,16 +201,7 @@ def build(target=TARGET):
     dist = ROOT / "fork-dist"
     package = dist / "package"
     dist.mkdir(exist_ok=True)
-    # cargo-edit updates inherited workspace versions and Cargo.lock together.
-    run(
-        "cargo",
-        "set-version",
-        "--manifest-path",
-        "codex-rs/Cargo.toml",
-        "-p",
-        "codex-cli",
-        metadata["version"],
-    )
+    # 发布版本写入包清单；保留内部 Cargo 版本，避免每个 fork 序号使缓存失效。
     os.environ["STABLE_GIT_COMMIT"] = metadata["source_commit"]
     run(
         "python3",

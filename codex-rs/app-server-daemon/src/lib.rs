@@ -933,7 +933,7 @@ impl Daemon {
             managed_codex_path: managed.managed_codex_bin,
             managed_codex_version,
             socket_path: self.socket_path.clone(),
-            cli_version: env!("CARGO_PKG_VERSION").to_string(),
+            cli_version: codex_build_info::BuildInfo::package_version().to_string(),
             app_server_version: info.app_server_version,
         })
     }
@@ -1162,7 +1162,7 @@ impl Daemon {
             managed_codex_path: self.managed_codex_bin.clone(),
             managed_codex_version,
             socket_path: self.socket_path.clone(),
-            cli_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            cli_version: Some(codex_build_info::BuildInfo::package_version().to_string()),
             app_server_version,
         }
     }
@@ -1179,7 +1179,7 @@ impl Daemon {
             backend,
             remote_control_enabled,
             socket_path: self.socket_path.clone(),
-            cli_version: env!("CARGO_PKG_VERSION").to_string(),
+            cli_version: codex_build_info::BuildInfo::package_version().to_string(),
             app_server_version,
         }
     }

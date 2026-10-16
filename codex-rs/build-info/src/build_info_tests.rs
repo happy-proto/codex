@@ -20,7 +20,7 @@ fn packaged_runtime_uses_manifest_version() {
     fs::write(&executable, b"").expect("create runtime binary");
     fs::write(
         package.path().join("codex-package.json"),
-        r#"{"version":"1.2.3-alpha.4"}"#,
+        r#"{"version":"1.2.3-alpha.4.fork.2"}"#,
     )
     .expect("create runtime package manifest");
 
@@ -31,9 +31,13 @@ fn packaged_runtime_uses_manifest_version() {
     );
 
     assert_eq!(
+        BuildInfo::resolve_package_version(&context),
+        "1.2.3-alpha.4.fork.2"
+    );
+    assert_eq!(
         BuildInfo::resolve(&context, BUILD_COMMIT),
         BuildInfo {
-            version: Version::parse("1.2.3-alpha.4").expect("valid release version"),
+            version: Version::parse("1.2.3-alpha.4.fork.2").expect("valid release version"),
             build_commit: BUILD_COMMIT.to_string(),
             target: Some(env!("CODEX_BUILD_TARGET").to_string()),
         },
@@ -49,6 +53,10 @@ fn unpackaged_runtime_uses_build_commit() {
         /*method_override*/ None,
     );
 
+    assert_eq!(
+        BuildInfo::resolve_package_version(&context),
+        env!("CARGO_PKG_VERSION")
+    );
     assert_eq!(
         BuildInfo::resolve(&context, BUILD_COMMIT),
         BuildInfo {
