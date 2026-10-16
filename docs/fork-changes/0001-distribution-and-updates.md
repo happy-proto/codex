@@ -11,6 +11,10 @@
 
 `main` 是唯一长期分支，直接维护全部改造；`scripts/fork/upstream-tag` 记录上游基线，定期 rebase 到新 alpha。
 `fork.yml` 并行执行 Linux Rust 测试、Linux AMD64 和 ARM macOS 完整包构建，通过后自动发布。
+macOS 构建显式使用 `macos-latest`，跟随 GitHub 当前稳定 runner 镜像；目标仍为
+`aarch64-apple-darwin`。镜像升级后的完整包由 CI 原生验收，性能对照须区分实际镜像，
+不把不同系统的耗时直接归因于缓存优化。标签对应的系统与架构见
+[GitHub runner 映像说明](https://github.com/actions/runner-images#available-images)。
 版本使用上游 alpha 加 `.fork.N`，不覆盖已发布版本；平台包和 SHA-256 由 `fork-release.json` 描述。
 发布版本写入 `codex-package.json`，CLI、TUI、exec 展示和 daemon 身份在运行时读取。
 内部 crate 保留所选上游 alpha 的版本，不随 `.fork.N` 重写；源码、依赖和编译参数仍参与缓存校验。
