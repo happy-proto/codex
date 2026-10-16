@@ -35,7 +35,10 @@ Responses WebSocket 连接会跨请求和 turn 复用。
   跨 turn 与长时间空闲、完整消息与工具上下文恢复、轮转后增量续接、
   预连接和预热，以及跨阈值在途响应完整结束。
 - 原有 `responses_websocket_connection_limit_error_reconnects_and_completes`
-  验证上游到期错误发生后的重试恢复。Rust 测试交给 GitHub Actions，本地不编译。
+  验证上游到期错误发生后的重试恢复。
+  [自有 CI](../../.github/workflows/fork.yml) 的常规验证运行整个 `client_websockets`
+  和独立的 `websocket_fallback` 套件；定向测试仍只运行指定筛选条件。
+  Rust 测试交给 GitHub Actions，本地不编译。
 
 ## 上游同步
 
