@@ -133,7 +133,7 @@ async fn base_instructions_use_input_items(responses_lite: bool) -> Result<()> {
             .as_str()
             .is_some_and(|id| id.starts_with("msg_"))
     );
-    let mut expected_instructions = serde_json::json!({
+    let expected_instructions = serde_json::json!({
         "id": instructions["id"],
         "type": "message",
         "role": "developer",
@@ -145,11 +145,12 @@ async fn base_instructions_use_input_items(responses_lite: bool) -> Result<()> {
             "content_item_kinds": ["model.base_instructions"],
         },
     });
-    if responses_lite {
-        expected_instructions["internal_chat_message_metadata_passthrough"]["content_item_metadata"] =
-            serde_json::json!([{"provenance": {"type": "harness", "hook": false}}]);
-    }
     assert_eq!(instructions, &expected_instructions);
+    assert!(input.iter().all(|item| {
+        item["internal_chat_message_metadata_passthrough"]
+            .get("content_item_metadata")
+            .is_none()
+    }));
 
     let tools = if responses_lite {
         assert!(body.get("tools").is_none());
@@ -202,6 +203,11 @@ async fn base_instructions_use_input_items(responses_lite: bool) -> Result<()> {
     .await;
     let resumed = builder().restart(&server, &test).await?;
     resumed.submit_turn("continue").await?;
+    assert!(followup.single_request().input().iter().all(|item| {
+        item["internal_chat_message_metadata_passthrough"]
+            .get("content_item_metadata")
+            .is_none()
+    }));
     assert_eq!(
         &followup.single_request().input()[..=instructions_index],
         &input[..=instructions_index]
