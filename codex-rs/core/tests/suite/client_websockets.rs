@@ -2019,6 +2019,199 @@ async fn responses_websocket_connection_limit_error_reconnects_and_completes() {
     server.shutdown().await;
 }
 
+// Advance only the connection age: keep network I/O on the running clock so the
+// runtime cannot auto-advance unrelated handshake and stream idle deadlines.
+async fn advance_websocket_age(seconds: u64) {
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(seconds)).await;
+    tokio::time::resume();
+}
+
+#[test_case::test_case(29 * 60, false; "young_same_turn")]
+#[test_case::test_case(29 * 60, true; "young_next_turn")]
+#[test_case::test_case(30 * 60, false; "rotate_same_turn")]
+#[test_case::test_case(30 * 60, true; "rotate_next_turn")]
+#[test_case::test_case(90 * 60, true; "rotate_after_long_idle")]
+#[tokio::test]
+async fn responses_websocket_rotation_preserves_context(age_seconds: u64, next_turn: bool) {
+    skip_if_no_network!();
+
+    let tool_call = core_test_support::responses::ev_function_call("call-1", "test_tool", "{}");
+    let completed = vec![ev_response_created("resp-2"), ev_completed("resp-2")];
+    let server = start_websocket_server(vec![
+        vec![
+            vec![
+                ev_response_created("resp-1"),
+                tool_call.clone(),
+                ev_completed("resp-1"),
+            ],
+            completed.clone(),
+            completed.clone(),
+        ],
+        vec![completed.clone(), completed],
+    ])
+    .await;
+    let harness = websocket_harness(&server).await;
+    let mut session = harness.client.new_session();
+    let first = prompt_with_input(vec![message_item("hello")]);
+    stream_until_complete_with_model_info(
+        &mut session,
+        &harness,
+        &first,
+        &harness.model_info,
+        "resp-1",
+    )
+    .await;
+    advance_websocket_age(age_seconds).await;
+    if next_turn {
+        drop(session);
+        session = harness.client.new_session();
+    }
+    let follow_up = prompt_with_input(vec![
+        message_item("hello"),
+        serde_json::from_value(tool_call["item"].clone()).unwrap(),
+        serde_json::from_value(json!({
+            "type": "function_call_output", "call_id": "call-1", "output": "tool result"
+        }))
+        .unwrap(),
+    ]);
+    stream_until_complete_with_model_info(
+        &mut session,
+        &harness,
+        &follow_up,
+        &harness.model_info,
+        "resp-2",
+    )
+    .await;
+
+    let rotated = age_seconds >= 30 * 60;
+    let connections = server.connections();
+    assert_eq!(connections.len(), if rotated { 2 } else { 1 });
+    let request = if rotated {
+        &connections[1][0]
+    } else {
+        &connections[0][1]
+    }
+    .body_json();
+    if rotated {
+        assert!(request.get("previous_response_id").is_none());
+        assert_eq!(
+            request["input"],
+            serde_json::to_value(&follow_up.input).unwrap()
+        );
+    } else {
+        assert_eq!(request["previous_response_id"], "resp-1");
+        assert_eq!(
+            request["input"],
+            serde_json::to_value(&follow_up.input[2..]).unwrap()
+        );
+    }
+    // A fresh connection must itself remain reusable after rotation.
+    stream_until_complete_with_model_info(
+        &mut session,
+        &harness,
+        &follow_up,
+        &harness.model_info,
+        "resp-2",
+    )
+    .await;
+    let connections = server.connections();
+    assert_eq!(connections.len(), if rotated { 2 } else { 1 });
+    let last = connections.last().unwrap().last().unwrap().body_json();
+    assert_eq!(last["previous_response_id"], "resp-2");
+    assert_eq!(last["input"], json!([]));
+    server.shutdown().await;
+}
+
+#[test_case::test_case(false; "preconnect")]
+#[test_case::test_case(true; "prewarm")]
+#[tokio::test]
+async fn responses_websocket_rotation_refreshes_prepared_connections(warmup: bool) {
+    skip_if_no_network!();
+
+    let completed = vec![ev_response_created("resp-1"), ev_completed("resp-1")];
+    let server = start_websocket_server(vec![
+        vec![completed.clone(), completed.clone(), completed.clone()],
+        vec![completed.clone(), completed.clone(), completed],
+    ])
+    .await;
+    let harness = websocket_harness(&server).await;
+    let mut session = harness.client.new_session();
+    let prompt = prompt_with_input(vec![message_item("hello")]);
+    let metadata = prewarm_metadata(&harness, None);
+    if warmup {
+        session
+            .prewarm_websocket(
+                &prompt,
+                &harness.model_info,
+                &harness.session_telemetry,
+                harness.effort.clone(),
+                harness.summary,
+                None,
+                &metadata,
+            )
+            .await
+            .unwrap();
+    } else {
+        session
+            .preconnect_websocket(
+                &harness.model_info,
+                None,
+                &harness.session_telemetry,
+                &metadata,
+            )
+            .await
+            .unwrap();
+    }
+    advance_websocket_age(30 * 60).await;
+    if warmup {
+        session
+            .prewarm_websocket(
+                &prompt,
+                &harness.model_info,
+                &harness.session_telemetry,
+                harness.effort.clone(),
+                harness.summary,
+                None,
+                &metadata,
+            )
+            .await
+            .unwrap();
+    } else {
+        session
+            .preconnect_websocket(
+                &harness.model_info,
+                None,
+                &harness.session_telemetry,
+                &metadata,
+            )
+            .await
+            .unwrap();
+    }
+    assert_eq!(server.handshakes().len(), 2);
+    stream_until_complete_with_model_info(
+        &mut session,
+        &harness,
+        &prompt,
+        &harness.model_info,
+        "resp-1",
+    )
+    .await;
+    let connections = server.connections();
+    assert_eq!(connections.len(), 2);
+    let first = connections[1][0].body_json();
+    assert!(first.get("previous_response_id").is_none());
+    assert_eq!(first["input"], serde_json::to_value(&prompt.input).unwrap());
+    if warmup {
+        assert_eq!(first["generate"], false);
+        assert_eq!(
+            connections[1][1].body_json()["previous_response_id"],
+            "resp-1"
+        );
+    }
+    server.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn responses_websocket_uses_incremental_create_on_prefix() {
     skip_if_no_network!();
