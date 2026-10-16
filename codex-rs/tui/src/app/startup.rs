@@ -1191,6 +1191,7 @@ See the Codex keymap documentation for supported actions and examples."
             account_email_request_id: None,
             rate_limit_hard_stop_generation: 0,
             rate_limit_refresh_state: Default::default(),
+            thread_name_refresh: Default::default(),
             pending_mcp_login_start: None,
             active_mcp_login_ids: HashMap::new(),
             pending_plugin_enabled_writes: HashMap::new(),
@@ -1609,6 +1610,7 @@ See the Codex keymap documentation for supported actions and examples."
                     cloud_inventory_owner = cloud_owner;
                     cloud_inventory_poll.reset();
                 }
+                let thread_name_poll_deadline = app.thread_name_poll_deadline();
                 let control = select! {
                     // Leave the previous frame visible and let other app work run between batches.
                     Some(transition) = std::future::ready(app.pending_input_drain), if app.pending_input_drain.is_some() => {
@@ -1931,6 +1933,15 @@ See the Codex keymap documentation for supported actions and examples."
                         AppRunControl::Continue
                     }
                     () = async {
+                    match thread_name_poll_deadline {
+                        Some(deadline) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    app.refresh_current_thread_name(backends.session_at(displayed_session));
+                    AppRunControl::Continue
+                }
+                () = async {
                         match app.chat_widget.terminal_title_next_refresh {
                             Some(deadline) => {
                                 tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
