@@ -1,81 +1,44 @@
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
-<p align="center">
-  <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
-</p>
-</br>
-If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
-</br>If you want the desktop app experience, run <code>codex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
-</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
+# Codex 个人 fork
 
----
+这是个人自用的 [Codex CLI](https://github.com/openai/codex) fork，跟进上游 alpha 版本。
+官方 CLI 的一些功能需求和 Bug Issue 长期排不上期，因此在这里维护自己需要的功能和修复。
 
-## Quickstart
+主要改造包括中文 Markdown、OSC 7 工作目录、列表展示、
+显式 skill 调用、容量错误无限重试，以及会话名称同步。
+完整说明见 [编号改造记录](docs/fork-changes/README.md)。
 
-### Installing and running Codex CLI
+浏览器与电脑操作默认使用 [Open Browser Use 和 Open Computer Use](docs/fork-changes/0011-open-automation.md)。
+内置对应 skills，使用本机已安装的运行程序；仅在 fork 内过滤官方自动化插件，
+不修改与官方 Desktop 共用的插件配置。
 
-Run the following on Mac or Linux to install Codex CLI:
+## 安装
 
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | sh
+支持 macOS Apple Silicon 和 Linux AMD64（glibc）。
+Linux 需要 Python 3、flock、tar 和 xz；macOS 包采用 ad-hoc 签名。
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/main/scripts/fork/install.sh | sh
 ```
 
-Run the following on Windows to install Codex CLI:
+默认安装到 `~/.local/bin`，继续使用现有配置、凭据和会话。
+请将该目录加入 PATH，再运行 `codex`。
 
-```shell
-powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"
+## 更新与回退
+
+启动时只提示新版本，使用以下命令主动更新或回退：
+
+```sh
+codex update
+curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/main/scripts/fork/install.sh | sh -s -- --rollback
 ```
 
-The standalone installers download from `https://releases.openai.com/codex` by default and fall back to GitHub Releases if a metadata or asset download is unavailable. To force GitHub Releases, set `CODEX_INSTALLER_USE_RELEASES_OPENAI_COM` to `false` (`0` and `no` are also accepted):
+默认分支迁移到 `main` 后，仍内置旧分支安装链接的版本需要先运行一次上面的安装命令；
+新版本继续使用 `codex update`，已有配置和会话不变。
 
-```shell
-curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_INSTALLER_USE_RELEASES_OPENAI_COM=false sh
-```
+## 维护
 
-```powershell
-$env:CODEX_INSTALLER_USE_RELEASES_OPENAI_COM='false'; irm https://chatgpt.com/codex/install.ps1 | iex
-```
+`main` 是唯一长期分支，保存全部改造；定期 rebase 到已发布的上游 alpha，推送后由 CI 验证并发布。
+维护规则见 [AGENTS.md](AGENTS.md)，操作方法见 [维护 skill](.agents/skills/codex-fork-maintenance/SKILL.md)。
+安装、版本和发布细节见 [分发与更新说明](docs/fork-changes/0001-distribution-and-updates.md)。
 
-Codex CLI can also be installed via the following package managers:
-
-```shell
-# Install using npm
-npm install -g @openai/codex
-```
-
-```shell
-# Install using Homebrew
-brew install --cask codex
-```
-
-Then simply run `codex` to get started.
-
-<details>
-<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
-
-Each GitHub Release contains many executables, but in practice, you likely want one of these:
-
-- macOS
-  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
-  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
-- Linux
-  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
-  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
-
-Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
-
-</details>
-
-### Using Codex with your ChatGPT plan
-
-Run `codex` and select **Sign in with ChatGPT**. We recommend signing into your ChatGPT account to use Codex as part of your Plus, Pro, Business, Edu, or Enterprise plan. [Learn more about what's included in your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt).
-
-You can also use Codex with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
-
-## Docs
-
-- [**Codex Documentation**](https://developers.openai.com/codex)
-- [**Contributing**](./docs/contributing.md)
-- [**Installing & building**](./docs/install.md)
-- [**Open source fund**](./docs/open-source-fund.md)
-
-This repository is licensed under the [Apache-2.0 License](LICENSE).
+[上游介绍与文档](docs/upstream-readme.md) · [Apache-2.0 License](LICENSE)

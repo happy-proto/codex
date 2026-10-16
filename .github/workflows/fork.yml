@@ -1,0 +1,325 @@
+name: Fork CI and release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tui_test_filter:
+        description: 仅运行匹配的 TUI 库测试，跳过产物和发布；留空执行完整验证
+        type: string
+        default: ''
+      core_test_filter:
+        description: 仅运行匹配的 core 集成测试，跳过产物和发布；留空执行完整验证
+        type: string
+        default: ''
+      publish:
+        description: 发布已验证的 fork 构建；耗时实验默认不发布
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-${{ github.ref }}-${{ github.event_name }}
+  # main 新推送自动取消旧构建，优先验证和发布最新提交。
+  # 手动耗时实验使用独立队列，不自动取消正在运行的实验。
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  scripts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: '3.12'
+      - name: Test portable fork version and publication contracts
+        run: python3 -m unittest discover -s scripts/fork -p 'test_*.py' -v
+      - name: 校验内置第三方 skill 快照
+        run: python3 scripts/fork/sync_skills.py check
+      - name: Choose one fork revision for both platforms and tests
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "version=$(python3 scripts/fork/release.py version)" >> "$GITHUB_OUTPUT"
+      - name: Check shell syntax
+        run: |
+          sh -n scripts/fork/install.sh
+          sh -n scripts/fork/cargo-timed.sh
+
+  build:
+    if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+    needs: scripts
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            cache: fork-build-v1
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+            cache: fork-build-linux-v1
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    env:
+      CODEX_FORK_VERSION: ${{ needs.scripts.outputs.version }}
+      CARGO_BUILD_JOBS: '3'
+      CODEX_FORK_CARGO: cargo
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: '0'
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_VERSION: fork-v1
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && 'READ_WRITE' || 'READ_ONLY' }}
+      SCCACHE_IDLE_TIMEOUT: '0'
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'off'
+      CARGO_PROFILE_RELEASE_LTO: 'false'
+      # core 的测试辅助程序需要 debug assertions 才能在临时目录创建调度别名。
+      CARGO_PROFILE_CI_TEST_DEBUG: '0'
+      CARGO_PROFILE_CI_TEST_SPLIT_DEBUGINFO: 'off'
+      CARGO_PROFILE_CI_TEST_CODEGEN_UNITS: '256'
+      STABLE_GIT_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch selected upstream alpha
+        run: |
+          tag=$(cat scripts/fork/upstream-tag)
+          git fetch https://github.com/openai/codex.git "refs/tags/$tag:refs/tags/$tag"
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: '3.12'
+      - name: Test native installer contracts
+        working-directory: scripts/fork
+        run: python3 -m unittest test_release.InstallerTests -v
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libcap-dev libasound2-dev
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: 配置 sccache 编译缓存
+        id: sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.18.0
+      - name: 恢复 Cargo 下载缓存
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: codex-rs
+          cache-targets: false
+          cache-bin: false
+          shared-key: ${{ matrix.cache }}-downloads
+          save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+      - name: Install version-management tool
+        uses: taiki-e/install-action@v2.62.49
+        with:
+          tool: cargo-edit
+      - name: Share the pinned V8 artifacts between package and tests
+        env:
+          CODEX_REPO_ROOT: ${{ github.workspace }}
+          PACKAGE_TARGET: ${{ matrix.target }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from scripts.codex_package.targets import TARGET_SPECS
+          from scripts.codex_package.v8 import resolve_codex_v8_cargo_env
+          artifacts = resolve_codex_v8_cargo_env(TARGET_SPECS[os.environ["PACKAGE_TARGET"]])
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              for key, value in artifacts.items():
+                  output.write(f"{key}={value}\n")
+          PY
+      - name: Refresh the cached V8 build record
+        # 重新执行 V8 build script，确保恢复缓存后固定的静态库已正确解压。
+        run: cargo clean --manifest-path codex-rs/Cargo.toml --target ${{ matrix.target }} --release -p v8
+      - name: Validate source and build complete native package
+        id: package
+        run: python3 scripts/fork/release.py build --target ${{ matrix.target }}
+      - name: 上传产物构建耗时报告
+        uses: actions/upload-artifact@v7.0.0
+        if: always()
+        with:
+          name: fork-build-timings-${{ matrix.target }}-${{ github.sha }}
+          path: codex-rs/target/cargo-timings/
+          if-no-files-found: ignore
+      - name: 保存产物编译缓存统计
+        if: always() && steps.sccache.outcome == 'success'
+        run: |
+          mkdir -p fork-sccache
+          sccache --show-stats --stats-format=json > fork-sccache/build.json
+      - name: 上传产物编译缓存统计
+        if: always() && steps.sccache.outcome == 'success'
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: fork-build-sccache-${{ matrix.target }}-${{ github.sha }}
+          path: fork-sccache/
+      - uses: actions/upload-artifact@v7.0.0
+        if: ${{ always() && steps.package.outcome == 'success' }}
+        with:
+          name: fork-package-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            fork-dist/*.tar.xz
+            fork-dist/fork-release.json
+            fork-dist/install.sh
+          if-no-files-found: error
+
+  tests:
+    needs: scripts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      CODEX_FORK_VERSION: ${{ needs.scripts.outputs.version }}
+      CARGO_BUILD_JOBS: '3'
+      CODEX_FORK_CARGO: cargo
+      RUSTC_WRAPPER: sccache
+      CARGO_INCREMENTAL: '0'
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_VERSION: fork-v1
+      SCCACHE_GHA_RW_MODE: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && 'READ_WRITE' || 'READ_ONLY' }}
+      SCCACHE_IDLE_TIMEOUT: '0'
+      # Preserve release-only code and disabled debug assertions without
+      # spending release-package optimization time on the test harness.
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: '0'
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '256'
+      # Match the upstream TUI test stack size for unoptimized harnesses.
+      RUST_MIN_STACK: '8388608'
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
+      CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'off'
+      CARGO_PROFILE_RELEASE_LTO: 'false'
+      STABLE_GIT_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Fetch selected upstream alpha
+        run: |
+          tag=$(cat scripts/fork/upstream-tag)
+          git fetch https://github.com/openai/codex.git "refs/tags/$tag:refs/tags/$tag"
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: '3.12'
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libcap-dev libasound2-dev
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: 配置 sccache 编译缓存
+        id: sccache
+        uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.18.0
+      - name: 恢复 Cargo 下载缓存
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: codex-rs
+          cache-targets: false
+          cache-bin: false
+          shared-key: fork-tests-v1-downloads
+          save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+      - name: Install version-management tool
+        uses: taiki-e/install-action@v2.62.49
+        with:
+          tool: cargo-edit
+      - name: Set the tested fork version
+        run: |
+          cargo set-version --manifest-path codex-rs/Cargo.toml -p codex-cli "$CODEX_FORK_VERSION"
+      - name: 执行定向测试或 release 更新验证
+        working-directory: codex-rs
+        env:
+          TUI_TEST_FILTER: ${{ inputs.tui_test_filter }}
+          CORE_TEST_FILTER: ${{ inputs.core_test_filter }}
+        run: |
+          if [ -n "$CORE_TEST_FILTER" ]; then
+            cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all "$CORE_TEST_FILTER" -- --test-threads=1
+            exit 0
+          fi
+          if [ -n "$TUI_TEST_FILTER" ]; then
+            cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib "$TUI_TEST_FILTER"
+            exit 0
+          fi
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates_cache::tests
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates::tests
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_action::tests
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib working_directory
+      - name: Verify fork update presentation
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        env:
+          INSTA_UPDATE: new
+        run: |
+          result=0
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_available_history_cell_snapshot || result=1
+          exit "$result"
+      - name: Test daemon update defaults
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-app-server-daemon --lib settings::tests
+      - name: 上传测试构建耗时报告
+        uses: actions/upload-artifact@v7.0.0
+        if: always()
+        with:
+          name: fork-test-timings-${{ github.sha }}
+          path: codex-rs/target/cargo-timings/
+          if-no-files-found: ignore
+      - name: 保存测试编译缓存统计
+        if: always() && steps.sccache.outcome == 'success'
+        run: |
+          mkdir -p fork-sccache
+          sccache --show-stats --stats-format=json > fork-sccache/test.json
+      - name: 上传测试编译缓存统计
+        if: always() && steps.sccache.outcome == 'success'
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: fork-test-sccache-${{ github.sha }}
+          path: fork-sccache/
+      - uses: actions/upload-artifact@v7.0.0
+        if: failure()
+        with:
+          name: fork-snapshot-failures-${{ github.sha }}
+          path: codex-rs/tui/src/**/*.snap.new
+          if-no-files-found: ignore
+
+  publish:
+    # 手动发布与自动发布共用锁，防止同一序号的并发构建交错上传。
+    concurrency:
+      group: fork-publication
+      cancel-in-progress: false
+    if: github.repository == 'happy-proto/codex' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && !inputs.tui_test_filter && !inputs.core_test_filter && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    needs: [build, tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: fork-package-*-${{ github.sha }}
+          path: fork-downloads
+      - name: Assemble both platform packages
+        run: |
+          mkdir -p fork-dist
+          for target in aarch64-apple-darwin x86_64-unknown-linux-gnu; do
+            mv "fork-downloads/fork-package-$target-${{ github.sha }}" "fork-dist/$target"
+          done
+      - name: Publish verified build and update channel manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/fork/release.py publish
+      - name: Prune fork releases and tags older than seven days, keeping the latest three
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/fork/release.py prune --apply
