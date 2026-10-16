@@ -1,5 +1,5 @@
 ---
-source: cli/src/main.rs
+source: cli/src/lib.rs
 assertion_line: 3324
 expression: "errors.join(\"\\n\")"
 ---
