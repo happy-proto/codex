@@ -4,6 +4,14 @@ use super::*;
 use crate::history_cell::McpInventoryLoadingCell;
 
 impl ChatWidget {
+    pub(crate) fn update_terminal_working_directory(
+        &mut self,
+        local_workspace: bool,
+    ) -> std::io::Result<()> {
+        self.terminal_working_directory
+            .update(self.config.cwd.as_path(), local_workspace)
+    }
+
     pub(crate) fn can_change_working_directory(&self, thread_id: ThreadId) -> bool {
         let active = &self.transcript.active_cell;
         self.thread_id == Some(thread_id)
