@@ -425,6 +425,20 @@ impl App {
         };
         self.chat_widget
             .set_composer_restricted_input_mode(input_mode);
+        // Announce only the attached widget's cwd, never a candidate checkout
+        // while a resume/worktree transition is still pending or has failed.
+        if self.current_displayed_thread_id().is_some() {
+            let local_workspace = !crate::uses_remote_workspace_or_environment(
+                &self.app_server_target,
+                self.environment_manager.as_ref(),
+            );
+            if let Err(error) = self
+                .chat_widget
+                .update_terminal_working_directory(local_workspace)
+            {
+                tracing::warn!(%error, "failed to report terminal working directory");
+            }
+        }
         self.flush_native_history(tui);
         if tui.is_owned_screen() {
             self.transcript_reflow.note_width(size.width);
