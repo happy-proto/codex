@@ -586,7 +586,7 @@ async fn reconnect_reconciles_offscreen_pending_profile_before_restoring_permiss
         &mut session,
         &mut events,
         connected,
-        CODEX_CLI_VERSION,
+        cli_version(),
     )
     .await?;
     assert!(app.pending_server_profiles.contains_key(&primary));
@@ -724,14 +724,8 @@ async fn reconnect_allows_slow_hydration_but_bounds_a_stalled_server() -> Result
             app.begin_reconnect();
             let mut session = crate::start_embedded_app_server_for_picker(&app.config).await?;
             let mut tui = crate::tui::test_support::make_test_tui()?;
-            app.finish_reconnect(
-                &mut tui,
-                &mut session,
-                &mut events,
-                result?,
-                CODEX_CLI_VERSION,
-            )
-            .await?;
+            app.finish_reconnect(&mut tui, &mut session, &mut events, result?, cli_version())
+                .await?;
             assert!(app.thread_unavailable(id));
             app.handle_tui_event(
                 &mut tui,

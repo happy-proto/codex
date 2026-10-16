@@ -405,7 +405,7 @@ impl App {
                     &local_settings.tui,
                     &app_server_target,
                     app_server.server_codex_home(),
-                    CODEX_CLI_VERSION,
+                    cli_version(),
                     app_server.server_version(),
                     /*last_shown*/ None,
                 )
@@ -1023,13 +1023,9 @@ See the Codex keymap documentation for supported actions and examples."
         if !tui.is_terminal_focused() {
             app.recap.note_focus_lost(Instant::now());
         }
-        let _ =
-            app.initialize_server_version_notice(CODEX_CLI_VERSION, app_server.server_version());
+        let _ = app.initialize_server_version_notice(cli_version(), app_server.server_version());
         if initial_server_version_notice.is_none() {
-            app.update_server_version_overview_notice(
-                CODEX_CLI_VERSION,
-                /*server_version*/ None,
-            );
+            app.update_server_version_overview_notice(cli_version(), /*server_version*/ None);
         }
         if start_in_agents_overview {
             app.open_agents_overview(&app_server);
@@ -1440,7 +1436,7 @@ See the Codex keymap documentation for supported actions and examples."
                     reconnect = None;
                     match result {
                         Ok(connected) => {
-                            if let Err(err) = app.finish_reconnect(tui, backends.session_at_mut(displayed_session), &mut app_event_rx, connected, CODEX_CLI_VERSION).await {
+                            if let Err(err) = app.finish_reconnect(tui, backends.session_at_mut(displayed_session), &mut app_event_rx, connected, cli_version()).await {
                                 break Err(err);
                             }
                             backends.resume_events(initial_owner);
