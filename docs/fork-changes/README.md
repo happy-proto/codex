@@ -12,6 +12,7 @@
 | 0004 | [功能列表输出格式](0004-features-list.md) |
 | 0005 | [MCP 列表展示](0005-mcp-list.md) |
 | 0006 | [工作中显式 skill 正文注入](0006-steered-skills.md) |
+| 0007 | [容量错误无限退避重试](0007-capacity-retries.md)（已移除，恢复上游规则） |
 | 0013 | [发布版本与编译缓存分离](0013-build-cache-stability.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
