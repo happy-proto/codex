@@ -3156,6 +3156,13 @@ async fn try_run_sampling_request(
     } else {
         None
     };
+    let generation_failure_counter = client_session.generation_failure_counter();
+    let mut generation_measurement = Some(
+        turn_context
+            .turn_timing_state
+            .begin_generation_measurement()
+            .observe_failures(Arc::clone(&generation_failure_counter)),
+    );
     let mut resampling = crate::guardian::ResponseResampling::new(&sess);
     let prompt = Arc::new(prompt);
     let interrupt_at_boundary = SamplingInterrupt::enabled(&turn_context);
@@ -3749,6 +3756,29 @@ async fn try_run_sampling_request(
                     .await;
                 }
                 response_completed = true;
+                if let Some(usage) = &token_usage {
+                    request_token_usage
+                        .get_or_insert_default()
+                        .add_assign(usage);
+                }
+                tracing::info!(
+                    event.name = "codex.generation_speed.response",
+                    thread_id = %sess.thread_id,
+                    turn_id = %turn_context.sub_id,
+                    response_id,
+                    ?end_turn,
+                    output_tokens = token_usage.as_ref().map(|usage| usage.output_tokens),
+                    "generation speed response completed"
+                );
+                generation_measurement
+                    .take()
+                    .expect("response measurement is active")
+                    .complete(
+                        &response_id,
+                        // end_turn controls follow-up sampling, not the validity of terminal usage.
+                        // A drained interruption can still provide exact usage for this request.
+                        token_usage.as_ref().map(|usage| usage.output_tokens),
+                    );
                 sess.services
                     .analytics_events_client
                     .track_code_mode_tool_call(
@@ -3809,6 +3839,12 @@ async fn try_run_sampling_request(
                     response_id_for_assessment = None;
                     pending_assessment = None;
                     includes_reasoning = step_context.settings.model_info.use_responses_lite;
+                    generation_measurement = Some(
+                        turn_context
+                            .turn_timing_state
+                            .begin_generation_measurement()
+                            .observe_failures(Arc::clone(&generation_failure_counter)),
+                    );
                     stream = match resampling
                         .retry(stream_request(&prompt), &cancellation_token)
                         .await
@@ -3981,6 +4017,8 @@ async fn try_run_sampling_request(
         }
     }
     drop(stream);
+    // A failed/closed/preempted stream must stop the clock before tool or user waits.
+    drop(generation_measurement);
     drop(sampling_span);
     drop(sampling_timing_guard);
     flush_assistant_text_segments_all(
