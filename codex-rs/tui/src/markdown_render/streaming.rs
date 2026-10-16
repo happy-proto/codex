@@ -75,7 +75,13 @@ pub(crate) fn render_with_copy_sources(
     let parser = TopLevelBlockTracker {
         iter: DecodedTextMerge::new(super::source_tables::preserve(
             input,
-            directives.events(math.events(parser.into_offset_iter()), cwd),
+            directives.events(
+                math.events(super::cjk_strong::events(
+                    &math.markdown,
+                    parser.into_offset_iter(),
+                )),
+                cwd,
+            ),
         )),
         depth: 0,
         block_count: 0,
