@@ -34,6 +34,22 @@ pub struct BuildInfo {
 }
 
 impl BuildInfo {
+    /// Return the installed package version without stamping it into shared crates.
+    /// Unpackaged Cargo builds retain the workspace's upstream version.
+    pub fn package_version() -> &'static str {
+        static VERSION: OnceLock<String> = OnceLock::new();
+        VERSION
+            .get_or_init(|| Self::resolve_package_version(InstallContext::current()))
+            .as_str()
+    }
+
+    fn resolve_package_version(install_context: &InstallContext) -> String {
+        install_context.package_manifest().map_or_else(
+            || env!("CARGO_PKG_VERSION").to_owned(),
+            |manifest| manifest.version.to_string(),
+        )
+    }
+
     /// Return build information for the current Codex runtime.
     pub fn get() -> Self {
         BUILD_INFO
