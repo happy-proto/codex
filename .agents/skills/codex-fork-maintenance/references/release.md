@@ -23,14 +23,18 @@ Linux x64 和 ARM macOS runner 分别验证本机安装契约和真实 CLI；仅
 分析耗时时读取各 job 的日志和 `fork-build-timings-*`、`fork-test-timings-*` artifact，
 用 Cargo 报告区分 crate 编译和并发等待，不把日志末尾的整段耗时直接归为链接。
 
-Rust 编译由 mbx 1.23.0 包装 Cargo，使用 GitHub Actions 的 `objects` 缓存模式。
-只导出本次构建使用或生成的对象；Cargo registry 和 Git 依赖下载由独立 rust-cache 保存，
-该下载缓存关闭 target 和 bin 缓存，不与 mbx 重复保存编译产物。
-构建与测试按平台和 profile 使用独立 cache generation，避免并行 job 争用同一条目。
-设置 `MBX_TARGET_VIEWS=0` 保留上游 package builder 和耗时报告使用的 workspace target 路径。
+Rust 编译由 Cargo 执行，通过 `RUSTC_WRAPPER=sccache` 接入 sccache 0.18.0，
+使用 GitHub Actions 远端缓存，按编译结果独立保存，不归档整个 target 或对象库。
+关闭 Cargo incremental，避免编译请求不可缓存；沿用上游 package builder 和 workspace target 路径。
+构建与测试共用 `SCCACHE_GHA_VERSION=fork-v1` 命名空间，
+由 sccache 按编译器及编译输入区分缓存，允许相同输入复用，不再为每个 job 导出独立闭包。
+仅默认分支使用 `READ_WRITE`；其它分支设置 `SCCACHE_GHA_RW_MODE=READ_ONLY`。
+Cargo registry 和 Git 依赖下载继续由独立 rust-cache 保存，关闭 target 和 bin 缓存。
 V8、rg 继续由上游下载器校验和获取，不额外缓存下载资源。
-使用 mbx Action 默认的对象库布局，避免隔离模式清理只读 build-script 输出时的权限错误。
-每次导出只包含该 job 的构建闭包，不归档整个历史对象库；runner 在 job 结束后销毁。
+链接、bin、proc-macro 等不受 sccache Rust 缓存支持的请求仍正常编译；
+不能将这些请求算作可缓存任务的 miss，具体限制见 [sccache Rust 文档](https://github.com/mozilla/sccache/blob/main/docs/Rust.md)。
+Action 在 job summary 输出统计，同时保存 `fork-*-sccache-*` JSON artifact，核对 hits、misses、
+不可缓存原因和缓存读写错误。保持服务运行到 job 结束，避免长时间链接或测试后统计因空闲退出而丢失。
 
 在默认分支 `main` 预热和保存正式缓存。
 `fork.yml` 接受 `main` 的 push 和手动触发；提交直接在 `main` 维护，
@@ -41,7 +45,8 @@ V8、rg 继续由上游下载器校验和获取，不额外缓存下载资源。
 显式 skill 回归可通过 `core_test_filter` 定向运行，采用相同的跳过规则。
 手动实验和自动发布使用不同并发组，避免耗时实验占用自动发布队列。
 比较迁移前完整版本、首次预热和热缓存完整版本，分别记录构建、测试 job 的执行时间、
-缓存恢复/保存时间和排队时间；读取 `fork-*-mbx-*` 统计及 Cargo 耗时报告。
+缓存读写时间和排队时间；读取 `fork-*-sccache-*` 统计及 Cargo 耗时报告。
+远端空间占用需另外读取仓库 Actions cache 清单，不把单个 job 的编译统计当作总占用。
 不能用冷缓存一次运行或单独的编译加速数字判断最终收益；持续超过 10% 的耗时增长应复查再接入。
 
 修改发布流程时检查：版本与选定 alpha 一致、源码属于默认分支的完整历史且记录的上游 tag 是其祖先、签名后的资源摘要正确、
@@ -54,3 +59,23 @@ V8、rg 继续由上游下载器校验和获取，不额外缓存下载资源。
 
 平台及路径的具体接口由 README、发布工作流和 `scripts/fork/` 的代码定义；先读源码再操作。
 每次交付明确区分本地验证、GitHub CI、Release 产物及本机实际运行版本。
+
+## GitHub Actions 依赖锁定
+
+`fork.yml` 的 `uses` 使用可读的版本或分支引用，实际提交及传递依赖由
+`.github/workflows/actions.lock` 锁定；不要手工编辑 lockfile，也不在工作流里直接维护 SHA。
+当前只将自有 `fork.yml` 纳入锁定，避免生成过程改写禁用的上游工作流。
+使用 GitHub 官方 CLI 扩展生成和校验：
+
+```sh
+gh extension install github/gh-actions-lock
+gh actions-lock .github/workflows/fork.yml --no-migrate-local-actions
+gh actions-lock .github/workflows/fork.yml --verify
+```
+
+增加、删除或调整 action 引用后重新生成，审查 workflow 和 lockfile 的完整差异。
+普通生成保留已有锁定；需要跟随可移动分支或版本标签更新时，审查上游变化后用同一作用域的 `--relock`。
+生成时保留 `--no-migrate-local-actions`，否则扩展还会将不在本轮作用域内的本地 action 引用迁移到 `$/…`。
+Rust toolchain action 的 `1.95.0` 是上游分支名，由 lockfile 固定实现；
+更新 Rust 时同时核对 `codex-rs/rust-toolchain.toml` 与该引用，不将其当成 action 的发行版本。
+原生 lockfile 当前为公开预览，行为以 [GitHub 文档](https://docs.github.com/en/actions/how-tos/secure-your-work/lock-workflow-dependencies)为准。
