@@ -16,6 +16,7 @@
 | 0009 | [已打开会话的名称同步](0009-thread-name-refresh.md) |
 | 0010 | [回合与近期平均生成速度](0010-generation-speed.md) |
 | 0011 | [默认使用开放的浏览器与电脑操作工具](0011-open-automation.md) |
+| 0012 | [Responses Lite 请求来源字段兼容](0012-responses-lite-content-metadata.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 修改已有改造时更新原记录，新改造使用下一个编号；编号不重用，不对应 PR 或固定 commit SHA。

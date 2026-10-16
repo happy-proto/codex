@@ -1010,11 +1010,9 @@ impl ModelClient {
             prefix.push(instructions);
         }
         input.splice(0..0, prefix);
-        if !model_info.use_responses_lite {
-            // Only RLite accepts per-content attribution until the Responses API schema expands.
-            for item in &mut input {
-                item.clear_content_item_metadata();
-            }
+        // 官方 RLite 后端尚不接受逐内容来源字段；只清理请求副本，保留分类与本地来源记录。
+        for item in &mut input {
+            item.clear_content_item_metadata();
         }
         if !is_openai {
             for item in &mut input {
