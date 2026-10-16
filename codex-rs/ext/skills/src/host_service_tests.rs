@@ -182,6 +182,49 @@ async fn skills_for_config_with_stack(
 }
 
 #[tokio::test]
+async fn fork_automation_skills_are_isolated_and_user_skills_override_defaults() {
+    let codex_home = tempfile::tempdir().expect("tempdir");
+    let cwd = tempfile::tempdir().expect("tempdir");
+    let desktop_skill = codex_home.path().join("skills/.system/desktop/SKILL.md");
+    fs::create_dir_all(desktop_skill.parent().expect("parent")).expect("create Desktop root");
+    fs::write(&desktop_skill, "Desktop-owned skill sentinel").expect("write Desktop file");
+    write_user_skill(
+        &codex_home,
+        "open-browser-use",
+        "open-browser-use",
+        "custom browser",
+    );
+    let config_layer_stack = config_stack(&codex_home, "");
+    let service = HostSkillsService::new(codex_home.path().abs(), true);
+    let outcome = skills_for_config_with_stack(&service, &cwd, &config_layer_stack, &[]).await;
+    let browser = outcome
+        .skills
+        .iter()
+        .filter(|s| s.name == "open-browser-use")
+        .collect::<Vec<_>>();
+    assert_eq!(browser.len(), 1);
+    assert_eq!(browser[0].scope, SkillScope::User);
+    let computer = outcome
+        .skills
+        .iter()
+        .find(|s| s.name == "open-computer-use")
+        .expect("built-in computer skill");
+    assert_eq!(computer.scope, SkillScope::System);
+    assert!(
+        computer
+            .path_to_skills_md
+            .to_abs_path()
+            .expect("local skill")
+            .starts_with(codex_home.path().join(".fork/skills"))
+    );
+    assert_eq!(
+        fs::read_to_string(desktop_skill).expect("read Desktop file"),
+        "Desktop-owned skill sentinel"
+    );
+    assert!(outcome.errors.is_empty(), "{:?}", outcome.errors);
+}
+
+#[tokio::test]
 async fn skills_for_config_reuses_cache_for_same_effective_config() {
     let codex_home = tempfile::tempdir().expect("tempdir");
     let cwd = tempfile::tempdir().expect("tempdir");
@@ -320,7 +363,7 @@ async fn watchable_skill_root_paths_exclude_plugin_and_system_roots() {
 
     assert!(watchable_paths.contains(&codex_home.path().join("skills").abs()));
     assert!(!watchable_paths.contains(&plugin_skill_root.path));
-    assert!(!watchable_paths.contains(&codex_home.path().join("skills/.system").abs()));
+    assert!(!watchable_paths.contains(&codex_home.path().join(".fork/skills").abs()));
 }
 
 #[tokio::test]
@@ -865,7 +908,7 @@ async fn skills_for_cwd_without_fs_skips_repo_roots() {
 async fn skills_for_config_excludes_bundled_skills_when_disabled_in_config() {
     let codex_home = tempfile::tempdir().expect("tempdir");
     let cwd = tempfile::tempdir().expect("tempdir");
-    let bundled_skill_dir = codex_home.path().join("skills/.system/bundled-skill");
+    let bundled_skill_dir = codex_home.path().join(".fork/skills/bundled-skill");
     fs::create_dir_all(&bundled_skill_dir).expect("create bundled skill dir");
     fs::write(
         bundled_skill_dir.join("SKILL.md"),
