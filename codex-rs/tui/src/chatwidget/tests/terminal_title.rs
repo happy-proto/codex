@@ -5,6 +5,86 @@ use crate::bottom_pane::goal_status_indicator_line;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
+async fn refreshed_thread_name_updates_both_surfaces_without_notification() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let thread_id = ThreadId::new();
+    chat.thread_id = Some(thread_id);
+    chat.local_settings.tui.status_line = Some(vec!["thread-title".into()]);
+    chat.local_settings.tui.terminal_title = Some(vec!["thread-name".into()]);
+    chat.expect_manual_thread_name(thread_id, "Old title".into());
+    let revision = chat.thread_name_revision();
+    chat.apply_refreshed_thread_name(thread_id, revision, Some("External title".into()));
+    assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::ThreadTitle)
+            .as_deref(),
+        Some("External title")
+    );
+    assert_eq!(chat.last_terminal_title.as_deref(), Some("External title"));
+    assert_ne!(chat.thread_name_revision(), revision);
+
+    let revision = chat.thread_name_revision();
+    chat.apply_refreshed_thread_name(thread_id, revision, Some("External title".into()));
+    assert_eq!(
+        chat.thread_name_revision(),
+        revision,
+        "unchanged metadata should not redraw"
+    );
+    chat.apply_refreshed_thread_name(thread_id, revision, None);
+    assert_eq!(chat.thread_name(), None);
+    assert_eq!(
+        chat.status_line_value_for_item(StatusLineItem::ThreadTitle),
+        Some(thread_id.to_string())
+    );
+}
+
+#[tokio::test]
+async fn refreshed_thread_name_cannot_overwrite_newer_notifications_or_manual_renames() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let thread_id = ThreadId::new();
+    chat.thread_id = Some(thread_id);
+    chat.expect_manual_thread_name(thread_id, "Original".into());
+    let revision = chat.thread_name_revision();
+    chat.on_thread_name_updated(thread_id, Some("Notification title".into()));
+    chat.apply_refreshed_thread_name(thread_id, revision, Some("Stale title".into()));
+    assert_eq!(chat.thread_name().as_deref(), Some("Notification title"));
+
+    let revision = chat.thread_name_revision();
+    chat.expect_manual_thread_name(thread_id, "Manual title".into());
+    chat.expect_manual_thread_name(thread_id, "Notification title".into());
+    chat.apply_refreshed_thread_name(thread_id, revision, Some("Stale title".into()));
+    assert_eq!(chat.thread_name().as_deref(), Some("Notification title"));
+}
+
+#[tokio::test]
+async fn refreshed_thread_name_is_ignored_after_switching_or_replacing_the_widget() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let first = ThreadId::new();
+    let second = ThreadId::new();
+    chat.thread_id = Some(first);
+    let revision = chat.thread_name_revision();
+    chat.thread_id = Some(second);
+    chat.expect_manual_thread_name(second, "Other thread".into());
+    chat.apply_refreshed_thread_name(first, revision, Some("Stale title".into()));
+    assert_eq!(chat.thread_name().as_deref(), Some("Other thread"));
+    let (mut replacement, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    replacement.thread_id = Some(first);
+    replacement.apply_refreshed_thread_name(first, revision, Some("Stale title".into()));
+    assert_eq!(replacement.thread_name(), None);
+}
+
+#[tokio::test]
+async fn refreshed_thread_name_is_requested_only_when_a_surface_displays_it() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.local_settings.tui.status_line = Some(vec!["model-name".into()]);
+    chat.local_settings.tui.terminal_title = Some(vec!["project".into()]);
+    assert!(!chat.displays_thread_name());
+    chat.local_settings.tui.status_line = Some(vec!["thread-title".into()]);
+    assert!(chat.displays_thread_name());
+    chat.local_settings.tui.status_line = Some(Vec::new());
+    chat.local_settings.tui.terminal_title = Some(vec!["thread-name".into()]);
+    assert!(chat.displays_thread_name());
+}
+#[tokio::test]
 async fn daybreak_status_surfaces_follow_the_thread_preference() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.local_settings.tui.terminal_title = Some(vec!["daybreak".into()]);
