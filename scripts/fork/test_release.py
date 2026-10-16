@@ -92,12 +92,12 @@ import json, select, sys
 request = json.loads(sys.stdin.readline())
 if select.select([sys.stdin], [], [], 0.05)[0] and sys.stdin.read() == "":
     sys.exit(0)
-print(json.dumps({"id": request["id"], "result": {}}), flush=True)
+print(json.dumps({"id": request["id"], "result": {"userAgent": "codex_cli_rs/1.2.3"}}), flush=True)
 sys.stdin.read()
 """
             )
             cli.chmod(0o755)
-            release.initialize_app_server(cli, os.environ.copy())
+            release.initialize_app_server(cli, os.environ.copy(), "1.2.3")
 
     def test_package_builder_receives_repository_root_without_compilation(self):
         with mock.patch.dict(os.environ):
@@ -110,6 +110,26 @@ sys.stdin.read()
                 text=True,
             )
         self.assertIn("--package-version", result.stdout)
+
+    def test_initialization_validates_the_packaged_server_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cli = Path(directory) / "fake-app-server"
+            cli.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, sys\n"
+                "request = json.loads(sys.stdin.readline())\n"
+                'result = {"userAgent": "codex_cli_rs/1.2.3-alpha.4.fork.2 (test)"}\n'
+                'print(json.dumps({"id": request["id"], "result": result}), flush=True)\n'
+                "sys.stdin.read()\n"
+            )
+            cli.chmod(0o755)
+            release.initialize_app_server(
+                cli, os.environ.copy(), "1.2.3-alpha.4.fork.2"
+            )
+            with self.assertRaisesRegex(ValueError, "app-server version mismatch"):
+                release.initialize_app_server(
+                    cli, os.environ.copy(), "1.2.3-alpha.4.fork.3"
+                )
 
     def test_alpha_version_has_numbered_fork_marker(self):
         self.assertEqual(
