@@ -96,6 +96,7 @@ pub(crate) struct RunningTask {
     /// MCP reviews can span sampling attempts and must stop even while the sampler drains.
     pub(crate) mcp_elicitation_cancellation: CancellationToken,
     pub(crate) handle: AbortOnDropHandle<()>,
+    pub(crate) generation_speed_reporter: Option<crate::generation_speed::GenerationSpeedReporter>,
     pub(crate) turn_context: Arc<TurnContext>,
     pub(crate) _agent_execution_guard: Option<AgentExecutionGuard>,
     /// Follows the task into whichever finalizer claims its terminal event.

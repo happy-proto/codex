@@ -63,6 +63,7 @@ pub(crate) struct StatusIndicatorWidget {
     details_max_lines: usize,
     /// Optional suffix rendered after the elapsed/interrupt segment.
     inline_message: Option<String>,
+    recent_generation_speed: Option<String>,
     /// Hook activity may move below the status row when it cannot fit in full.
     hook_status_message: Option<String>,
     show_interrupt_hint: bool,
@@ -104,6 +105,7 @@ impl StatusIndicatorWidget {
             details: None,
             details_max_lines: STATUS_DETAILS_DEFAULT_MAX_LINES,
             inline_message: None,
+            recent_generation_speed: None,
             hook_status_message: None,
             show_interrupt_hint: true,
             interrupt_binding: Some(key_hint::plain(KeyCode::Esc).into()),
@@ -116,6 +118,10 @@ impl StatusIndicatorWidget {
 
     pub(crate) fn interrupt(&self) {
         self.app_event_tx.interrupt();
+    }
+
+    pub(crate) fn set_recent_generation_speed(&mut self, speed: Option<String>) {
+        self.recent_generation_speed = speed;
     }
 
     pub(crate) fn set_motion_preferences(&mut self, tui: &codex_config::types::Tui) {

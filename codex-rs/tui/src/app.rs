@@ -274,6 +274,7 @@ mod right_click_paste;
 mod status_line_settings;
 mod statusline_picker;
 pub(crate) use right_click_paste::PasteEnvironment;
+mod generation_speed;
 mod pane_motion;
 mod safety_buffering;
 mod safety_recourse;

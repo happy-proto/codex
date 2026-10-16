@@ -942,6 +942,7 @@ impl App {
         if is_replay_only && let Some(session) = snapshot.session.as_mut() {
             session.read_only_history = true;
         }
+        self.refresh_generation_speeds(thread_id).await;
         self.render_thread_snapshot(tui, app_server, thread_id, snapshot, !is_replay_only)
             .await?;
         if !is_replay_only
