@@ -15,6 +15,7 @@ pub(super) struct TurnLifecycleState {
     /// Completion labels already inserted into this thread's visible history.
     pub(super) rendered_completion_turn_ids: HashSet<String>,
     pub(super) goal_status_active_turn_started_at: Option<Instant>,
+    pub(super) live_generation_speed_started_at_ms: i64,
 }
 
 impl TurnLifecycleState {
@@ -26,10 +27,12 @@ impl TurnLifecycleState {
             budget_limited_turn_ids: HashSet::new(),
             rendered_completion_turn_ids: HashSet::new(),
             goal_status_active_turn_started_at: None,
+            live_generation_speed_started_at_ms: 0,
         }
     }
 
     pub(super) fn start(&mut self, now: Instant) {
+        self.live_generation_speed_started_at_ms = chrono::Utc::now().timestamp_millis();
         self.agent_turn_running = true;
         self.goal_status_active_turn_started_at = Some(now);
         self.sleep_inhibitor.set_turn_running(/*turn_running*/ true);
@@ -43,6 +46,7 @@ impl TurnLifecycleState {
     }
 
     pub(super) fn restore_running(&mut self, running: bool, now: Instant) {
+        self.live_generation_speed_started_at_ms = chrono::Utc::now().timestamp_millis();
         self.agent_turn_running = running;
         self.goal_status_active_turn_started_at = running.then_some(now);
         self.sleep_inhibitor.set_turn_running(running);

@@ -7530,6 +7530,41 @@ fn test_turn(turn_id: &str, status: TurnStatus, items: Vec<ThreadItemPayload>) -
     }
 }
 
+#[tokio::test]
+async fn live_generation_speed_rejects_old_reads_after_same_turn_recovery_and_remote_connections() {
+    let (mut app, _rx, _ops) = make_test_app_with_channels().await;
+    let id = ThreadId::new();
+    app.chat_widget
+        .handle_thread_session(test_thread_session(id, test_path_buf("/tmp/project")));
+    app.chat_widget
+        .handle_server_notification(turn_started_notification(id, "turn"), None);
+    let before_recovery = app.chat_widget.live_generation_speed_target().unwrap();
+    app.finish_live_generation_speed(before_recovery.clone(), Some(42.0));
+    assert!(render_bottom_popup(&app.chat_widget, 120).contains("42.0 token/s"));
+    app.chat_widget
+        .handle_server_notification(turn_started_notification(id, "turn"), None);
+    let recovered = app.chat_widget.live_generation_speed_target().unwrap();
+    assert_ne!(before_recovery, recovered);
+    app.finish_live_generation_speed(before_recovery, Some(999.0));
+    assert!(!render_bottom_popup(&app.chat_widget, 120).contains("token/s"));
+    app.finish_live_generation_speed(recovered.clone(), Some(12.0));
+    assert!(render_bottom_popup(&app.chat_widget, 120).contains("12.0 token/s"));
+    app.reconnect.offline = true;
+    app.finish_live_generation_speed(recovered.clone(), Some(99.0));
+    assert!(!render_bottom_popup(&app.chat_widget, 120).contains("token/s"));
+    app.reconnect.offline = false;
+    app.app_server_target = AppServerTarget::Remote {
+        endpoint: crate::RemoteAppServerEndpoint::UnixSocket {
+            socket_path: codex_utils_absolute_path::AbsolutePathBuf::try_from(
+                app.config.codex_home.join("remote.sock"),
+            )
+            .unwrap(),
+        },
+    };
+    app.finish_live_generation_speed(recovered, Some(99.0));
+    assert!(!render_bottom_popup(&app.chat_widget, 120).contains("token/s"));
+}
+
 fn turn_started_notification(thread_id: ThreadId, turn_id: &str) -> ServerNotification {
     ServerNotification::TurnStarted(TurnStartedNotification {
         thread_id: thread_id.to_string(),
