@@ -14,6 +14,20 @@ use super::McpCli;
 use super::McpSubcommand;
 
 #[test]
+fn mcp_list_output_accepts_human_plain_and_json() {
+    for args in [
+        vec!["mcp", "list"],
+        vec!["mcp", "list", "--format", "human"],
+        vec!["mcp", "list", "--format", "plain"],
+        vec!["mcp", "list", "--json"],
+    ] {
+        assert!(McpCli::try_parse_from(args).is_ok());
+    }
+    assert!(McpCli::try_parse_from(["mcp", "list", "--json", "--format", "plain"]).is_err());
+    assert!(McpCli::try_parse_from(["mcp", "list", "--format", "yaml"]).is_err());
+}
+
+#[test]
 fn oauth_client_secret_is_redacted_in_parsed_command_debug() {
     let cli = McpCli::try_parse_from([
         "mcp",
