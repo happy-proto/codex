@@ -79,6 +79,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use unicode_segmentation::UnicodeSegmentation;
 
+mod cjk_strong;
 mod inline_directives;
 mod list_spacing;
 mod local_links;
@@ -506,7 +507,10 @@ pub(crate) fn render_markdown_lines_with_list_spacing(
     let math = math::MathMarkdown::new(input, options, width);
     let parser = DecodedTextMerge::new(source_tables::preserve(
         input,
-        math.events(Parser::new_ext(&math.markdown, options).into_offset_iter()),
+        math.events(cjk_strong::events(
+            &math.markdown,
+            Parser::new_ext(&math.markdown, options).into_offset_iter(),
+        )),
     ));
     let mut w = Writer::new(input, width, cwd, is_hidden_link_destination);
     w.list_spacing = list_spacing;
