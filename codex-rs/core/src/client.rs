@@ -333,6 +333,7 @@ struct WebsocketContinuation {
 #[derive(Debug, Default)]
 struct WebsocketSession {
     connection: Option<ApiWebSocketConnection>,
+    connected_at: Option<tokio::time::Instant>,
     responses_headers: ApiHeaderMap,
     /// Owner of the cached state, including before a connection is opened.
     auth_owner_generation: Option<u64>,
@@ -480,6 +481,13 @@ fn response_items_equal_ignoring_internal_metadata(
 }
 
 impl WebsocketSession {
+    // Rotate at request boundaries, leaving ample headroom below the upstream
+    // 60-minute lifetime. This age follows the socket across turn cache handoffs.
+    fn needs_rotation(&self) -> bool {
+        self.connected_at
+            .is_some_and(|started| started.elapsed() >= Duration::from_secs(30 * 60))
+    }
+
     fn reset(&mut self, reason: Option<&'static str>) {
         // Per-socket backend metrics call a resend after reconnect "initial".
         // Retain the loss reason across reconnects/turns until the next send.
@@ -1726,6 +1734,7 @@ impl ModelClientSession {
             {
                 Some("other")
             }
+            Some(_) if self.websocket_session.needs_rotation() => Some("connection_age"),
             Some(conn) if conn.is_closed().await => Some("connection_closed"),
             Some(_) | None => None,
         };
@@ -1756,6 +1765,7 @@ impl ModelClientSession {
                 )
                 .await?;
             self.websocket_session.connection = Some(new_conn);
+            self.websocket_session.connected_at = Some(tokio::time::Instant::now());
             self.websocket_session.responses_headers = responses_headers.clone();
             self.websocket_session.auth_owner_generation = auth_owner_generation;
             self.websocket_session.connection_key = Some(connection_key);
@@ -2335,7 +2345,7 @@ impl ModelClientSession {
         if self.websocket_session.last_request.is_some()
             && let Some(connection) = self.websocket_session.connection.as_ref()
         {
-            !connection.is_closed().await
+            !self.websocket_session.needs_rotation() && !connection.is_closed().await
         } else {
             false
         }
