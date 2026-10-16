@@ -412,6 +412,12 @@ jobs:
         if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib generation_speed
+      - name: 验证 WebSocket 主动轮转、重连与 HTTP fallback
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: |
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::client_websockets:: -- --test-threads=1
+          ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::websocket_fallback:: -- --test-threads=1
       - name: 上传测试构建耗时报告
         uses: actions/upload-artifact@v7.0.0
         if: always()
