@@ -1000,6 +1000,7 @@ See the Codex keymap documentation for supported actions and examples."
             account_email_request_id: None,
             rate_limit_hard_stop_generation: 0,
             rate_limit_refresh_state: Default::default(),
+            thread_name_refresh: Default::default(),
             pending_mcp_login_start: None,
             active_mcp_login_ids: HashMap::new(),
             pending_plugin_enabled_writes: HashMap::new(),
@@ -1261,6 +1262,7 @@ See the Codex keymap documentation for supported actions and examples."
                 .chat_widget
                 .rate_limit_refresh_interval()
                 .and_then(|interval| app.rate_limit_refresh_state.poll_deadline(interval));
+            let thread_name_poll_deadline = app.thread_name_poll_deadline();
             let control = select! {
                 result = async {
                     match app.daemon_restart.as_mut() {
@@ -1415,6 +1417,15 @@ See the Codex keymap documentation for supported actions and examples."
                     }
                 }, if listen_for_app_server_events => {
                     app.refresh_rate_limits(&app_server, RateLimitRefreshOrigin::Periodic);
+                    AppRunControl::Continue
+                }
+                () = async {
+                    match thread_name_poll_deadline {
+                        Some(deadline) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    app.refresh_current_thread_name(&app_server);
                     AppRunControl::Continue
                 }
                 () = async {
