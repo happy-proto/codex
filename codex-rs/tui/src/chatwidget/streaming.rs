@@ -534,6 +534,7 @@ impl ChatWidget {
             StatusDetailsCapitalization::CapitalizeFirst,
             STATUS_DETAILS_DEFAULT_MAX_LINES,
         );
+        self.bottom_pane.restart_retry_countdown();
     }
 
     pub(crate) fn reconcile_corrected_cloud_copy(
