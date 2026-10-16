@@ -677,6 +677,7 @@ fn fork_automation_is_excluded_from_remote_recommendations() {
             item("browser"),
             item("computer-use"),
             item("unified-computer-use"),
+            item("codex-app-tools"),
             item("github"),
         ],
     });

@@ -32,7 +32,7 @@ fn user_layer(path: AbsolutePathBuf, config: &str) -> ConfigLayerEntry {
 async fn fork_automation_filters_local_and_remote_plugins_without_mutating_shared_files() {
     let home = TempDir::new().expect("tempdir");
     let config_path = user_config_path(&home, "config.toml");
-    let config = "[plugins.\"chrome@openai-bundled\"]\nenabled = true\n[plugins.\"keep@custom\"]\nenabled = true\n";
+    let config = "[plugins.\"chrome@openai-bundled\"]\nenabled = true\n[plugins.\"codex-app-tools@openai-bundled\"]\nenabled = true\n[plugins.\"keep@custom\"]\nenabled = true\n";
     fs::write(&config_path, config).expect("write shared config");
     let cached_manifest = home
         .path()
@@ -65,16 +65,24 @@ async fn fork_automation_filters_local_and_remote_plugins_without_mutating_share
                 skill_root_loader: loader.as_ref(),
             }
         };
-        let extra = HashMap::from([(
-            "unified-computer-use@openai-curated-remote".to_string(),
-            PluginConfig {
-                enabled: Some(true),
-                remote_plugin_id: None,
-                release_id: None,
-                auto_provision: None,
-                mcp_servers: HashMap::new(),
-            },
-        )]);
+        let extra = [
+            "unified-computer-use@openai-curated-remote",
+            "codex-app-tools@openai-curated-remote",
+        ]
+        .into_iter()
+        .map(|name| {
+            (
+                name.to_string(),
+                PluginConfig {
+                    enabled: Some(true),
+                    remote_plugin_id: None,
+                    release_id: None,
+                    auto_provision: None,
+                    mcp_servers: HashMap::new(),
+                },
+            )
+        })
+        .collect();
         let plugins =
             load_plugins_from_layer_stack_with_scope(&stack, &policy, extra, &store, true, scope)
                 .await;
