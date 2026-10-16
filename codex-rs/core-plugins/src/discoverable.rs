@@ -102,7 +102,8 @@ impl PluginsManager {
             for plugin in marketplace.plugins {
                 let is_configured_plugin = input.configured_plugin_ids.contains(plugin.id.as_str());
                 let is_fallback_plugin = is_tool_suggest_fallback_plugin(&plugin.id);
-                if plugin.installed
+                if crate::fork_policy::replaces_official_automation(&plugin.id)
+                    || plugin.installed
                     || plugin.policy.installation == MarketplacePluginInstallPolicy::NotAvailable
                     || input.disabled_plugin_ids.contains(plugin.id.as_str())
                     || (!is_configured_plugin && !is_fallback_plugin)
@@ -176,7 +177,8 @@ impl PluginsManager {
                     || input
                         .disabled_plugin_ids
                         .contains(plugin.remote_plugin_id.as_str());
-                if installed_remote_plugin_ids.contains(&plugin.remote_plugin_id)
+                if crate::fork_policy::replaces_official_automation(&plugin.config_id)
+                    || installed_remote_plugin_ids.contains(&plugin.remote_plugin_id)
                     || plugin.install_policy == PluginInstallPolicy::NotAvailable
                     || plugin.availability == PluginAvailability::DisabledByAdmin
                     || is_disabled

@@ -36,7 +36,10 @@ fn plugin_mentions_from_list_response(
 }
 
 fn plugin_is_eligible_for_mentions(plugin: &PluginSummary) -> bool {
-    plugin.installed && plugin.enabled && plugin.availability != PluginAvailability::DisabledByAdmin
+    plugin.installed
+        && plugin.enabled
+        && plugin.availability != PluginAvailability::DisabledByAdmin
+        && !codex_core_plugins::replaces_official_automation(&plugin.id)
 }
 
 fn plugin_mention_from_summary(
@@ -146,6 +149,47 @@ mod tests {
                     app_connector_ids: Vec::new(),
                 }
             ]
+        );
+    }
+
+    #[test]
+    fn fork_automation_omits_official_plugins_from_mentions() {
+        let summary = |name: &str, marketplace: &str| PluginSummary {
+            id: format!("{name}@{marketplace}"),
+            ..plugin_summary(name)
+        };
+        let response = PluginListResponse {
+            marketplaces: vec![
+                PluginMarketplaceEntry {
+                    name: "openai-bundled".to_string(),
+                    path: None,
+                    interface: None,
+                    plugins: vec![
+                        summary("browser", "openai-bundled"),
+                        summary("computer-use", "openai-bundled"),
+                        summary("unified-computer-use", "openai-bundled"),
+                        summary("codex-app-tools", "openai-bundled"),
+                        summary("code-review", "openai-bundled"),
+                    ],
+                },
+                PluginMarketplaceEntry {
+                    name: "custom".to_string(),
+                    path: None,
+                    interface: None,
+                    plugins: vec![summary("codex-app-tools", "custom")],
+                },
+            ],
+            marketplace_load_errors: Vec::new(),
+            featured_plugin_ids: Vec::new(),
+        };
+
+        let mentions = plugin_mentions_from_list_response(response);
+        assert_eq!(
+            mentions
+                .iter()
+                .map(|plugin| plugin.config_name.as_str())
+                .collect::<Vec<_>>(),
+            ["code-review@openai-bundled", "codex-app-tools@custom"]
         );
     }
 
