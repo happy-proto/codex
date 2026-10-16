@@ -1079,7 +1079,7 @@ impl App {
                 )
                 .await;
                 self.local_settings = local_settings;
-                self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
+                self.refresh_server_version_overview_notice(cli_version());
                 self.config = config;
                 self.remember_launch_permissions();
 
@@ -1427,7 +1427,7 @@ impl App {
         self.detach_current_thread_for_navigation(app_server, Some(resumed_thread_id))
             .await;
         self.local_settings = local_settings;
-        self.refresh_server_version_overview_notice(CODEX_CLI_VERSION);
+        self.refresh_server_version_overview_notice(cli_version());
         self.config = resume_config;
         tui.set_notification_settings(
             self.local_settings.tui.notification_settings.method,
