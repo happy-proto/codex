@@ -163,6 +163,7 @@ use toml_edit::DocumentMut;
 
 mod auth_keyring;
 pub mod edit;
+mod fork_automation;
 mod managed_features;
 mod metrics;
 mod network_config;
@@ -1870,6 +1871,26 @@ impl Config {
                 name.clone(),
                 server.clone(),
             ));
+        }
+
+        let existing = catalog.clone().build().configured_servers();
+        if let Some((name, server)) =
+            fork_automation::default_computer_server(&existing, |command| {
+                which::which(command).ok()
+            })
+        {
+            let mut defaults = HashMap::from([(name, server)]);
+            filter_mcp_servers_by_requirements(
+                &mut defaults,
+                self.config_layer_stack.requirements().mcp_servers.as_ref(),
+            );
+            for (name, server) in defaults {
+                catalog.register(McpServerRegistration::from_compatibility(
+                    name,
+                    "fork-open-computer-use",
+                    server,
+                ));
+            }
         }
 
         McpConfig {

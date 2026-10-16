@@ -6,6 +6,7 @@ mod discoverable;
 mod error_subtype;
 mod executor_hooks;
 mod executor_provider;
+mod fork_policy;
 mod git_policy;
 mod http_client_selector;
 pub mod installed_marketplaces;

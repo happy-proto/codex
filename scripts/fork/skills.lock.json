@@ -1,0 +1,30 @@
+{
+  "open-browser-use": {
+    "commit": "b136cac71a3c497b5696aefd871dd15cba7d7559",
+    "files": {
+      "LICENSE": "0fdb775e00e6fdde23984b4f1184cd13c34135caac1e714ad489141c239704bc",
+      "SKILL.md": "350e6e7b14c1eb63c52b47c9a23727399038fe10c0ddc8de63b44961235313fe",
+      "agents/openai.yaml": "ead90db5ed25d0970404a76b249396d00932d6b7ec0a771fff7ae011a82fbc8f",
+      "references/installation.md": "0e905331c8b12db838cff05ea6b859697be9f405f108088b567a437952b6a5c3",
+      "references/sdk-and-protocol.md": "fa5ead71334c726ed1a9fc63682ee25cad8ef4a528473ba7d1f26dd196c5fb9c",
+      "references/troubleshooting.md": "d0c575ccee0420d57f9ef4c45a1d876080b51224abe2dc532f648c292cdcdcbb"
+    },
+    "path": "skills/open-browser-use",
+    "ref": "main",
+    "repository": "https://github.com/iFurySt/open-browser-use"
+  },
+  "open-computer-use": {
+    "commit": "e3f185b919c777e33e1ef8b47a688ce6d8f908d4",
+    "files": {
+      "LICENSE": "0fdb775e00e6fdde23984b4f1184cd13c34135caac1e714ad489141c239704bc",
+      "SKILL.md": "1c82a74e5c77262507f563ebac1751ad91f070c425a97f2f7bbd595f0fbac1ca",
+      "agents/openai.yaml": "efebe3eea340f5f801d058bbb90afee7ac97bbe56d41557a83ec2b787c1c5996",
+      "references/installation.md": "a8a5477aadf09eb486f6d41120afbd67ec348f0fe626e5bb8cde3b4086d1fc34",
+      "references/troubleshooting.md": "1d26991774330adb9d0317f1fd0f1d8bc83b0216df70bab5289e847051514291",
+      "references/usage.md": "dfb0f6394fbb5925cd89e1510cc9d9b341c532cac0798dabcd32dd32547d9f91"
+    },
+    "path": "skills/open-computer-use",
+    "ref": "main",
+    "repository": "https://github.com/iFurySt/open-codex-computer-use"
+  }
+}
