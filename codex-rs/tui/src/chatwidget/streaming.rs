@@ -498,6 +498,7 @@ impl ChatWidget {
             StatusDetailsCapitalization::CapitalizeFirst,
             STATUS_DETAILS_DEFAULT_MAX_LINES,
         );
+        self.bottom_pane.restart_retry_countdown();
     }
 
     /// Handle completion of an `AgentMessage` turn item.
