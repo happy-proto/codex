@@ -612,6 +612,7 @@ impl App {
     ) {
         self.statusline_picker = None;
         chat_widget.inherit_view_transition_key_guard(&mut self.chat_widget);
+        chat_widget.generation_speeds = std::mem::take(&mut self.chat_widget.generation_speeds);
         chat_widget.fork_in_progress = self.chat_widget.fork_in_progress;
         self.pending_right_click_paste = None;
         self.config_notification_test_pending = None;
@@ -940,6 +941,7 @@ impl App {
         if is_replay_only && let Some(session) = snapshot.session.as_mut() {
             session.read_only_history = true;
         }
+        self.refresh_generation_speeds(thread_id).await;
         self.render_thread_snapshot(tui, app_server, thread_id, snapshot, !is_replay_only)
             .await?;
         if !is_replay_only
