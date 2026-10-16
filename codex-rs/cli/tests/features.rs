@@ -225,7 +225,7 @@ async fn features_list_is_sorted_alphabetically_by_feature_name() -> Result<()> 
 
     let mut cmd = codex_command(codex_home.path())?;
     let output = cmd
-        .args(["features", "list"])
+        .args(["features", "list", "--format", "plain"])
         .assert()
         .success()
         .get_output()
@@ -246,6 +246,92 @@ async fn features_list_is_sorted_alphabetically_by_feature_name() -> Result<()> 
 
     assert_eq!(actual_names, expected_names);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn features_list_formats_report_the_same_effective_states() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    let run = |format: Option<&str>| -> Result<String> {
+        let mut cmd = codex_command(codex_home.path())?;
+        cmd.args(["-c", "features.undo=false", "features", "list"]);
+        if let Some(format) = format {
+            cmd.args(["--format", format]);
+        }
+        let output = cmd.assert().success().get_output().stdout.clone();
+        Ok(String::from_utf8(output)?)
+    };
+
+    let table = run(Some("table"))?;
+    assert_eq!(run(None)?, table, "the default format should be table");
+    assert!(table.starts_with('╭'));
+    assert!(table.lines().last().unwrap().starts_with('╰'));
+    let markdown = run(Some("markdown"))?;
+    let json: serde_json::Value = serde_json::from_str(&run(Some("json"))?)?;
+    let features = json["features"].as_array().unwrap();
+    assert!(!features.is_empty());
+    let expected = features
+        .iter()
+        .map(|feature| {
+            vec![
+                feature["name"].as_str().unwrap().to_string(),
+                feature["stage"].as_str().unwrap().to_string(),
+                feature["enabled"].as_bool().unwrap().to_string(),
+            ]
+        })
+        .collect::<Vec<_>>();
+    let names = expected.iter().map(|row| &row[0]).collect::<Vec<_>>();
+    let mut sorted_names = names.clone();
+    sorted_names.sort();
+    assert_eq!(names, sorted_names);
+    assert_eq!(
+        expected.iter().find(|row| row[0] == "undo").unwrap()[2],
+        "false"
+    );
+
+    for (output, separator) in [(&table, '│'), (&markdown, '|')] {
+        let rows = output
+            .lines()
+            .filter(|line| line.starts_with(separator))
+            .filter(|line| !line.starts_with("|---"))
+            .map(|line| {
+                line.trim_matches(separator)
+                    .split(separator)
+                    .map(|cell| cell.trim().to_string())
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(rows[0], ["name", "stage", "enabled"]);
+        assert_eq!(&rows[1..], expected);
+    }
+    let plain = run(Some("plain"))?;
+    let actual = plain
+        .lines()
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actual,
+        expected.iter().map(|row| row.join(" ")).collect::<Vec<_>>()
+    );
+    Ok(())
+}
+
+#[test]
+fn features_list_help_and_invalid_format() -> Result<()> {
+    let codex_home = TempDir::new()?;
+    codex_command(codex_home.path())?
+        .args(["features", "list", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--format <FORMAT>"))
+        .stdout(contains("[default: table]"))
+        .stdout(contains("plain, table, markdown, json"));
+    codex_command(codex_home.path())?
+        .args(["features", "list", "--format", "yaml"])
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(contains("invalid value 'yaml'"));
     Ok(())
 }
 
@@ -311,7 +397,7 @@ async fn features_list_honors_cloud_managed_feature_requirements() -> Result<()>
         .env_remove("CODEX_ACCESS_TOKEN")
         .env_remove("CODEX_API_KEY")
         .env_remove("OPENAI_API_KEY")
-        .args(["features", "list"])
+        .args(["features", "list", "--format", "plain"])
         .assert()
         .success()
         .get_output()
