@@ -318,6 +318,13 @@ jobs:
           cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::generation_speed:: -- --test-threads=1
           cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-state --lib generation_speed
           cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib generation_speed
+      - name: 验证 Responses Lite 请求兼容性与本地来源保留
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: |
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::responses_lite::base_instructions_use_input_items
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all responses_websocket_omits_content_attribution_without_mutating_history
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all remote_compact_v2_retains_metadata_from_resumed_history
       - name: 验证模型容量错误的无限退避重试
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
