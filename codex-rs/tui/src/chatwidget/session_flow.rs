@@ -108,6 +108,7 @@ impl ChatWidget {
         self.turn_lifecycle.reset_thread();
         self.clear_safety_buffering();
         self.thread_name = session.thread_name.clone();
+        self.thread_name_revision = uuid::Uuid::new_v4();
         self.current_goal_status_indicator = None;
         self.current_goal_status = None;
         self.update_collaboration_mode_indicator();
@@ -384,6 +385,7 @@ impl ChatWidget {
     pub(crate) fn expect_manual_thread_name(&mut self, thread_id: ThreadId, name: String) {
         if self.thread_id == Some(thread_id) {
             self.thread_name = Some(name);
+            self.thread_name_revision = uuid::Uuid::new_v4();
             self.refresh_status_surfaces();
             self.request_redraw();
         }
@@ -397,6 +399,7 @@ impl ChatWidget {
     ) {
         if self.thread_id == Some(thread_id) {
             self.thread_name = thread_name;
+            self.thread_name_revision = uuid::Uuid::new_v4();
             self.refresh_status_surfaces();
             self.request_redraw();
             self.maybe_send_next_queued_input();
@@ -405,5 +408,24 @@ impl ChatWidget {
 
     pub(super) fn set_skills(&mut self, skills: Option<Vec<SkillMetadata>>) {
         self.bottom_pane.set_skills(skills);
+    }
+
+    /// Metadata reconciliation is silent and must not advance queued input.
+    pub(crate) fn apply_refreshed_thread_name(
+        &mut self,
+        thread_id: ThreadId,
+        revision: uuid::Uuid,
+        name: Option<String>,
+    ) {
+        if self.thread_id != Some(thread_id)
+            || self.thread_name_revision != revision
+            || self.thread_name == name
+        {
+            return;
+        }
+        self.thread_name = name;
+        self.thread_name_revision = uuid::Uuid::new_v4();
+        self.refresh_status_surfaces();
+        self.request_redraw();
     }
 }
