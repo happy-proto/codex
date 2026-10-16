@@ -2519,11 +2519,13 @@ enum PendingCompactionOutcome {
     SuccessOverBudget,
     StaleSuccess,
     Failure,
+    FailureBeforeCheckpoint,
     Interrupted,
 }
 
 #[test_case::test_case(PendingCompactionOutcome::Success, CompactionTrigger::Auto; "auto uses pending result")]
 #[test_case::test_case(PendingCompactionOutcome::Failure, CompactionTrigger::Auto; "auto falls back after failure")]
+#[test_case::test_case(PendingCompactionOutcome::FailureBeforeCheckpoint, CompactionTrigger::Auto; "auto falls back after failure before checkpoint")]
 #[test_case::test_case(PendingCompactionOutcome::StaleSuccess, CompactionTrigger::Auto; "auto falls back after account changes")]
 #[test_case::test_case(PendingCompactionOutcome::Interrupted, CompactionTrigger::Auto; "auto can be interrupted")]
 #[test_case::test_case(PendingCompactionOutcome::Absent, CompactionTrigger::Manual; "manual without background")]
@@ -2551,12 +2553,16 @@ async fn async_compaction_reuses_pending_work(
     } else {
         10_000
     };
-    let valid_output = outcome != PendingCompactionOutcome::Failure;
+    let valid_output = !matches!(
+        outcome,
+        PendingCompactionOutcome::Failure | PendingCompactionOutcome::FailureBeforeCheckpoint
+    );
     let succeeds = !matches!(
         outcome,
         PendingCompactionOutcome::Absent
             | PendingCompactionOutcome::SuccessOverBudget
             | PendingCompactionOutcome::Failure
+            | PendingCompactionOutcome::FailureBeforeCheckpoint
             | PendingCompactionOutcome::StaleSuccess
     );
     let response = |id, event, tokens| vec![event, ev_completed_with_tokens(id, tokens)];
@@ -2622,6 +2628,19 @@ async fn async_compaction_reuses_pending_work(
     if has_background {
         tokio::time::timeout(timeout, streaming.wait_for_request_count(/*count*/ 2)).await?;
     }
+    let release_background = if outcome == PendingCompactionOutcome::FailureBeforeCheckpoint {
+        release_background.send(()).expect("release failed result");
+        // Finish the failed attempt while foreground work is idle. The next turn
+        // must poll the closed channel at its checkpoint before needing compaction.
+        tokio::time::timeout(
+            timeout,
+            test.codex.wait_for_background_compaction_for_test(),
+        )
+        .await?;
+        None
+    } else {
+        Some(release_background)
+    };
     if manual {
         test.codex.submit(Op::Compact).await?;
     } else if over_budget {
@@ -2641,7 +2660,7 @@ async fn async_compaction_reuses_pending_work(
             if matches!(event.item, TurnItem::ContextCompaction(_)))
     })
     .await;
-    if has_background {
+    if has_background && outcome != PendingCompactionOutcome::FailureBeforeCheckpoint {
         assert_eq!(streaming.requests().await.len(), if manual { 2 } else { 3 });
     }
     if outcome == PendingCompactionOutcome::Interrupted {
@@ -2650,7 +2669,10 @@ async fn async_compaction_reuses_pending_work(
             matches!(event, EventMsg::TurnAborted(_))
         })
         .await;
-        release_background.send(()).expect("release unused result");
+        release_background
+            .expect("pending background work")
+            .send(())
+            .expect("release unused result");
         completions.remove(1).await?;
         test.codex.shutdown_and_wait().await?;
         assert_eq!(streaming.requests().await.len(), if manual { 2 } else { 3 });
@@ -2670,7 +2692,7 @@ async fn async_compaction_reuses_pending_work(
         )?;
         auth.reload().await;
     }
-    if has_background {
+    if has_background && let Some(release_background) = release_background {
         release_background.send(()).expect("release pending result");
     }
     let EventMsg::ItemStarted(started) = started else {
