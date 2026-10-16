@@ -670,6 +670,29 @@ fn item(name: &str) -> RecommendedPluginItem {
 }
 
 #[test]
+fn fork_automation_is_excluded_from_remote_recommendations() {
+    let mode = recommended_plugins_mode(RecommendedPluginsResponse {
+        enabled: true,
+        plugins: vec![
+            item("browser"),
+            item("computer-use"),
+            item("unified-computer-use"),
+            item("github"),
+        ],
+    });
+    let RecommendedPluginsMode::Endpoint { plugins } = mode else {
+        panic!("expected endpoint mode");
+    };
+    assert_eq!(
+        plugins
+            .iter()
+            .map(|plugin| plugin.config_id.as_str())
+            .collect::<Vec<_>>(),
+        ["github@openai-curated-remote"]
+    );
+}
+
+#[test]
 fn recommended_plugins_enabled_flag_selects_endpoint_or_legacy_mode() {
     let disabled: RecommendedPluginsResponse = serde_json::from_value(serde_json::json!({
         "enabled": false,

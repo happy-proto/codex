@@ -29,6 +29,71 @@ fn user_layer(path: AbsolutePathBuf, config: &str) -> ConfigLayerEntry {
 }
 
 #[tokio::test]
+async fn fork_automation_filters_local_and_remote_plugins_without_mutating_shared_files() {
+    let home = TempDir::new().expect("tempdir");
+    let config_path = user_config_path(&home, "config.toml");
+    let config = "[plugins.\"chrome@openai-bundled\"]\nenabled = true\n[plugins.\"keep@custom\"]\nenabled = true\n";
+    fs::write(&config_path, config).expect("write shared config");
+    let cached_manifest = home
+        .path()
+        .join("plugins/cache/openai-bundled/chrome/local/.codex-plugin/plugin.json");
+    write_file(&cached_manifest, r#"{"name":"chrome"}"#);
+    let stack = ConfigLayerStack::new(
+        vec![user_layer(config_path.clone(), config)],
+        ConfigRequirements::default(),
+        ConfigRequirementsToml::default(),
+    )
+    .expect("valid stack");
+    let policy = stack
+        .effective_config()
+        .try_into::<ConfigToml>()
+        .expect("valid config")
+        .plugins;
+    let store = PluginStore::new(home.path().to_path_buf());
+    let loader = test_skill_root_loader();
+    let resolver = RemotePluginIdResolver::default();
+    let skill_rules = skill_config_rules_from_stack(&stack);
+    for hooks_only in [false, true] {
+        let scope = if hooks_only {
+            PluginLoadScope::HooksOnly
+        } else {
+            PluginLoadScope::AllCapabilities {
+                restriction_product: Some(Product::Codex),
+                skill_config_rules: &skill_rules,
+                plugin_skill_snapshots: None,
+                remote_plugin_id_resolver: &resolver,
+                skill_root_loader: loader.as_ref(),
+            }
+        };
+        let extra = HashMap::from([(
+            "unified-computer-use@openai-curated-remote".to_string(),
+            PluginConfig {
+                enabled: Some(true),
+                mcp_servers: HashMap::new(),
+            },
+        )]);
+        let plugins =
+            load_plugins_from_layer_stack_with_scope(&stack, &policy, extra, &store, true, scope)
+                .await;
+        assert_eq!(
+            plugins
+                .iter()
+                .map(|p| p.config_name.as_str())
+                .collect::<Vec<_>>(),
+            ["keep@custom"]
+        );
+    }
+    assert_eq!(
+        fs::read_to_string(config_path).expect("read config"),
+        config
+    );
+    assert_eq!(
+        fs::read_to_string(cached_manifest).expect("read cached manifest"),
+        r#"{"name":"chrome"}"#
+    );
+}
+
+#[tokio::test]
 async fn agent_plugin_overlay_apps_are_not_runtime_active() {
     let temp_dir = TempDir::new().expect("tempdir");
     let plugin_root = temp_dir.path().join("plugin");
