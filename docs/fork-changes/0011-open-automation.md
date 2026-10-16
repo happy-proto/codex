@@ -5,15 +5,24 @@
 ## 为什么改
 
 自签名 fork 无法使用依赖官方 Desktop 运行环境的 browser/computer use。
+`codex-app-tools` 提供的 `codex_app` MCP 同样依赖 Desktop 专用通信入口，
+不作为 fork 中的会话管理入口。
 CLI 与官方 Desktop 共用配置，直接禁用或卸载官方插件会影响 Desktop；
 仅在提示词里建议替代工具也不能阻止官方工具加载。
 
 ## 如何改
 
 - fork 在合并本地配置和远端安装状态后，过滤官方 marketplace 中的
-  `chrome`、`browser`、`browser-use`、`computer-use` 和 `unified-computer-use`。
+  `chrome`、`browser`、`browser-use`、`computer-use`、`unified-computer-use`
+  和 `codex-app-tools`。
   对应的 skills、MCP、apps 和 hooks 不参与本次运行，也不作为模型的工具建议或远端推荐。
+  TUI 的 `@` 插件候选复用相同过滤规则，不能仅按共享配置中的已安装、已启用状态展示。
   同名第三方插件不受影响。不修改共享配置、官方插件缓存、安装及账号启用状态。
+- 保留独立运行的 `code-review` 插件；不能仅因其由 Desktop 分发或默认禁用，
+  就判断它依赖 Desktop 签名。其 MCP 服务可独立完成握手，并通过本机 GitHub CLI 读取账号。
+- 共享配置中直接声明的 MCP 仍按各自的 `enabled` 状态处理。
+  `computer-use`、`cua_repl` 等显式禁用项可能保留在状态列表中，
+  出现在列表中不代表已经启动。`node_repl` 的直接配置也不属于插件过滤范围。
 - 内置 [Open Browser Use](https://github.com/iFurySt/open-browser-use) 和
   [Open Computer Use](https://github.com/iFurySt/open-codex-computer-use) 的完整 skill 目录和许可证。
   上游原文不打补丁；快照随二进制构建，无需首次启动联网或初始化 submodule。
@@ -31,6 +40,10 @@ CLI 与官方 Desktop 共用配置，直接禁用或卸载官方插件会影响 
 本改造内置的是 skill 和接入规则，不包含第三方运行程序、Chrome 扩展或系统权限。
 这些仍按各项目安装说明准备；fork 不自动安装、升级或授权它们。
 本行为也适用于 fork 提供的 app-server；官方 Desktop 自带的程序和配置保持原样。
+交互式 CLI 的独立会话管理使用上游自带的 `codex_tui` 工具；
+连接共享 app-server 时可创建、读取、等待和发送消息给独立任务，
+不依赖 `codex_app` MCP。该入口由 TUI 托管，不能据此推断 `codex exec`
+或其它客户端创建的会话也自动具有这些工具。
 
 ## 更新第三方 skill
 
@@ -63,6 +76,7 @@ python3 scripts/fork/sync_skills.py update open-browser-use --ref main
 
 - [插件过滤规则](../../codex-rs/core-plugins/src/fork_policy.rs)、
   [加载入口](../../codex-rs/core-plugins/src/loader.rs)、
+  [TUI 插件候选](../../codex-rs/tui/src/app/plugin_mentions.rs)、
   [模型工具建议](../../codex-rs/core-plugins/src/discoverable.rs)、
   [远端推荐](../../codex-rs/core-plugins/src/remote.rs)。
 - [skill 内置及独立缓存](../../codex-rs/skills/src/lib.rs)、

@@ -290,6 +290,7 @@ jobs:
         working-directory: codex-rs
         run: |
           cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core-plugins --lib fork_automation
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib app::plugin_mentions::tests
           cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills --lib
           cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills-extension --lib host_roots::tests
           cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills-extension --lib host_service::tests

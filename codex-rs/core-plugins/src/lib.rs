@@ -77,6 +77,7 @@ pub use executor_provider::ExecutorPluginProvider;
 pub use executor_provider::ExecutorPluginProviderError;
 pub use executor_provider::PluginRootOwnership;
 pub use executor_provider::ResolvedExecutorPlugin;
+pub use fork_policy::replaces_official_automation;
 pub use loader::PluginHookLoadOutcome;
 pub use manager::ConfiguredMarketplace;
 pub use manager::ConfiguredMarketplaceListOutcome;
