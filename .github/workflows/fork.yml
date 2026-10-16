@@ -279,6 +279,12 @@ jobs:
         run: |
           cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --bin codex features_list::tests
           cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test features features_list_
+      - name: 验证 MCP 列表展示与旧格式兼容
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: |
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --bin codex mcp_list_output
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test mcp_list
       - name: 上传测试构建耗时报告
         uses: actions/upload-artifact@v7.0.0
         if: always()
