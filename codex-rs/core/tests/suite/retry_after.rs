@@ -565,7 +565,7 @@ async fn responses_http_overload_respects_retry_limits(
     assert_eq!(error_events, 1);
     let expected_messages = if retry_after.is_some() {
         (1..=stream_max_retries)
-            .map(|retry| format!("Reconnecting... {retry}/{stream_max_retries}"))
+            .map(|retry| format!("Reconnecting... {retry}/{stream_max_retries} (retrying in 0s)"))
             .collect::<Vec<_>>()
     } else {
         Vec::new()
@@ -1920,6 +1920,14 @@ async fn websocket_error_uses_nested_retry_after() -> Result<()> {
         .await;
     assert_eq!(warmup.body_json()["generate"].as_bool(), Some(false));
     submit_user_input(&test, "recover from the websocket error").await?;
+    let notice = wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::StreamError(_))
+    })
+    .await;
+    let EventMsg::StreamError(notice) = notice else {
+        unreachable!("stream error notification")
+    };
+    assert!(notice.message.contains("retrying in 1s"));
     let retry = telemetry.next_retry().await;
     assert!(retry.delay <= Duration::from_secs(1));
     assert_eq!(
