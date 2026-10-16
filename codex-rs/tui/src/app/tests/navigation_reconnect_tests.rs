@@ -329,7 +329,7 @@ async fn reconnect_daemon_command_center_after_socket_replacement_without_a_conv
             &mut session,
             &mut events,
             connected,
-            CODEX_CLI_VERSION,
+            cli_version(),
         )
         .await?;
         if interrupted_setup {
