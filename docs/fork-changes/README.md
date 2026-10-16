@@ -11,6 +11,7 @@
 | 0003 | [中文 Markdown 加粗边界](0003-cjk-emphasis.md) |
 | 0004 | [功能列表输出格式](0004-features-list.md) |
 | 0005 | [MCP 列表展示](0005-mcp-list.md) |
+| 0007 | [工作中显式 skill 正文注入](0007-steered-skills.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 修改已有改造时更新原记录，新改造使用下一个编号；编号不重用，不对应 PR 或固定 commit SHA。
