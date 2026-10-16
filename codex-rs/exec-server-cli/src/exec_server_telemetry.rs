@@ -29,7 +29,7 @@ pub(crate) fn init(
     let otel = match config {
         Some(config) => codex_core::otel_init::build_provider(
             config,
-            env!("CARGO_PKG_VERSION"),
+            codex_build_info::BuildInfo::package_version(),
             Some(OTEL_SERVICE_NAME),
             DEFAULT_ANALYTICS_ENABLED,
         )
