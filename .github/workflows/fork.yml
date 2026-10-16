@@ -293,6 +293,17 @@ jobs:
           # subscriber isolated from the other skill tests.
           cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::skills:: -- --test-threads=1
           cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all steered_explicit_only_skill_respects_blocked_queued_prompt
+      - name: 验证模型容量错误的无限退避重试
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: |
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-api --lib telemetry::tests
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib responses_retry::tests
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib guardian_review_retries_transient_session_failure_then_approves
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::retry_after:: -- --test-threads=1
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all pre_sampling_compact_advised_errors_fall_back_then_retry_on_selected_model
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all manual_remote_compact_advice_respects_retry_limit
+          cargo test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all review_terminal_error_preserves_lifecycle_order
       - name: 上传测试构建耗时报告
         uses: actions/upload-artifact@v7.0.0
         if: always()
