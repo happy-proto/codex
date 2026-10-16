@@ -2641,6 +2641,7 @@ dependencies = [
  "sys-locale",
  "tar",
  "tempfile",
+ "textwrap 0.16.2",
  "tikv-jemallocator",
  "tokio",
  "tokio-tungstenite",
