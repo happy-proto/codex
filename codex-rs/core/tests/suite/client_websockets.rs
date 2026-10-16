@@ -61,6 +61,7 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_response_created;
 use core_test_support::responses::start_websocket_server;
 use core_test_support::responses::start_websocket_server_with_headers;
+use core_test_support::responses::websocket_accept_config;
 use core_test_support::responses_metadata as test_responses_metadata;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::RecordingUserInstructionsProvider;
@@ -2236,7 +2237,10 @@ async fn responses_websocket_rotation_leaves_in_flight_response_intact() {
     let (release, released) = tokio::sync::oneshot::channel();
     let server_task = tokio::spawn(async move {
         let (tcp, _) = listener.accept().await.unwrap();
-        let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        let mut socket =
+            tokio_tungstenite::accept_async_with_config(tcp, Some(websocket_accept_config()))
+                .await
+                .unwrap();
         socket.next().await.unwrap().unwrap();
         socket
             .send(tokio_tungstenite::tungstenite::Message::Text(
@@ -2267,7 +2271,10 @@ async fn responses_websocket_rotation_leaves_in_flight_response_intact() {
             }
         }
         let (tcp, _) = listener.accept().await.unwrap();
-        let mut socket = tokio_tungstenite::accept_async(tcp).await.unwrap();
+        let mut socket =
+            tokio_tungstenite::accept_async_with_config(tcp, Some(websocket_accept_config()))
+                .await
+                .unwrap();
         let request = socket.next().await.unwrap().unwrap();
         let body: serde_json::Value = serde_json::from_str(request.to_text().unwrap()).unwrap();
         for event in [ev_response_created("resp-2"), ev_completed("resp-2")] {
