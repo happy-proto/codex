@@ -1172,6 +1172,8 @@ See the Codex keymap documentation for supported actions and examples."
         let mut pending_resize: Option<(ratatui::layout::Size, Instant)> = None;
         let mut listen_for_app_server_events = true;
         let mut reconnect = None;
+        let mut generation_speed_poll = tokio::time::interval(Duration::from_secs(1));
+        generation_speed_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut waiting_for_initial_session_configured = wait_for_initial_session_configured;
         let mut waiting_for_initial_session_header = true;
 
@@ -1264,6 +1266,10 @@ See the Codex keymap documentation for supported actions and examples."
                 .and_then(|interval| app.rate_limit_refresh_state.poll_deadline(interval));
             let thread_name_poll_deadline = app.thread_name_poll_deadline();
             let control = select! {
+                _ = generation_speed_poll.tick(), if app.chat_widget.live_generation_speed_target().is_some() => {
+                    app.refresh_live_generation_speed();
+                    AppRunControl::Continue
+                }
                 result = async {
                     match app.daemon_restart.as_mut() {
                         Some(task) => task.await,

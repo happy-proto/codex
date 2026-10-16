@@ -322,6 +322,23 @@ impl Session {
             .set_turn_started_at_unix_ms(turn_started_at_unix_ms);
         let token_usage_at_turn_start = self.total_token_usage().await.unwrap_or_default();
 
+        let generation_speed_reporter = if task_kind == TaskKind::Regular
+            && let Some(state_db) = self.state_db()
+        {
+            Some(
+                turn_context
+                    .turn_timing_state
+                    .start_generation_speed_reporter(
+                        state_db,
+                        self.thread_id,
+                        turn_context.sub_id.clone(),
+                    )
+                    .await,
+            )
+        } else {
+            None
+        };
+
         let cancellation_token = CancellationToken::new();
         let done = Arc::new(Notify::new());
 
@@ -382,6 +399,7 @@ impl Session {
             codex.turn.token_usage.total_tokens = field::Empty,
         );
         let storage_originator = AuthStorageOriginator::from_client_name(&turn_context.originator);
+        let generation_speed_reporter_for_task = generation_speed_reporter.clone();
         let task_future = async move {
             let ctx_for_finish = Arc::clone(&ctx);
             let task_result = task_for_run
@@ -393,6 +411,11 @@ impl Session {
                 )
                 .instrument(trace_span!("session_task.run"))
                 .await;
+            // Finalization can start a queued turn. Stop and join the old publisher first,
+            // including any initialization retry that could claim the next turn's snapshot.
+            if let Some(reporter) = generation_speed_reporter_for_task {
+                reporter.stop().await;
+            }
             let sess = Arc::clone(&session);
             // Private reviewers save their transcript together with the terminal event.
             // Errors and cancellation retain their existing save path.
@@ -428,6 +451,7 @@ impl Session {
         let running_task = RunningTask {
             done,
             handle: AbortOnDropHandle::new(handle),
+            generation_speed_reporter,
             kind: task_kind,
             task,
             cancellation_token,
@@ -875,6 +899,76 @@ impl Session {
         };
         let saved_guardian_completion =
             matches!(event, EventMsg::TurnComplete(_)) && self.is_private_guardian_reviewer().await;
+        if !matches!(
+            &turn_context.session_source,
+            codex_protocol::protocol::SessionSource::SubAgent(_)
+        ) && let Some(state_db) = self.state_db()
+        {
+            let totals =
+                matches!(&event, EventMsg::TurnComplete(completed) if completed.error.is_none())
+                    .then(|| turn_context.turn_timing_state.generation_speed_totals())
+                    .flatten();
+            let result = tokio::time::timeout(Duration::from_millis(200), async {
+                match (totals, started_at, completed_at, duration_ms) {
+                    (
+                        Some((output_tokens, request_duration_us)),
+                        Some(started_at),
+                        Some(completed_at),
+                        Some(duration_ms),
+                    ) => {
+                        tracing::info!(
+                            event.name = "codex.generation_speed.persistence",
+                            thread_id = %self.thread_id,
+                            turn_id = %turn_context.sub_id,
+                            action = "save",
+                            output_tokens,
+                            request_duration_us,
+                            "generation speed persistence started"
+                        );
+                        state_db
+                            .save_generation_speed(
+                                self.thread_id,
+                                &turn_context.sub_id,
+                                output_tokens,
+                                request_duration_us,
+                                codex_state::GenerationSpeedCompletion {
+                                    started_at,
+                                    completed_at,
+                                    duration_ms,
+                                },
+                            )
+                            .await
+                    }
+                    _ => {
+                        tracing::info!(
+                            event.name = "codex.generation_speed.persistence",
+                            thread_id = %self.thread_id,
+                            turn_id = %turn_context.sub_id,
+                            action = "clear",
+                            has_totals = totals.is_some(),
+                            ?started_at,
+                            ?completed_at,
+                            ?duration_ms,
+                            "generation speed persistence started"
+                        );
+                        state_db
+                            .clear_generation_speed(self.thread_id, &turn_context.sub_id)
+                            .await
+                    }
+                }
+            })
+            .await;
+            match result {
+                Ok(Ok(())) => tracing::info!(
+                    event.name = "codex.generation_speed.persistence_completed",
+                    thread_id = %self.thread_id,
+                    turn_id = %turn_context.sub_id,
+                    "generation speed persistence completed"
+                ),
+                Ok(Err(err)) => tracing::info!(%err, "generation speed persistence skipped"),
+                Err(_) => tracing::info!("generation speed persistence timed out"),
+            }
+        }
         if !saved_guardian_completion {
             self.send_event(turn_context.as_ref(), event.clone()).await;
         }
@@ -948,6 +1042,10 @@ impl Session {
         error: Option<ErrorEvent>,
     ) {
         let sub_id = task.turn_context.sub_id.clone();
+        // Also join the publisher when the sampling task needs a forced abort.
+        if let Some(reporter) = &task.generation_speed_reporter {
+            reporter.stop().await;
+        }
         if task.cancellation_token.is_cancelled() {
             self.emit_turn_abort_lifecycle(reason, task.turn_context.extension_data.as_ref())
                 .await;
