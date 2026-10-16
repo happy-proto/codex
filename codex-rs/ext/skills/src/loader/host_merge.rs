@@ -226,7 +226,21 @@ fn merge_host_skill_root_snapshots(snapshots: Vec<HostSkillRootSnapshot>) -> Ski
     }
 
     let mut seen_paths = HashSet::new();
-    skills.retain(|skill| seen_paths.insert(skill.path_to_skills_md.clone()));
+    let overridden_fork_skills = skills
+        .iter()
+        .filter(|skill| skill.scope != SkillScope::System)
+        .filter(|skill| {
+            matches!(
+                skill.name.as_str(),
+                "open-browser-use" | "open-computer-use"
+            )
+        })
+        .map(|skill| skill.name.clone())
+        .collect::<HashSet<_>>();
+    skills.retain(|skill| {
+        !(skill.scope == SkillScope::System && overridden_fork_skills.contains(&skill.name))
+            && seen_paths.insert(skill.path_to_skills_md.clone())
+    });
     let retained_paths = skills
         .iter()
         .map(|skill| skill.path_to_skills_md.clone())
