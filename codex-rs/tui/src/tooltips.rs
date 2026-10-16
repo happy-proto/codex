@@ -162,7 +162,7 @@ pub(crate) fn render_tooltip(mut template: &str, keymap: Option<&RuntimeKeymap>)
 
 pub(crate) mod announcement {
     use crate::tooltips::ANNOUNCEMENT_TIP_URL;
-    use crate::version::CODEX_CLI_VERSION;
+    use crate::version::cli_version;
     use chrono::NaiveDate;
     use chrono::Utc;
     use codex_http_client::ClientRouteClass;
@@ -289,7 +289,7 @@ pub(crate) mod announcement {
                         .target_oses
                         .as_ref()
                         .is_none_or(|target_oses| target_oses.contains(&CURRENT_OS));
-                    tip.version_matches(CODEX_CLI_VERSION)
+                    tip.version_matches(cli_version())
                         && tip.date_matches(today)
                         && tip.target_app == "cli"
                         && plan_matches
@@ -563,7 +563,7 @@ from_date = "2000-01-01"
 # Example announcement tips for Codex TUI.
 # Each [[announcements]] entry is evaluated in order; the last matching one is shown.
 # Dates are UTC, formatted as YYYY-MM-DD. The from_date is inclusive and the to_date is exclusive.
-# version_regex matches against the CLI version (env!("CARGO_PKG_VERSION")); omit to apply to all versions.
+# version_regex matches against the running CLI package version; omit to apply to all versions.
 # target_app specify which app should display the announcement (cli, vsce, ...).
 # target_plan_types optionally restricts the announcement to plan types like ["plus", "pro"].
 # target_oses optionally restricts the announcement to operating systems like ["macos", "windows"].
