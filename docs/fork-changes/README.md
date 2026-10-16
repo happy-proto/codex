@@ -7,6 +7,7 @@
 | 编号 | 改造点 |
 | --- | --- |
 | 0001 | [独立分发、更新和安装](0001-distribution-and-updates.md) |
+| 0013 | [发布版本与编译缓存分离](0013-build-cache-stability.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 同步上游使用独立的 [上游同步 skill](../../.agents/skills/codex-upstream-sync/SKILL.md)。

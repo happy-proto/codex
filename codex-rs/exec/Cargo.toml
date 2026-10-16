@@ -64,6 +64,7 @@ ts-rs = { workspace = true, features = [
     "no-serde-warnings",
 ] }
 uuid = { workspace = true }
+codex-build-info.workspace = true
 
 
 [dev-dependencies]
