@@ -85,6 +85,7 @@ pub(crate) struct RunningTask {
     pub(crate) task: Arc<dyn AnySessionTask>,
     pub(crate) cancellation_token: CancellationToken,
     pub(crate) handle: AbortOnDropHandle<()>,
+    pub(crate) generation_speed_reporter: Option<crate::generation_speed::GenerationSpeedReporter>,
     pub(crate) turn_context: Arc<TurnContext>,
     pub(crate) _agent_execution_guard: Option<AgentExecutionGuard>,
     /// Follows the task into whichever finalizer claims its terminal event.
