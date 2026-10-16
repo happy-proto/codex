@@ -14,7 +14,7 @@ pub struct ResumeApprovalPreset {
 }
 
 #[derive(Parser, Clone, Debug)]
-#[command(version)]
+#[command(version = codex_build_info::BuildInfo::package_version())]
 pub struct Cli {
     /// Internal: launching CLI that handles daemon updates after the TUI exits.
     #[clap(skip)]
