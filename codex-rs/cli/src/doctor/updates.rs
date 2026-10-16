@@ -79,7 +79,11 @@ pub(super) async fn updates_check(config: &Config) -> DoctorCheck {
     match fetch_latest_version(&client, &install_context).await {
         Ok(latest_version) => {
             details.push(format!("latest version: {latest_version}"));
-            if is_newer(&latest_version, env!("CARGO_PKG_VERSION")) == Some(true) {
+            if is_newer(
+                &latest_version,
+                codex_build_info::BuildInfo::package_version(),
+            ) == Some(true)
+            {
                 details.push("latest version status: newer version is available".to_string());
             } else {
                 details.push("latest version status: current version is not older".to_string());
@@ -483,7 +487,10 @@ where
             .request(Method::GET, url)
             .header(
                 http::header::USER_AGENT,
-                concat!("codex-doctor/", env!("CARGO_PKG_VERSION")),
+                format!(
+                    "codex-doctor/{}",
+                    codex_build_info::BuildInfo::package_version()
+                ),
             )
             .send()
             .await
