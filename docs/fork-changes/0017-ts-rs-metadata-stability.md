@@ -25,6 +25,12 @@
 `ts-rs` 三次，对照原版与修复版的 `.rmeta` 摘要。macOS 原版三个摘要不同，修复版
 三个摘要相同；Linux/WSL 也复现同样差别。有限次数样本只证明该路径和所选输入。
 
+WSL 上的实际 workspace 对照另用 `cargo check --release -p codex-protocol`，
+只清理 `ts-rs` 后重复三次检查，保持其它依赖产物。原版的 `ts-rs`、absolute-path 和
+protocol 各自产生三个不同摘要，修复后三层各自保持一个摘要，验证变化沿真实依赖图
+传播。小型下游的 sccache 0.18.0 对照中，强制重编译上游后，原版连续三次 miss，
+修复版连续三次 hit；这些验证不替代平台发布构建的耗时对照。
+
 `--patched-macros codex-rs/vendor/ts-rs-macros` 可直接验证实际维护的副本，
 并保存源码摘要，防止只测了等价的临时补丁却遗漏正式依赖。默认禁用 sccache，
 避免把恢复的同一对象误当成确定性证据。完整发布构建仍负责验证真实依赖图和包行为。
