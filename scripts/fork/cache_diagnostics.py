@@ -39,6 +39,8 @@ FLAGS = {
     "rate_limit": "rate limit",
     "quota": "quota",
     "expired": "expired",
+    "lookup_non_ok": "getcacheentrydownloadurl returns non-ok",
+    "blob_not_found": "blobnotfound",
 }
 
 
@@ -50,7 +52,7 @@ def file_digest(path: Path) -> dict:
     return {"bytes": path.stat().st_size, "sha256": digest.hexdigest()}
 
 
-def classify_error(text: str, known_keys: set[str]) -> dict:
+def classify_error(text: str, known_keys: set[str], *, key_context: str = "") -> dict:
     first = text.split(maxsplit=1)[0] if text else ""
     status = re.search(r"\bstatus(?:_code)?\s*[:=]\s*([1-5][0-9]{2})\b", text)
     return {
@@ -59,7 +61,9 @@ def classify_error(text: str, known_keys: set[str]) -> dict:
         "flags": sorted(
             name for name, phrase in FLAGS.items() if phrase in text.lower()
         ),
-        "keys": sorted(set(re.findall(r"\b[a-f0-9]{64}\b", text)) & known_keys),
+        "keys": sorted(
+            set(re.findall(r"\b[a-f0-9]{64}\b", text + " " + key_context)) & known_keys
+        ),
     }
 
 
@@ -88,6 +92,8 @@ def summarize(log: Path, cwd: Path) -> dict:
     pending_arguments = {}
     pending_hash_seconds = {}
     raw_errors = []
+    raw_read_errors = []
+    raw_storage_read_failures = []
     event_pattern = re.compile(r"\[([A-Za-z_][A-Za-z0-9_.-]*)\]: (.*)")
     with log.open(errors="replace") as stream:
         for line in stream:
@@ -100,6 +106,17 @@ def summarize(log: Path, cwd: Path) -> dict:
                         line.split("Error executing cache write: ", 1)[1].strip(),
                     )
                 )
+            if "sccache::cache::cache" in line and "Got unexpected error: " in line:
+                raw_read_errors.append(
+                    (
+                        observed_at,
+                        line.split("Got unexpected error: ", 1)[1].strip(),
+                    )
+                )
+            if "opendal::services" in line and (
+                failure := re.search(r": (?:read|Reader::read) failed (.*)", line)
+            ):
+                raw_storage_read_failures.append((observed_at, failure[1], line))
             match = event_pattern.search(line)
             if not match:
                 continue
@@ -145,11 +162,28 @@ def summarize(log: Path, cwd: Path) -> dict:
         classify_error(error, set(records)) | {"observed_at": stamp}
         for stamp, error in raw_errors
     ]
+    read_errors = [
+        classify_error(error, set(records)) | {"observed_at": stamp}
+        for stamp, error in raw_read_errors
+    ]
+    storage_read_failures = [
+        classify_error(error, set(records), key_context=context)
+        | {"observed_at": stamp}
+        for stamp, error, context in raw_storage_read_failures
+    ]
     return {
         "schema_version": 1,
         "units": list(records.values()),
         "write_errors": errors,
         "write_error_kinds": dict(Counter(error["kind"] for error in errors)),
+        "backend_read_errors": read_errors,
+        "backend_read_error_kinds": dict(
+            Counter(error["kind"] for error in read_errors)
+        ),
+        "storage_read_failures": storage_read_failures,
+        "storage_read_failure_kinds": dict(
+            Counter(error["kind"] for error in storage_read_failures)
+        ),
     }
 
 

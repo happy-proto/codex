@@ -111,7 +111,7 @@ jobs:
       - name: 记录 sccache 缓存键与存储错误
         run: |
           mkdir -p "$RUNNER_TEMP/fork-sccache"
-          echo 'SCCACHE_LOG=sccache::server=debug,sccache::compiler::compiler=debug' >> "$GITHUB_ENV"
+          echo 'SCCACHE_LOG=sccache::server=debug,sccache::compiler::compiler=debug,sccache::cache::cache=warn,opendal::services=warn' >> "$GITHUB_ENV"
           echo "SCCACHE_ERROR_LOG=$RUNNER_TEMP/fork-sccache/daemon.log" >> "$GITHUB_ENV"
           echo 'SCCACHE_LOG_MILLIS=1' >> "$GITHUB_ENV"
       - name: 配置 sccache 编译缓存
@@ -228,7 +228,7 @@ jobs:
       - name: 记录 sccache 缓存键与存储错误
         run: |
           mkdir -p "$RUNNER_TEMP/fork-sccache"
-          echo 'SCCACHE_LOG=sccache::server=debug,sccache::compiler::compiler=debug' >> "$GITHUB_ENV"
+          echo 'SCCACHE_LOG=sccache::server=debug,sccache::compiler::compiler=debug,sccache::cache::cache=warn,opendal::services=warn' >> "$GITHUB_ENV"
           echo "SCCACHE_ERROR_LOG=$RUNNER_TEMP/fork-sccache/daemon.log" >> "$GITHUB_ENV"
           echo 'SCCACHE_LOG_MILLIS=1' >> "$GITHUB_ENV"
       - name: 配置 sccache 编译缓存
