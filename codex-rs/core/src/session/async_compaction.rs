@@ -3,6 +3,7 @@
 //! Snapshot capture and launch registration hold session state; prompt preparation does not.
 
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 
 use crate::compact_remote_v2::BackgroundCompactionCandidate;
@@ -34,6 +35,9 @@ struct CompactionAttempt {
 #[derive(Default)]
 pub(crate) struct AsyncCompactionState {
     last_attempt: Option<CompactionAttempt>,
+    attempt_sequence: u64,
+    consecutive_failures: u32,
+    retry_after: Option<tokio::time::Instant>,
     // Keep prepared request state off the turn stack while checkpoints await adoption.
     result: Option<oneshot::Receiver<Box<BackgroundCompactionCandidate>>>,
     tasks: TaskTracker,
@@ -84,7 +88,7 @@ pub(super) async fn maybe_start(
     }
 
     let base_instructions = sess.get_prompt_base_instructions().await;
-    let (prepared_input, tasks, shutdown_cancellation, launch, send, background_span) = {
+    let (prepared_input, tasks, shutdown_cancellation, launch, send, background_span, attempt_sequence) = {
         let mut state = sess.state.lock().await;
         let model_info = &step_context.settings.model_info;
         let attempt = CompactionAttempt {
@@ -93,10 +97,18 @@ pub(super) async fn maybe_start(
             compaction_hash: model_info.comp_hash.clone(),
             auth_owner_generation,
         };
+        let same_attempt = state.async_compaction.last_attempt.as_ref() == Some(&attempt);
+        // Pending and successful requests keep the same-attempt guard; failed requests
+        // may retry at a later checkpoint after their backoff expires.
+        let retry_blocked = same_attempt
+            && state
+                .async_compaction
+                .retry_after
+                .is_none_or(|retry_after| tokio::time::Instant::now() < retry_after);
         // Stop blocks new launches; already-running compaction remains session-owned.
         if turn_cancellation.is_cancelled()
             || state.shutting_down
-            || state.async_compaction.last_attempt.as_ref() == Some(&attempt)
+            || retry_blocked
             || state.history.annotated_items().is_empty()
             || sess.services.model_client.auth_owner_generation() != auth_owner_generation
         {
@@ -117,18 +129,37 @@ pub(super) async fn maybe_start(
         let shutdown_cancellation = state.async_compaction.shutdown_cancellation.clone();
         // Register before unlocking so shutdown cannot finish between capture and spawning.
         let launch = tasks.token();
+        if !same_attempt {
+            state.async_compaction.consecutive_failures = 0;
+        }
+        state.async_compaction.retry_after = None;
+        state.async_compaction.attempt_sequence =
+            state.async_compaction.attempt_sequence.wrapping_add(1);
+        let attempt_sequence = state.async_compaction.attempt_sequence;
         let background_span = tracing::info_span!(
             "async_compaction",
             thread_id = %sess.thread_id,
             turn_id = %turn_context.sub_id,
             model = %model_info.slug,
             history_version = attempt.history_version,
+            attempt_sequence,
             prefix_len = state.history.annotated_items().len(),
+        );
+        info!(
+            target: "codex_core::async_compaction",
+            thread_id = %sess.thread_id,
+            turn_id = %turn_context.sub_id,
+            stage = "started",
+            attempt_sequence,
+            retry_number = state.async_compaction.consecutive_failures,
+            active_context_tokens = token_status.active_context_tokens,
+            threshold_percent = turn_context.config.async_compaction_threshold_percent,
+            "后台压缩已启动"
         );
         state.async_compaction.last_attempt = Some(attempt);
         let (send, result) = oneshot::channel();
         state.async_compaction.result = Some(result);
-        (prepared_input, tasks, shutdown_cancellation, launch, send, background_span)
+        (prepared_input, tasks, shutdown_cancellation, launch, send, background_span, attempt_sequence)
     };
 
     // Prepare outside the lock on the foreground task so its step cannot advance before tool
@@ -138,15 +169,6 @@ pub(super) async fn maybe_start(
     let task_step = Arc::clone(step_context);
     let cutoff_world_state = Arc::clone(world_state);
     let storage_originator = AuthStorageOriginator::from_client_name(&turn_context.originator);
-    info!(
-        target: "codex_core::async_compaction",
-        thread_id = %sess.thread_id,
-        turn_id = %turn_context.sub_id,
-        stage = "started",
-        active_context_tokens = token_status.active_context_tokens,
-        threshold_percent = turn_context.config.async_compaction_threshold_percent,
-        "后台压缩已启动"
-    );
     let task = async move {
         let started = Instant::now();
         match run_background_compaction(
@@ -170,13 +192,30 @@ pub(super) async fn maybe_start(
                 );
             }
             Err(error) => {
+                let retry_delay = {
+                    let mut state = task_session.state.lock().await;
+                    if state.shutting_down
+                        || state.async_compaction.attempt_sequence != attempt_sequence
+                    {
+                        None
+                    } else {
+                        let async_state = &mut state.async_compaction;
+                        async_state.consecutive_failures =
+                            async_state.consecutive_failures.saturating_add(1);
+                        let exponent = async_state.consecutive_failures.saturating_sub(1).min(6);
+                        let delay = Duration::from_secs((1_u64 << exponent).min(60));
+                        async_state.retry_after = Some(tokio::time::Instant::now() + delay);
+                        Some(delay)
+                    }
+                };
                 info!(
                     target: "codex_core::async_compaction",
                     stage = "failed",
                     %error,
-                    retry_same_attempt = false,
+                    retry_same_attempt = retry_delay.is_some(),
+                    retry_after_ms = retry_delay.map(|delay| delay.as_millis() as u64),
                     duration_ms = started.elapsed().as_secs_f64() * 1000.0,
-                    "后台压缩失败，丢弃本次尝试"
+                    "后台压缩失败"
                 );
             }
         }
