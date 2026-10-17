@@ -26,12 +26,16 @@
 - [启动警告测试](../../codex-rs/tui/src/app/tests/startup_warnings_tests.rs) 和
   [会话生命周期测试](../../codex-rs/tui/src/app/tests/session_lifecycle_requests.rs)
   继续覆盖重复警告、旧目录结果和主动刷新路径。
+- [默认发布 CI](../../.github/workflows/fork.yml) 的完整验证运行启动相关及会话生命周期
+  测试；仅请求其它定向测试时不额外运行这组回归。
 
 真实 CLI 的补充验证可在隔离配置和临时项目中，通过 RPC 代理仅延迟第二次 Skills
 响应，并用 PTY 比较输入与实际屏幕回显。该实验无需模型回合，可区分等待响应引起的
 事件循环停顿与终端、输入法或整机调度问题。
 
 ## 上游同步
+
+对应上游问题：[openai/codex#54816](https://github.com/openai/codex/issues/54816)。
 
 上游 [#18370](https://github.com/openai/codex/pull/18370) 将首次预取移到后台，
 同步时仍需检查会话配置完成后的自动刷新是否沿用同步 `ListSkills` 路径。
