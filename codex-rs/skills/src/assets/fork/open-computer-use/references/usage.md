@@ -228,6 +228,21 @@ Every non-fixture `drag` result includes a text item that begins `Drag delivered
 
 When the gate is not enabled, treat window-server drags as unavailable and reach the same outcome another way: copy or move files with a shell command instead of a Finder drag, use `set_value` or keyboard selection instead of drag-selecting text, and use the app's own window controls instead of dragging a title bar.
 
+## Software Cursor
+
+The software cursor keeps a window-relative anchor for its target point. During travel, settle, click
+feedback and idle, it follows changes to the target window's frame. If the window moves during travel,
+the visible tip lands at the new position immediately, without continuing toward the old position.
+
+Window frames are read on a background worker at up to 30 Hz, with at most one read in flight. Rendering
+uses the latest cached frame, so a slow Accessibility response does not block the cursor. The snapshot's
+AX window element is preferred; `CGWindowListCopyWindowInfo` is used only when no AX element is available,
+because it can report an old origin after a move. A failed read keeps the last usable frame. Tracking is
+released when the cursor is cleared or its idle timeout expires.
+
+This follows the window's position, not layout changes inside it. Refresh app state after a layout change
+before choosing another target. Input delivery continues to use the existing action paths.
+
 ## Platform Notes
 
 ### macOS
