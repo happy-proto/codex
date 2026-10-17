@@ -20,7 +20,8 @@ use codex_otel::auth_storage::AuthStorageOriginator;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
-use tracing::debug;
+use tracing::Instrument;
+use tracing::info;
 
 #[derive(PartialEq, Eq)]
 struct CompactionAttempt {
@@ -131,6 +132,7 @@ pub(super) async fn maybe_start(
     let cutoff_world_state = Arc::clone(world_state);
     let storage_originator = AuthStorageOriginator::from_client_name(&turn_context.originator);
     let task = async move {
+        let started = Instant::now();
         match run_background_compaction(
             &task_session,
             task_step,
@@ -142,14 +144,21 @@ pub(super) async fn maybe_start(
         .await
         {
             Ok(candidate) => {
-                let _ = send.send(Box::new(candidate));
+                let delivered = send.send(Box::new(candidate)).is_ok();
+                info!(
+                    target: "codex_core::async_compaction",
+                    stage = "ready",
+                    delivered,
+                    duration_ms = started.elapsed().as_secs_f64() * 1000.0,
+                    "后台压缩结果已生成"
+                );
             }
             Err(error) => {
                 debug!(%error, "discarding unsuccessful background compaction");
             }
         }
     };
-    tasks.spawn(storage_originator.scope(task));
+    tasks.spawn(storage_originator.scope(task.instrument(background_span)));
     drop(launch);
 }
 
@@ -169,8 +178,24 @@ pub(super) async fn take_ready(
             return None;
         }
         // try_recv consumes a closed receiver; awaiting it later would panic.
-        Err(oneshot::error::TryRecvError::Closed) => return None,
+        Err(oneshot::error::TryRecvError::Closed) => {
+            info!(target: "codex_core::async_compaction", thread_id = %sess.thread_id,
+                turn_id = %turn_context.sub_id, stage = "receiver_closed",
+                "后台压缩接收器已关闭，检查点清理结果槽");
+            return None;
+        }
     };
+    if candidate.prefix.generation != state.history.history_version() {
+        info!(target: "codex_core::async_compaction", thread_id = %sess.thread_id,
+            turn_id = %turn_context.sub_id, stage = "rejected", reason = "history_version",
+            captured_version = candidate.prefix.generation,
+            current_version = state.history.history_version(),
+            "检查点丢弃过期后台压缩结果");
+    } else {
+        info!(target: "codex_core::async_compaction", thread_id = %sess.thread_id,
+            turn_id = %turn_context.sub_id, stage = "collected", source = "checkpoint",
+            "检查点取得后台压缩结果");
+    }
     (candidate.prefix.generation == state.history.history_version()).then_some(candidate)
 }
 
@@ -183,7 +208,13 @@ pub(crate) async fn wait_for_pending(
     }
     let result = {
         let mut state = sess.state.lock().await;
-        let result = state.async_compaction.result.take()?;
+        let Some(result) = state.async_compaction.result.take() else {
+            info!(target: "codex_core::async_compaction", thread_id = %sess.thread_id,
+                turn_id = %step_context.turn.sub_id, stage = "no_pending_result",
+                attempted = state.async_compaction.last_attempt.is_some(),
+                "前台压缩没有可等待的后台结果");
+            return None;
+        };
         let model = &step_context.settings.model_info;
         let attempt = state.async_compaction.last_attempt.as_ref()?;
         if attempt.history_version != state.history.history_version()
@@ -191,12 +222,28 @@ pub(crate) async fn wait_for_pending(
             || attempt.compaction_hash != model.comp_hash
             || attempt.auth_owner != sess.services.model_client.auth_owner()
         {
+            info!(target: "codex_core::async_compaction", thread_id = %sess.thread_id,
+                turn_id = %step_context.turn.sub_id, stage = "rejected", source = "pending",
+                history_changed = attempt.history_version != state.history.history_version(),
+                model_changed = attempt.model_slug != model.slug,
+                compaction_hash_changed = attempt.compaction_hash != model.comp_hash,
+                auth_changed = attempt.auth_owner != sess.services.model_client.auth_owner(),
+                "前台压缩丢弃不兼容的后台尝试");
             return None;
         }
         result
     };
     // Release session state while the request finishes and charges its usage.
-    result.await.ok()
+    let started = Instant::now();
+    info!(target: "codex_core::async_compaction", thread_id = %sess.thread_id,
+        turn_id = %step_context.turn.sub_id, stage = "waiting",
+        "前台压缩开始等待后台结果");
+    let candidate = result.await.ok();
+    info!(target: "codex_core::async_compaction", thread_id = %sess.thread_id,
+        turn_id = %step_context.turn.sub_id, stage = "wait_finished",
+        candidate_ready = candidate.is_some(), duration_ms = started.elapsed().as_secs_f64() * 1000.0,
+        "前台压缩结束等待后台结果");
+    candidate
 }
 
 pub(crate) async fn shutdown_cancellation(sess: &Session) -> CancellationToken {
