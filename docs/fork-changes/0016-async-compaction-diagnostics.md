@@ -10,7 +10,8 @@
 - [后台任务与检查点](../../codex-rs/core/src/session/async_compaction.rs) 显式携带
   thread、turn、模型、历史版本和前缀长度的 tracing span，记录启动、结果生成与
   通道交付、失败、检查点消费、接收器关闭、等待及等待结束。失败日志说明同一
-  尝试不会重试；只追加历史不会使尝试去重键变化。
+  尝试能否重试和退避时间；只追加历史不会使尝试去重键变化。
+  [退避重试](0017-async-compaction-retry.md) 为每次请求增加序号，启动日志记录重试次数。
 - [响应收集](../../codex-rs/core/src/compact_remote_v2.rs) 在输出校验前记录响应 ID、
   输出总数和可识别的压缩项数量，区分服务端完成与客户端接受。
 - [候选安装](../../codex-rs/core/src/compact_remote_v2_installation.rs) 与
