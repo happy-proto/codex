@@ -21,6 +21,12 @@
 - 构建和测试共用 sccache 后端命名空间，由编译缓存键区分输入；关闭 incremental。
   Cargo 下载缓存独立维护，不缓存整个 target、bin 或每个 job 的编译对象闭包。
   两类缓存只允许默认分支写入，其它分支的手动验证只读。
+- Linux 发布构建与测试共用 Cargo 下载缓存，由默认分支的发布构建保存。
+  恢复步骤单独排除测试专用的编译参数，避免为同一批源码保存重复 archive；
+  它不改变后续 Cargo 命令的环境，也不影响 sccache 对真实编译参数的校验。
+- `ci-test` 保留 test profile 的 debug assertions，关闭调试符号并使用 256 个 codegen
+  units；这些设置由 workflow 全局环境传给测试。release 测试继续覆盖 release-only
+  代码，保持关闭 debug assertions，以未优化的 harness 缩短验证耗时。
 
 ## 入口和验证
 
@@ -46,6 +52,8 @@ runner 镜像升级与缓存改造分别验收，不把不同系统的运行当�
 
 - 记录源码 commit、Rust 源码树、内部和分发版本、工具链及 runner 镜像，核对对照条件。
 - 记录缓存键、命中结果、输入哈希和读取耗时、实际编译耗时及成功写入时间。
+- 为选定的 crate 记录显式 `-C` 编译选项，并保存 release 与 ci-test 的 profile 环境；
+  缺省选项不推断为关闭，用于核对实际编译条件，避免只看 workflow 声明。
 - 为 ts-rs、absolute-path、V8、code-mode、config、protocol、core 和 TUI 保存直接依赖产物的文件名与摘要，
   区分源码或编译参数变化与依赖产物变化。
 - 写入失败只保留存储错误类别、HTTP 状态和已知缓存键，不上传可能含签名 URL 的原始日志。
@@ -63,8 +71,10 @@ runner 镜像升级与缓存改造分别验收，不把不同系统的运行当�
 
 ### 构建中的实时快照
 
-[构建观察器](../../scripts/fork/build_observer.py) 包裹原有发布构建命令，每分钟向
-Actions 日志和 `fork-sccache/progress.ndjson` 输出一次快照，不改变 Cargo 参数：
+[构建观察器](../../scripts/fork/build_observer.py) 包裹原有发布构建命令；
+[测试入口](../../scripts/fork/cargo-observed.sh) 为每条 Cargo 测试命令复用同一观察器，
+不改变参数、工作目录、环境或退出状态。每分钟记录一次资源快照，终端显示摘要，
+完整明细写入 `fork-sccache/progress.ndjson`：
 
 - runner 的 CPU 数、load average、空闲磁盘，编译与链接进程的 CPU、RSS、活跃 crate。
 - macOS 的内存页计数、页大小、压缩页和 swap 使用量；Linux 的可用内存与 swap。
@@ -72,6 +82,13 @@ Actions 日志和 `fork-sccache/progress.ndjson` 输出一次快照，不改变 
 - 增量读取 daemon 日志，实时统计后端读取、存储读取和写入错误的类别与 HTTP 状态，
   包括未计入公开读取错误计数的 429。三个层级分别统计，不相加；不输出原始日志。
 - 构建退出码与经过时间；观测或 artifact 写入失败不能改变实际构建结果。
+- 每次命令使用独立 invocation ID，汇总时分别取其最终耗时，不能把采样经过时间相加。
+
+[构建汇总](../../scripts/fork/build_report.py) 生成同一 artifact 下的 `report.json`
+及 Actions job summary，显示缓存命中、不可缓存请求、后端读取错误、资源峰值和最慢
+Cargo 单元。读取全部带时间戳的 timing 报告，排除指向最后一次命令的别名，避免最后
+一条命令完全命中时把整轮测试误报成零秒。单元累计时长允许并行，不视为 job 总耗时；
+资源峰值来自周期采样，不能作为进程真实峰值的精确测量。
 
 进程 CPU 百分比来自 `ps`，是进程生命周期的平均值，不冒充采样窗口内的瞬时利用率。
 统计范围为整个 runner，包含 sccache daemon 启动的编译器；在共享 WSL 上运行时应避开

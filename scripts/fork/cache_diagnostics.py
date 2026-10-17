@@ -69,6 +69,35 @@ def classify_error(text: str, known_keys: set[str], *, key_context: str = "") ->
     }
 
 
+def codegen_options(arguments: list[str]) -> dict:
+    allowed = {
+        "opt-level",
+        "codegen-units",
+        "debuginfo",
+        "debug-assertions",
+        "lto",
+        "strip",
+    }
+    result = {}
+    values = iter(arguments)
+    for argument in values:
+        option = (
+            next(values, "")
+            if argument == "-C"
+            else argument[2:]
+            if argument.startswith("-C")
+            else ""
+        )
+        name, separator, value = option.partition("=")
+        if (
+            name in allowed
+            and separator
+            and re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", value)
+        ):
+            result[name] = value
+    return result
+
+
 def dependency_fingerprints(arguments: list[str], cwd: Path) -> dict:
     result = {}
     for i, argument in enumerate(arguments):
@@ -144,6 +173,7 @@ def summarize(log: Path, cwd: Path) -> dict:
                         json.dumps(arguments).encode()
                     ).hexdigest()
                     record["dependencies"] = dependency_fingerprints(arguments, cwd)
+                    record["codegen_options"] = codegen_options(arguments)
             elif crate in current:
                 record = current[crate]
                 if lookup := re.fullmatch(r"Cache (hit|miss) in ([0-9.]+)\s*s", event):
@@ -208,9 +238,14 @@ if __name__ == "__main__":
             "CARGO_INCREMENTAL",
             "CARGO_BUILD_JOBS",
             "CARGO_PROFILE_RELEASE_OPT_LEVEL",
+            "CARGO_PROFILE_RELEASE_CODEGEN_UNITS",
             "CARGO_PROFILE_RELEASE_LTO",
             "CARGO_PROFILE_RELEASE_DEBUG",
             "CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO",
+            "CARGO_PROFILE_CI_TEST_DEBUG",
+            "CARGO_PROFILE_CI_TEST_SPLIT_DEBUGINFO",
+            "CARGO_PROFILE_CI_TEST_CODEGEN_UNITS",
+            "RUSTC_WRAPPER",
         )
     }
     report["rustc"] = subprocess.check_output(

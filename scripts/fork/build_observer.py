@@ -13,6 +13,7 @@ import time
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 from cache_diagnostics import classify_error
 
@@ -31,6 +32,7 @@ COMPILERS = {
 COUNTERS = {
     "compile_requests",
     "requests_executed",
+    "requests_not_cacheable",
     "cache_hits",
     "cache_misses",
     "cache_read_errors",
@@ -196,8 +198,36 @@ def snapshot() -> dict:
     return result
 
 
+def progress_summary(record: dict) -> dict:
+    result = {
+        name: record[name]
+        for name in (
+            "invocation_id",
+            "observed_at",
+            "elapsed_seconds",
+            "exit_code",
+            "load_average",
+            "disk_free_gib",
+            "swap_used_mib",
+            "sccache",
+            "storage_errors",
+            "sample_unavailable",
+        )
+        if name in record
+    }
+    processes = record.get("processes", [])
+    result.update(
+        event="fork-build-progress",
+        compiler_count=len(processes),
+        compiler_rss_sum_mib=round(sum(item["rss_mib"] for item in processes), 1),
+        active_crates=sorted({item["crate"] for item in processes if "crate" in item}),
+    )
+    return result
+
+
 def observe(command: list[str], output: Path, interval: float) -> int:
     started = time.monotonic()
+    invocation_id = uuid4().hex
     try:
         output.parent.mkdir(parents=True, exist_ok=True)
         stream = output.open("a")
@@ -235,6 +265,7 @@ def observe(command: list[str], output: Path, interval: float) -> int:
                         record["storage_sample_unavailable"] = True
                 record.update(
                     event="fork-build-observation",
+                    invocation_id=invocation_id,
                     observed_at=datetime.now(UTC).isoformat(),
                     elapsed_seconds=round(time.monotonic() - started, 1),
                 )
@@ -249,8 +280,10 @@ def observe(command: list[str], output: Path, interval: float) -> int:
                 except OSError:
                     pass
                 try:
-                    print(line, flush=True)
-                except OSError:
+                    print(
+                        json.dumps(progress_summary(record), sort_keys=True), flush=True
+                    )
+                except Exception:  # noqa: BLE001, S110 - 日志失败不改变结果或输出原始异常。
                     pass
                 if code is not None:
                     return (

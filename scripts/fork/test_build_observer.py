@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -14,11 +15,105 @@ from build_observer import (
     cache_counters,
     compiler_processes,
     observe,
+    progress_summary,
     snapshot,
 )
 
 
 class BuildObserverTests(unittest.TestCase):
+    def test_console_summary_keeps_details_in_artifact(self):
+        summary = progress_summary(
+            {
+                "invocation_id": "build-1",
+                "elapsed_seconds": 3.5,
+                "exit_code": 7,
+                "private": "PRIVATE_SENTINEL",
+                "processes": [{"pid": 123, "rss_mib": 12.5, "crate": "codex_core"}],
+            }
+        )
+        self.assertEqual(summary["compiler_rss_sum_mib"], 12.5)
+        self.assertEqual(summary["active_crates"], ["codex_core"])
+        self.assertEqual(summary["exit_code"], 7)
+        self.assertNotIn("processes", summary)
+        self.assertNotIn("PRIVATE_SENTINEL", json.dumps(summary))
+
+    def test_appended_commands_have_separate_invocation_ids(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("build_observer.snapshot", side_effect=dict),
+        ):
+            output = Path(directory) / "progress.ndjson"
+            with patch(
+                "build_observer.progress_summary", side_effect=RuntimeError("PRIVATE")
+            ):
+                for status in (0, 7):
+                    self.assertEqual(
+                        observe(
+                            [sys.executable, "-c", f"raise SystemExit({status})"],
+                            output,
+                            0.01,
+                        ),
+                        status,
+                    )
+            records = [json.loads(line) for line in output.read_text().splitlines()]
+            self.assertEqual(len({record["invocation_id"] for record in records}), 2)
+            self.assertEqual(
+                [record["exit_code"] for record in records if "exit_code" in record],
+                [0, 7],
+            )
+            self.assertNotIn("PRIVATE", output.read_text())
+
+    def test_cargo_wrapper_preserves_arguments_environment_cwd_and_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scripts = root / "repo with spaces/scripts/fork"
+            scripts.mkdir(parents=True)
+            wrapper = scripts / "cargo-observed.sh"
+            shutil.copy2(Path(__file__).with_name(wrapper.name), wrapper)
+            (scripts / "build_observer.py").write_text(
+                "import os, pathlib, sys\n"
+                "assert sys.argv[1] == '--output' and sys.argv[3] == '--'\n"
+                "assert pathlib.Path(sys.argv[2]).resolve() == pathlib.Path(__file__).resolve().parents[2] / 'fork-sccache/progress.ndjson'\n"
+                "os.execvpe(sys.argv[4], sys.argv[4:], os.environ)\n"
+            )
+            binaries = root / "bin"
+            binaries.mkdir()
+            cargo = binaries / "cargo"
+            cargo.write_text(
+                f"#!{sys.executable}\n"
+                "import json, os, pathlib, sys\n"
+                "pathlib.Path(os.environ['FORK_TEST_CAPTURE']).write_text(json.dumps({'args': sys.argv[1:], 'cwd': os.getcwd(), 'debug': os.environ['CARGO_PROFILE_CI_TEST_DEBUG']}))\n"
+                "raise SystemExit(7)\n"
+            )
+            cargo.chmod(0o755)
+            capture = root / "args.json"
+            arguments = [
+                "test",
+                "--profile",
+                "ci-test",
+                "--",
+                "filter with spaces",
+                "$literal",
+            ]
+            result = subprocess.run(
+                [str(wrapper), *arguments],
+                check=False,
+                cwd=root,
+                env={
+                    **os.environ,
+                    "PATH": str(binaries) + os.pathsep + os.environ["PATH"],
+                    "FORK_TEST_CAPTURE": str(capture),
+                    "CARGO_PROFILE_CI_TEST_DEBUG": "0",
+                },
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 7, result.stderr)
+            self.assertEqual(
+                json.loads(capture.read_text()),
+                {"args": arguments, "cwd": str(root.resolve()), "debug": "0"},
+            )
+
     def test_live_storage_errors_are_incremental_and_private(self):
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / "daemon.log"

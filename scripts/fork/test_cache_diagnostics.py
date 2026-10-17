@@ -3,10 +3,35 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from cache_diagnostics import classify_error, summarize
+from cache_diagnostics import classify_error, codegen_options, summarize
 
 
 class CacheDiagnosticsTests(unittest.TestCase):
+    def test_compiler_options_exclude_private_link_arguments(self):
+        self.assertEqual(
+            codegen_options(
+                [
+                    "-C",
+                    "opt-level=0",
+                    "-Ccodegen-units=256",
+                    "-C",
+                    "debuginfo=0",
+                    "-C",
+                    "debug-assertions=on",
+                    "-C",
+                    "link-arg=PRIVATE_SENTINEL",
+                    "--cfg",
+                    "PRIVATE_SENTINEL",
+                ]
+            ),
+            {
+                "opt-level": "0",
+                "codegen-units": "256",
+                "debuginfo": "0",
+                "debug-assertions": "on",
+            },
+        )
+
     def test_cache_hit_has_no_compile_duration(self):
         with tempfile.TemporaryDirectory() as directory:
             cwd = Path(directory)
@@ -31,6 +56,9 @@ class CacheDiagnosticsTests(unittest.TestCase):
                 "codex_core",
                 "--extern",
                 f"dependency={dependency}",
+                "-Copt-level=0",
+                "-C",
+                "debuginfo=0",
             ]
             log = cwd / "daemon.log"
             log.write_text(
@@ -49,6 +77,9 @@ class CacheDiagnosticsTests(unittest.TestCase):
             self.assertEqual(first["lookup"], "miss")
             self.assertEqual(first["compile_seconds"], 492.44)
             self.assertTrue(first["stored"])
+            self.assertEqual(
+                first["codegen_options"], {"opt-level": "0", "debuginfo": "0"}
+            )
             self.assertEqual(
                 first["dependencies"]["dependency"]["file"], dependency.name
             )
