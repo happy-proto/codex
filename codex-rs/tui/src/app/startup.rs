@@ -1221,7 +1221,7 @@ See the Codex keymap documentation for supported actions and examples."
             event_stream_ms = %event_stream_started_at.elapsed().as_millis(),
             "tui startup initial frame scheduled"
         );
-        app.refresh_startup_skills(&app_server);
+        app.refresh_skills_in_background(&app_server);
         // Kick off a non-blocking rate-limit prefetch so the first `/status`
         // already has data and available reset credits can be surfaced, without
         // delaying the initial frame render.

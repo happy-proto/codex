@@ -1731,6 +1731,11 @@ impl App {
             } => {
                 self.handle_mcp_inventory_result(result, detail, thread_id);
             }
+            AppEvent::RefreshSessionSkills { cwd } => {
+                if !cwds_differ(&cwd, self.config.cwd.as_path()) {
+                    self.refresh_skills_in_background(app_server);
+                }
+            }
             AppEvent::SkillsListLoaded { result, .. } => {
                 self.handle_skills_list_result(
                     result.map_err(|err| color_eyre::eyre::eyre!(err)),
