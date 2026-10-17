@@ -68,6 +68,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--target", default="aarch64-apple-darwin")
+    parser.add_argument(
+        "--patched-macros", type=Path, help="用实际维护的宏源码作为修复组"
+    )
     args = parser.parse_args()
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=False)
@@ -160,12 +163,33 @@ def main() -> None:
     if macro["version"] != "11.1.0":
         raise ValueError("宏依赖版本未匹配仓库锁文件")
     vendor = root / "patched-macros"
-    shutil.copytree(Path(macro["manifest_path"]).parent, vendor)
-    patch_macro(vendor)
-    run(
-        ["cargo", "add", "--manifest-path", str(vendor / "Cargo.toml"), "indexmap@2"],
-        env,
-        root / "add-indexmap.log",
+    if args.patched_macros:
+        shutil.copytree(
+            args.patched_macros.resolve(),
+            vendor,
+            ignore=shutil.ignore_patterns("target", "Cargo.lock"),
+        )
+    else:
+        shutil.copytree(Path(macro["manifest_path"]).parent, vendor)
+        patch_macro(vendor)
+        run(
+            [
+                "cargo",
+                "add",
+                "--manifest-path",
+                str(vendor / "Cargo.toml"),
+                "indexmap@2",
+            ],
+            env,
+            root / "add-indexmap.log",
+        )
+    source_hashes = {
+        str(path.relative_to(vendor)): digest(path)
+        for path in sorted(vendor.rglob("*"))
+        if path.is_file() and (path.suffix == ".rs" or path.name == "Cargo.toml")
+    }
+    (root / "patched-source.json").write_text(
+        json.dumps(source_hashes, indent=2) + "\n"
     )
     results = []
     dependency_versions = {}
