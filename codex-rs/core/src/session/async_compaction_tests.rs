@@ -165,3 +165,168 @@ async fn cancelled_turn_skips_launch_but_preserves_existing_work(trigger: Compac
     assert_eq!(request.requests().len(), 1);
     shutdown(&sess).await;
 }
+
+#[test_case::test_case(1; "transient failure")]
+#[test_case::test_case(3; "consecutive failures back off")]
+#[test_case::test_case(8; "persistent failures cap backoff")]
+#[tokio::test]
+async fn failed_background_compaction_retries_after_backoff(failures: usize) {
+    let server = responses::start_mock_server().await;
+    let mut provider = codex_model_provider_info::built_in_model_providers(None)["openai"].clone();
+    provider.base_url = Some(format!("{}/v1", server.uri()));
+    provider.supports_websockets = false;
+    let server_uri = server.uri();
+    let (sess, turn, _events) =
+        crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
+            CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+            Vec::new(),
+            move |config| {
+                config.model = Some("gpt-5.2".to_string());
+                config.model_context_window = Some(100_000);
+                config.model_auto_compact_token_limit = Some(90_000);
+                config.model_provider = provider;
+                config.chatgpt_base_url = server_uri;
+                config.features.enable(Feature::AsyncCompaction).unwrap();
+                config.features.disable(Feature::TokenBudget).unwrap();
+            },
+        )
+        .await;
+    let invalid = responses::sse(vec![
+        responses::ev_assistant_message("invalid", "missing compaction output"),
+        responses::ev_completed("invalid"),
+    ]);
+    let valid = responses::sse(vec![
+        serde_json::json!({"type":"response.output_item.done", "item": {
+            "type":"compaction", "encrypted_content":"retried-summary"
+        }}),
+        responses::ev_completed("recovered"),
+    ]);
+    let mut bodies = vec![invalid; failures];
+    bodies.push(valid);
+    let request = responses::mount_sse_sequence(&server, bodies).await;
+    let cancellation = CancellationToken::new();
+    let step = sess
+        .capture_step_context(Arc::clone(&turn), &cancellation)
+        .await
+        .expect("capture step");
+    let original: ResponseItem = serde_json::from_value(serde_json::json!({
+        "type": "message", "role": "user",
+        "content": [{"type": "input_text", "text": "original turn"}]
+    }))
+    .expect("user message");
+    sess.replace_history(vec![original], None).await;
+    sess.update_token_usage_info(
+        &turn,
+        Some(&TokenUsage {
+            input_tokens: 70_000,
+            total_tokens: 70_000,
+            ..Default::default()
+        }),
+    )
+    .await
+    .expect("record usage");
+    let status = super::super::context_window::context_window_token_status(&sess, &turn).await;
+    let world_state = Arc::new(WorldState::default());
+    let auth = sess.services.model_client.auth_owner_generation();
+    maybe_start(
+        &sess,
+        &step,
+        &world_state,
+        CompactionPhase::MidTurn,
+        &cancellation,
+        &status,
+        (Some("routing".to_string()), auth),
+    )
+    .await;
+    wait_for_background_compaction_for_test(&sess).await;
+    for (index, delay) in [1, 2, 4, 8, 16, 32, 60, 60]
+        .into_iter()
+        .take(failures)
+        .enumerate()
+    {
+        assert!(
+            take_ready(&sess, &turn).await.is_none(),
+            "failed result discarded"
+        );
+        assert_eq!(request.requests().len(), index + 1);
+        // Advance only the retry clock; mock network I/O runs with live time.
+        tokio::time::pause();
+        maybe_start(
+            &sess,
+            &step,
+            &world_state,
+            CompactionPhase::MidTurn,
+            &cancellation,
+            &status,
+            (Some("routing".to_string()), auth),
+        )
+        .await;
+        tokio::time::resume();
+        wait_for_background_compaction_for_test(&sess).await;
+        assert_eq!(
+            request.requests().len(),
+            index + 1,
+            "cooldown suppresses retries"
+        );
+        tokio::time::pause();
+        tokio::time::advance(std::time::Duration::from_secs(delay)).await;
+        let cancelled = CancellationToken::new();
+        cancelled.cancel();
+        maybe_start(
+            &sess,
+            &step,
+            &world_state,
+            CompactionPhase::MidTurn,
+            &cancelled,
+            &status,
+            (Some("routing".to_string()), auth),
+        )
+        .await;
+        tokio::time::resume();
+        wait_for_background_compaction_for_test(&sess).await;
+        assert_eq!(
+            request.requests().len(),
+            index + 1,
+            "cancellation suppresses retries"
+        );
+        tokio::time::pause();
+        maybe_start(
+            &sess,
+            &step,
+            &world_state,
+            CompactionPhase::MidTurn,
+            &cancellation,
+            &status,
+            (Some("routing".to_string()), auth),
+        )
+        .await;
+        tokio::time::resume();
+        wait_for_background_compaction_for_test(&sess).await;
+        assert_eq!(
+            request.requests().len(),
+            index + 2,
+            "same history retries after cooldown"
+        );
+    }
+    assert!(
+        take_ready(&sess, &turn).await.is_some(),
+        "retry publishes valid summary"
+    );
+    maybe_start(
+        &sess,
+        &step,
+        &world_state,
+        CompactionPhase::MidTurn,
+        &cancellation,
+        &status,
+        (Some("routing".to_string()), auth),
+    )
+    .await;
+    wait_for_background_compaction_for_test(&sess).await;
+    assert_eq!(
+        request.requests().len(),
+        failures + 1,
+        "success remains deduplicated"
+    );
+    shutdown(&sess).await;
+}
