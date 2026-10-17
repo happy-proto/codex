@@ -210,7 +210,7 @@ jobs:
           shared-key: fork-build-v1-downloads
           save-if: false
       - name: 对照 ts-rs 原版与上游确定性修复
-        run: python3 scripts/fork/probe_ts_rs_cache.py --output "$RUNNER_TEMP/fork-cache-probe"
+        run: python3 scripts/fork/probe_ts_rs_cache.py --output "$RUNNER_TEMP/fork-cache-probe" --patched-macros codex-rs/vendor/ts-rs-macros
       - name: 保存小型复现与依赖摘要
         if: always()
         uses: actions/upload-artifact@v7.0.0
