@@ -13,6 +13,7 @@ import tomllib
 from pathlib import Path
 
 UPSTREAM_FIX = "https://github.com/Aleph-Alpha/ts-rs/pull/488"
+TS_FEATURES = ("uuid-impl", "serde-json-impl", "no-serde-warnings")
 
 
 def digest(path: Path) -> str:
@@ -136,7 +137,7 @@ def main() -> None:
             str(fixture / "Cargo.toml"),
             "ts-rs@=11.1.0",
             "--features",
-            "serde-json-impl,no-serde-warnings",
+            ",".join(TS_FEATURES),
         ],
         env,
         root / "add.log",
@@ -284,6 +285,7 @@ def main() -> None:
         "target": args.target,
         "workspace_lock_sha256": digest(lock_path),
         "release_profile": profile,
+        "ts_rs_features": TS_FEATURES,
         "cases": {},
     }
     for case in ("baseline", "patched"):

@@ -84,6 +84,8 @@ Actions 日志和 `fork-sccache/progress.ndjson` 输出一次快照，不改变 
 和最终 binary 才能判断一次假设。[小型复现脚本](../../scripts/fork/probe_ts_rs_cache.py)
 对应 `ts-rs 11.1.0` 及 [上游宏输出确定性修复 #488](https://github.com/Aleph-Alpha/ts-rs/pull/488)：
 
+fixture 显式启用发布构建使用的 `uuid-impl`、`serde-json-impl` 和 `no-serde-warnings`。
+
 - 手动运行 `fork.yml` 并设置 `macos_cache_probe=true`，仅在 `macos-latest` 运行小型
   fixture，跳过完整构建、其它 Rust 测试和发布；Cargo 下载缓存只读。
 - 原版和隔离副本中的上游修复各编译三次，只清理 `ts-rs` 产物并保留依赖。
