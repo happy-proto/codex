@@ -12,6 +12,8 @@ from collections import Counter
 from pathlib import Path
 
 SELECTED = {
+    "ts_rs",
+    "codex_utils_absolute_path",
     "v8",
     "codex_code_mode",
     "codex_config",
