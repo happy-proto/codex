@@ -61,6 +61,21 @@ runner 镜像升级与缓存改造分别验收，不把不同系统的运行当�
 诊断日志格式随 sccache 版本维护，[脚本回归](../../scripts/fork/test_cache_diagnostics.py)
 覆盖命中与编译结果、依赖摘要变化和原始错误信息不外泄。
 
+### 用小型依赖复现代替完整构建
+
+发现相同缓存键对应的重编译产物摘要变化后，先隔离该依赖，避免重复构建 core、TUI
+和最终 binary 才能判断一次假设。[小型复现脚本](../../scripts/fork/probe_ts_rs_cache.py)
+对应 `ts-rs 11.1.0` 及 [上游宏输出确定性修复 #488](https://github.com/Aleph-Alpha/ts-rs/pull/488)：
+
+- 手动运行 `fork.yml` 并设置 `macos_cache_probe=true`，仅在 `macos-latest` 运行小型
+  fixture，跳过完整构建、其它 Rust 测试和发布；Cargo 下载缓存只读。
+- 原版和隔离副本中的上游修复各编译三次，只清理 `ts-rs` 产物并保留依赖。
+  禁用编译缓存，检查每组依赖字节一致，防止把恢复同一缓存对象误判为可复现构建。
+- 保存逐次 `.rmeta`、摘要、命令日志和汇总。原版需实际出现差异，修复版需保持一致，
+  否则本次验证失败或证据不足；不修改 workspace 或全局 registry 中的依赖源码。
+- 这仅验证选定版本及 fixture。工作区升级该依赖后重新核对小型复现的适用范围，
+  不把有限次数的样本当成所有 crate 与所有宏输入都可复现的证明。
+
 固定的 sccache 0.18.0 未包含 [上游的 `.rmeta` 流式通知修复](https://github.com/mozilla/sccache/pull/2875)。
 缓存未命中时，延后的通知会削弱 Cargo 流水线，也会让 timing 图中的前端和 codegen
 分段失真；用单元总耗时和缓存诊断判断复用，不把图中的长前端段直接当成实际前端耗时。

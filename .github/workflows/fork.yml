@@ -17,6 +17,10 @@ on:
         description: 发布已验证的 fork 构建；耗时实验默认不发布
         type: boolean
         default: false
+      macos_cache_probe:
+        description: 仅验证 macOS 小型依赖的可复现构建，不构建或发布 Codex
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -55,7 +59,7 @@ jobs:
           sh -n scripts/fork/cargo-timed.sh
 
   build:
-    if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+    if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter && !inputs.macos_cache_probe }}
     needs: scripts
     strategy:
       fail-fast: false
@@ -184,7 +188,42 @@ jobs:
             fork-dist/install.sh
           if-no-files-found: error
 
+  macos-cache-probe:
+    if: ${{ inputs.macos_cache_probe }}
+    needs: scripts
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@1.95.0
+      - name: 恢复 Cargo 下载缓存
+        uses: Swatinem/rust-cache@v2.9.2
+        with:
+          workspaces: codex-rs
+          cache-targets: false
+          cache-bin: false
+          shared-key: fork-build-v1-downloads
+          save-if: false
+      - name: 对照 ts-rs 原版与上游确定性修复
+        run: python3 scripts/fork/probe_ts_rs_cache.py --output "$RUNNER_TEMP/fork-cache-probe"
+      - name: 保存小型复现与依赖摘要
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: fork-macos-cache-probe-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/fork-cache-probe/*.json
+            ${{ runner.temp }}/fork-cache-probe/*.rmeta
+            ${{ runner.temp }}/fork-cache-probe/*.log
+          if-no-files-found: ignore
+
   tests:
+    if: ${{ !inputs.macos_cache_probe }}
     needs: scripts
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -392,7 +431,7 @@ jobs:
     concurrency:
       group: fork-publication
       cancel-in-progress: false
-    if: github.repository == 'happy-proto/codex' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && !inputs.tui_test_filter && !inputs.core_test_filter && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    if: github.repository == 'happy-proto/codex' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && !inputs.tui_test_filter && !inputs.core_test_filter && !inputs.macos_cache_probe && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     needs: [build, tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
