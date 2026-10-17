@@ -461,6 +461,18 @@ async fn collect_compaction_output(
         ));
     };
 
+    tracing::info!(
+        target: "codex_core::async_compaction",
+        thread_id = %sess.thread_id,
+        turn_id = %turn_context.sub_id,
+        stage = "response_completed",
+        background = matches!(request_kind, CompactionRequestKind::Background(_)),
+        %response_id,
+        output_item_count,
+        compaction_count,
+        "压缩响应已完成，开始校验输出项"
+    );
+
     if compaction_count != 1 {
         return Err(CodexErr::Fatal(format!(
             "remote compaction v2 expected exactly one compaction output item, got {compaction_count} from {output_item_count} output items"
