@@ -84,6 +84,18 @@ def main() -> None:
     }
     if versions != {"ts-rs": "11.1.0", "ts-rs-macros": "11.1.0"}:
         raise ValueError("此复现仅对应 fork 当前使用的 ts-rs 11.1.0")
+    release = tomllib.loads((repository / "codex-rs/Cargo.toml").read_text())[
+        "profile"
+    ]["release"]
+    profile = {
+        "CARGO_PROFILE_RELEASE_LTO": "false",
+        "CARGO_PROFILE_RELEASE_DEBUG": "0",
+        "CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO": "off",
+        "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": str(release["codegen-units"]),
+        "CARGO_PROFILE_RELEASE_OPT_LEVEL": str(release.get("opt-level", 3)),
+        "CARGO_PROFILE_RELEASE_STRIP": str(release["strip"]).lower(),
+        "CARGO_PROFILE_RELEASE_PANIC": release.get("panic", "unwind"),
+    }
     env = dict(os.environ)
     # 必须真正执行 rustc，不能把恢复出的同一个缓存对象误当成可复现构建。
     for name in (
@@ -97,8 +109,7 @@ def main() -> None:
         CARGO_TARGET_DIR=str(root / "target"),
         CARGO_INCREMENTAL="0",
         CARGO_BUILD_JOBS="3",
-        CARGO_PROFILE_RELEASE_LTO="false",
-        CARGO_PROFILE_RELEASE_DEBUG="0",
+        **profile,
     )
     fixture = root / "fixture"
     run(
@@ -205,7 +216,7 @@ def main() -> None:
                 root / f"{case}-{attempt}-clean.log",
             )
             output = run(
-                ["cargo", "build", *common, "--message-format=json"],
+                ["cargo", "build", *common, "--locked", "--message-format=json"],
                 env,
                 root / f"{case}-{attempt}-build.log",
             )
@@ -272,6 +283,7 @@ def main() -> None:
         "upstream_fix": UPSTREAM_FIX,
         "target": args.target,
         "workspace_lock_sha256": digest(lock_path),
+        "release_profile": profile,
         "cases": {},
     }
     for case in ("baseline", "patched"):

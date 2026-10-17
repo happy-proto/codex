@@ -90,6 +90,8 @@ Actions 日志和 `fork-sccache/progress.ndjson` 输出一次快照，不改变 
   禁用编译缓存，检查每组依赖字节一致，防止把恢复同一缓存对象误判为可复现构建。
 - 从 workspace lockfile 提供传递依赖版本，记录锁文件摘要，并拒绝 fixture 解析出
   该锁文件中没有的版本，避免只固定直接依赖而让小型复现跟随 registry 更新。
+- release codegen units、strip 等设置跟随 workspace profile，debug、LTO 和 split
+  debuginfo 对齐发布 CI 的覆盖值，记录实际配置；fixture 不模拟全仓 feature 合并。
 - 保存逐次 `.rmeta`、摘要、命令日志和汇总。原版需实际出现差异，修复版需保持一致，
   否则本次验证失败或证据不足；不修改 workspace 或全局 registry 中的依赖源码。
 - 这仅验证选定版本及 fixture。工作区升级该依赖后重新核对小型复现的适用范围，
