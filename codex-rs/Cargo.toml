@@ -1,4 +1,5 @@
 [workspace]
+exclude = ["vendor/ts-rs-macros"]
 members = [
     "aws-auth",
     "analytics",
@@ -658,6 +659,7 @@ inherits = "test"
 opt-level = 0
 
 [patch.crates-io]
+ts-rs-macros = { path = "vendor/ts-rs-macros" }
 # Uncomment to debug local changes.
 # ratatui = { path = "../../ratatui" }
 crossterm = { git = "https://github.com/openai-oss-forks/crossterm", rev = "ed1cdab335221515706178d68495bba2aed1924f" }
