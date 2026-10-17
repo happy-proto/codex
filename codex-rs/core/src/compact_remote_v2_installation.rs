@@ -45,6 +45,11 @@ pub(super) async fn run_compaction(
                 &replacement_step_context.turn,
             )
             .await;
+            tracing::info!(target: "codex_core::async_compaction", thread_id = %sess.thread_id,
+                turn_id = %step_context.turn.sub_id, stage = "installed",
+                active_context_tokens = status.active_context_tokens,
+                still_over_budget = status.token_limit_reached,
+                "后台压缩结果已安装，已保留快照后的追加历史");
             if !status.token_limit_reached {
                 return Ok(true);
             }
@@ -86,6 +91,11 @@ async fn build_and_install_compaction(
         && (candidate.model_info.slug != step_context.settings.model_info.slug
             || candidate.model_info.comp_hash != step_context.settings.model_info.comp_hash)
     {
+        tracing::info!(target: "codex_core::async_compaction", thread_id = %sess.thread_id,
+            turn_id = %turn_context.sub_id, stage = "rejected", source = "installation",
+            model_changed = candidate.model_info.slug != step_context.settings.model_info.slug,
+            compaction_hash_changed = candidate.model_info.comp_hash != step_context.settings.model_info.comp_hash,
+            "安装时丢弃模型不兼容的后台压缩结果");
         return Ok(false);
     }
     let needs_start = started_item.is_none();
@@ -123,6 +133,9 @@ async fn build_and_install_compaction(
             )),
         )
     } else {
+        tracing::info!(target: "codex_core::async_compaction", thread_id = %sess.thread_id,
+            turn_id = %turn_context.sub_id, stage = "foreground_request_started",
+            "发起前台压缩请求");
         let attempt = run_remote_compact_v2_attempt(
             sess,
             step_context,
@@ -135,6 +148,9 @@ async fn build_and_install_compaction(
         let (attempt, compaction_turn_context) = match attempt {
             Ok(attempt) => (attempt, turn_context),
             Err(error) => {
+                tracing::info!(target: "codex_core::async_compaction", thread_id = %sess.thread_id,
+                    turn_id = %turn_context.sub_id, stage = "foreground_request_failed", %error,
+                    "前台压缩请求失败");
                 let fallback_turn_context = &replacement_step_context.turn;
                 if !should_retry_with_current_model(&error, turn_context, fallback_turn_context) {
                     return Err(error);
