@@ -69,6 +69,8 @@ Actions 日志和 `fork-sccache/progress.ndjson` 输出一次快照，不改变 
 - runner 的 CPU 数、load average、空闲磁盘，编译与链接进程的 CPU、RSS、活跃 crate。
 - macOS 的内存页计数、页大小、压缩页和 swap 使用量；Linux 的可用内存与 swap。
 - sccache 命中、未命中和读写错误计数；后端降级的读取错误仍以日志诊断为准。
+- 增量读取 daemon 日志，实时统计后端读取、存储读取和写入错误的类别与 HTTP 状态，
+  包括未计入公开读取错误计数的 429。三个层级分别统计，不相加；不输出原始日志。
 - 构建退出码与经过时间；观测或 artifact 写入失败不能改变实际构建结果。
 
 进程 CPU 百分比来自 `ps`，是进程生命周期的平均值，不冒充采样窗口内的瞬时利用率。

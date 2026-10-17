@@ -10,8 +10,11 @@ import shutil
 import signal
 import subprocess
 import time
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
+
+from cache_diagnostics import classify_error
 
 COMPILERS = {
     "rustc",
@@ -35,6 +38,48 @@ COUNTERS = {
     "cache_writes",
     "compile_fails",
 }
+
+
+class StorageLogCounters:
+    """增量读取 daemon 日志，只保留错误类别与 HTTP 状态。"""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.offset = 0
+        self.counts = {
+            name: Counter() for name in ("backend_read", "storage_read", "cache_write")
+        }
+
+    def sample(self) -> dict:
+        with self.path.open(errors="replace") as stream:
+            if self.offset > self.path.stat().st_size:
+                self.offset = 0
+                for counts in self.counts.values():
+                    counts.clear()
+            stream.seek(self.offset)
+            for line in iter(stream.readline, ""):
+                if not line.endswith("\n"):
+                    break
+                self.offset = stream.tell()
+                channel = None
+                message = ""
+                if "sccache::cache::cache" in line and "Got unexpected error: " in line:
+                    channel = "backend_read"
+                    message = line.split("Got unexpected error: ", 1)[1]
+                elif "opendal::services" in line and (
+                    failure := re.search(r": (?:read|Reader::read) failed (.*)", line)
+                ):
+                    channel = "storage_read"
+                    message = failure[1]
+                elif "Error executing cache write: " in line:
+                    channel = "cache_write"
+                    message = line.split("Error executing cache write: ", 1)[1]
+                if channel:
+                    error = classify_error(message, set())
+                    self.counts[channel][f"{error['kind']}/{error['http_status']}"] += 1
+        return {
+            name: dict(sorted(counts.items())) for name, counts in self.counts.items()
+        }
 
 
 def compiler_processes(output: str) -> list[dict]:
@@ -160,6 +205,8 @@ def observe(command: list[str], output: Path, interval: float) -> int:
         stream = None
     child = subprocess.Popen(command, start_new_session=True)
     received_signal = None
+    log = os.environ.get("SCCACHE_ERROR_LOG")
+    storage = StorageLogCounters(Path(log)) if log else None
 
     def forward(signum, _frame):
         nonlocal received_signal
@@ -181,6 +228,11 @@ def observe(command: list[str], output: Path, interval: float) -> int:
                 except Exception:  # noqa: BLE001 - 采样必须 fail open，不能替换构建结果。
                     # 观测失败不能覆盖构建结果，也不输出可能含环境信息的异常文本。
                     record = {"sample_unavailable": True}
+                if storage:
+                    try:
+                        record["storage_errors"] = storage.sample()
+                    except OSError:
+                        record["storage_sample_unavailable"] = True
                 record.update(
                     event="fork-build-observation",
                     observed_at=datetime.now(UTC).isoformat(),

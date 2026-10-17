@@ -9,10 +9,39 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from build_observer import cache_counters, compiler_processes, observe, snapshot
+from build_observer import (
+    StorageLogCounters,
+    cache_counters,
+    compiler_processes,
+    observe,
+    snapshot,
+)
 
 
 class BuildObserverTests(unittest.TestCase):
+    def test_live_storage_errors_are_incremental_and_private(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "daemon.log"
+            private = "PRIVATE_STORAGE_SENTINEL"
+            warning = f"[WARN sccache::cache::cache] Got unexpected error: RateLimited (temporary) at read, context: {{status: 429}} => https://private.invalid/?sig={private}\n"
+            log.write_text(warning)
+            counters = StorageLogCounters(log)
+            first = counters.sample()
+            self.assertEqual(first["backend_read"], {"RateLimited/429": 1})
+            self.assertEqual(counters.sample(), first)
+            with log.open("a") as stream:
+                stream.write(warning.rstrip("\n"))
+            self.assertEqual(counters.sample(), first)
+            with log.open("a") as stream:
+                stream.write(
+                    "\n[WARN opendal::services] service=ghac: read failed NotFound (permanent) at Reader::read, context: {status: 404}\n"
+                )
+            result = counters.sample()
+            self.assertEqual(result["backend_read"], {"RateLimited/429": 2})
+            self.assertEqual(result["storage_read"], {"NotFound/404": 1})
+            self.assertNotIn(private, json.dumps(result))
+            self.assertNotIn("private.invalid", json.dumps(result))
+
     def test_live_process_names_are_not_truncated_paths(self):
         with patch(
             "build_observer.COMPILERS",
