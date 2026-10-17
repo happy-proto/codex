@@ -4389,6 +4389,12 @@ impl Session {
                         || self.services.model_client.auth_owner_generation()
                             != prefix.auth_owner_generation
                     {
+                        tracing::info!(target: "codex_core::async_compaction", thread_id = %self.thread_id,
+                            turn_id = %turn_context.sub_id, stage = "rejected", source = "prefix_validation",
+                            history_changed = state.history.history_version() != prefix.generation,
+                            history_shrunk = state.history.annotated_items().len() < prefix.len,
+                            auth_changed = self.services.model_client.auth_owner_generation() != prefix.auth_owner_generation,
+                            "原子历史替换拒绝后台压缩前缀");
                         return false;
                     }
                     let current = state.history.annotated_items();
