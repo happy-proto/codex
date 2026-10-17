@@ -27,6 +27,9 @@
 - `ci-test` 保留 test profile 的 debug assertions，关闭调试符号并使用 256 个 codegen
   units；这些设置由 workflow 全局环境传给测试。release 测试继续覆盖 release-only
   代码，保持关闭 debug assertions，以未优化的 harness 缩短验证耗时。
+- 完整测试按 `ci-test` 和 release profile 分成两个并行 job，分别复用各自的编译结果，
+  保留原有测试参数与覆盖范围。定向 core 或 TUI 验证只启动对应组；所有测试组通过后
+  才允许发布。两组使用独立的 timing、缓存诊断与失败快照 artifact 名称。
 
 ## 入口和验证
 

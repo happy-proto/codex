@@ -232,6 +232,11 @@ jobs:
   tests:
     if: ${{ !inputs.macos_cache_probe }}
     needs: scripts
+    strategy:
+      fail-fast: false
+      matrix:
+        # 定向验证只启动对应 profile，完整验证并行运行两组。
+        profile: ${{ fromJSON(inputs.core_test_filter && !inputs.tui_test_filter && '["ci-test"]' || inputs.tui_test_filter && !inputs.core_test_filter && '["release"]' || '["ci-test","release"]') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
@@ -299,16 +304,23 @@ jobs:
           shared-key: fork-build-linux-v1-downloads
           save-if: false
       - name: 验证包版本解析与源码构建回退
+        if: matrix.profile == 'release'
         working-directory: codex-rs
         run: ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-build-info --lib
+      - name: 执行定向 core 验证
+        if: matrix.profile == 'ci-test' && inputs.core_test_filter != ''
+        working-directory: codex-rs
+        env:
+          CORE_TEST_FILTER: ${{ inputs.core_test_filter }}
+        run: ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all "$CORE_TEST_FILTER" -- --test-threads=1
       - name: 执行定向测试或 release 更新验证
+        if: matrix.profile == 'release'
         working-directory: codex-rs
         env:
           TUI_TEST_FILTER: ${{ inputs.tui_test_filter }}
           CORE_TEST_FILTER: ${{ inputs.core_test_filter }}
         run: |
           if [ -n "$CORE_TEST_FILTER" ]; then
-            ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all "$CORE_TEST_FILTER" -- --test-threads=1
             exit 0
           fi
           if [ -n "$TUI_TEST_FILTER" ]; then
@@ -320,13 +332,13 @@ jobs:
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_action::tests
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib working_directory
       - name: 验证会话自动刷新与启动输入响应
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib startup -- --test-threads=1
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib session_lifecycle_requests -- --test-threads=1
       - name: Verify fork update presentation
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         env:
           INSTA_UPDATE: new
@@ -335,38 +347,41 @@ jobs:
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_available_history_cell_snapshot || result=1
           exit "$result"
       - name: 验证 Markdown 渲染、流式输出及选择复制
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib markdown_render
       - name: Test daemon update defaults
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-app-server-daemon --lib settings::tests
       - name: 验证功能列表的输出格式与配置状态
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --bin codex features_list::tests
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test features features_list_
       - name: 验证 MCP 列表展示与旧格式兼容
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --bin codex mcp_list_output
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test mcp_list
+      - name: 验证 TUI 插件引用
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib app::plugin_mentions::tests
       - name: 验证 fork 自动化工具替换与 Desktop 隔离
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core-plugins --lib fork_automation
-          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib app::plugin_mentions::tests
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills --lib
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills-extension --lib host_roots::tests
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-skills-extension --lib host_service::tests
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib config::fork_automation
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-app-server --test all skills_list_runtime_enable_refreshes_fork_system_skill_cache
       - name: 验证显式 skill 的初始调用与 steer 注入
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           # The history-injection test captures thread-local tracing; keep its
@@ -374,40 +389,43 @@ jobs:
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::skills:: -- --test-threads=1
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all steered_explicit_only_skill_respects_blocked_queued_prompt
       - name: 验证已打开会话的名称同步
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib thread_name_refresh
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib refreshed_thread_name
       - name: 验证回合生成速度与本地持久化
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib generation_speed
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::generation_speed:: -- --test-threads=1
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-state --lib generation_speed
-          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib generation_speed
+      - name: 验证 TUI 回合生成速度
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib generation_speed
       - name: 验证 Responses Lite 请求兼容性与本地来源保留
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::responses_lite::base_instructions_use_input_items
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all responses_websocket_omits_content_attribution_without_mutating_history
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all remote_compact_v2_retains_metadata_from_resumed_history
       - name: 验证 WebSocket 主动轮转、重连与 HTTP fallback
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::client_websockets:: -- --test-threads=1
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all suite::websocket_fallback:: -- --test-threads=1
       - name: 验证后台压缩退避重试、结果复用、失败回退与中断
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --lib session::async_compaction::tests -- --test-threads=1
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all async_compaction -- --test-threads=1
       - name: 验证模型容量错误的无限退避重试
-        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-api --lib telemetry::tests
@@ -421,7 +439,7 @@ jobs:
         uses: actions/upload-artifact@v7.0.0
         if: always()
         with:
-          name: fork-test-timings-${{ github.sha }}
+          name: fork-test-timings-${{ matrix.profile }}-${{ github.sha }}
           path: codex-rs/target/cargo-timings/
           if-no-files-found: ignore
       - name: 保存测试编译缓存统计
@@ -435,12 +453,12 @@ jobs:
         if: always() && steps.sccache.outcome == 'success'
         uses: actions/upload-artifact@v7.0.0
         with:
-          name: fork-test-sccache-${{ github.sha }}
+          name: fork-test-sccache-${{ matrix.profile }}-${{ github.sha }}
           path: fork-sccache/
       - uses: actions/upload-artifact@v7.0.0
         if: failure()
         with:
-          name: fork-snapshot-failures-${{ github.sha }}
+          name: fork-snapshot-failures-${{ matrix.profile }}-${{ github.sha }}
           path: codex-rs/tui/src/**/*.snap.new
           if-no-files-found: ignore
 
