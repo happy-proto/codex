@@ -265,6 +265,12 @@ jobs:
           cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates::tests
           cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_action::tests
           cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib working_directory
+      - name: 验证会话自动刷新与启动输入响应
+        if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: |
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib startup -- --test-threads=1
+          cargo test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib session_lifecycle_requests -- --test-threads=1
       - name: Verify fork update presentation
         if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
