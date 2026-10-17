@@ -95,7 +95,7 @@ def snapshot() -> dict:
     }
     try:
         result["processes"] = compiler_processes(
-            read_command(["ps", "-axo", "pid=,pcpu=,rss=,comm=,args="])
+            read_command(["ps", "-ww", "-axo", "pid=,pcpu=,rss=,ucomm=,args="])
         )
     except (OSError, subprocess.SubprocessError):
         result["process_sample_unavailable"] = True

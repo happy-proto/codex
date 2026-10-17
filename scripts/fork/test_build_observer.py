@@ -9,10 +9,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from build_observer import cache_counters, compiler_processes, observe
+from build_observer import cache_counters, compiler_processes, observe, snapshot
 
 
 class BuildObserverTests(unittest.TestCase):
+    def test_live_process_names_are_not_truncated_paths(self):
+        with patch(
+            "build_observer.COMPILERS",
+            {Path(sys.executable).name, "python3.12", "python3", "python", "Python"},
+        ):
+            processes = snapshot()["processes"]
+        self.assertIn(os.getpid(), [item["pid"] for item in processes])
+
     def test_process_sample_exports_only_compiler_fields(self):
         private = "PRIVATE_ARGUMENT_SENTINEL"
         result = compiler_processes(
