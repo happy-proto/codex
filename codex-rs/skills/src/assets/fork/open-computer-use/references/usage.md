@@ -52,6 +52,33 @@ await app.typeText("Hello");
 await app.getAXState();
 ```
 
+### Selective observation (opt-in)
+
+The native `get_app_state` tool on macOS, Windows and Linux accepts `include_ax` and
+`include_screenshot`. Both default to `true`; at least one must remain true.
+The REPL forwards the corresponding optional `includeAX` / `includeScreenshot`
+booleans:
+
+```js
+var editor = await cua.getApp("gedit", { initialState: false });
+await editor.getScreenshot({ includeAX: false }); // no AX, focus or selection walk
+await editor.click([100, 100]);                   // window-relative coordinates
+await editor.getAXState({ includeScreenshot: false }); // no capture or PNG encoding
+// Use newly observed element indexes only after inspecting the AX result.
+```
+
+Screenshot-only observation invalidates prior element indexes and cached query
+aliases for that app, even if the window title is unchanged. Its result explicitly
+reports this. Coordinate actions use the newly observed window bounds; element
+actions require a fresh AX observation. Existing calls without these options keep
+their full native observation behavior. These flags are implemented on all three native platforms; action read-back is unchanged.
+
+These options select collection, not image deduplication. An unchanged screenshot
+is still returned when requested. macOS/Linux JS actions already disable automatic
+read-back, and getAXState does not emit images; includeScreenshot:false additionally skips
+native capture on all three platforms. See `docs/selective-observation.md` for real GTK
+and Worker JS validation.
+
 The code-first surface also forwards macOS background-operation options:
 
 ```js

@@ -14,14 +14,14 @@
     "repository": "https://github.com/iFurySt/open-browser-use"
   },
   "open-computer-use": {
-    "commit": "7cb8bb7cfb97fce085b8fa519c1457e5fa51cfa5",
+    "commit": "31a7d7da5f28d8b737c936460493efbcae453816",
     "files": {
       "LICENSE": "0fdb775e00e6fdde23984b4f1184cd13c34135caac1e714ad489141c239704bc",
       "SKILL.md": "3ea4f82cedbe8fb46bb2cf4a1781eebe51e1fad2091a6e5c702f741d31740d5b",
       "agents/openai.yaml": "efebe3eea340f5f801d058bbb90afee7ac97bbe56d41557a83ec2b787c1c5996",
       "references/installation.md": "aaedb9c7fb5957b2ba824fdd6f29215a8ce4dfd387bbfb0d8a6fe795ae56793a",
       "references/troubleshooting.md": "1d26991774330adb9d0317f1fd0f1d8bc83b0216df70bab5289e847051514291",
-      "references/usage.md": "d033f335725e47f7c221992bcccb9d5ec71c825504e39222e49a33cd780e6a57"
+      "references/usage.md": "a66942474012d43d1b07c7d8863a87579b92d11b774f59c4153cc4d14175a70b"
     },
     "path": "skills/open-computer-use",
     "ref": "main",
