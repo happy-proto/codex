@@ -17,6 +17,10 @@ on:
         description: 发布已验证的 fork 构建；耗时实验默认不发布
         type: boolean
         default: false
+      tests_only:
+        description: 仅验证串行测试基线，跳过打包和发布
+        type: boolean
+        default: false
       macos_cache_probe:
         description: 仅验证 macOS 小型依赖的可复现构建，不构建或发布 Codex
         type: boolean
@@ -66,7 +70,7 @@ jobs:
           sh -n scripts/fork/cargo-observed.sh
 
   build:
-    if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter && !inputs.macos_cache_probe }}
+    if: ${{ !inputs.tui_test_filter && !inputs.core_test_filter && !inputs.macos_cache_probe && !inputs.tests_only }}
     needs: scripts
     strategy:
       fail-fast: false
@@ -449,7 +453,7 @@ jobs:
     concurrency:
       group: fork-publication
       cancel-in-progress: false
-    if: github.repository == 'happy-proto/codex' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && !inputs.tui_test_filter && !inputs.core_test_filter && !inputs.macos_cache_probe && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    if: github.repository == 'happy-proto/codex' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && !inputs.tui_test_filter && !inputs.core_test_filter && !inputs.macos_cache_probe && !inputs.tests_only && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish))
     needs: [build, tests]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
