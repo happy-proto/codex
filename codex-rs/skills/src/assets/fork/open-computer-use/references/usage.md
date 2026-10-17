@@ -39,6 +39,7 @@ drag
 type_text
 press_key
 set_value
+select_text   (macOS runtime only)
 ```
 
 macOS also exposes `query` for targeted AX lookup. These nine core tools remain the cross-platform compatibility surface. The bundled Codex plugin uses a
@@ -227,6 +228,24 @@ open-computer-use call --calls '[
 Every non-fixture `drag` result includes a text item that begins `Drag delivered via app_post` or `Drag delivered via global pointer path`, so a default drag that did nothing is legible instead of looking like success. For an MCP server the variable belongs in the server entry's `env`, not in the calling shell, and the server must be restarted afterwards.
 
 When the gate is not enabled, treat window-server drags as unavailable and reach the same outcome another way: copy or move files with a shell command instead of a Finder drag, use `set_value` or keyboard selection instead of drag-selecting text, and use the app's own window controls instead of dragging a title bar.
+
+## Text Selection (macOS)
+
+Use `await app.selectText(elementIndex, text, options?)` with a snapshot or `query`
+index from the current session. The native CLI/MCP tool is `select_text`.
+
+| Argument | Meaning |
+| --- | --- |
+| `elementIndex` | The text element's current index. |
+| `text` | Exact target text, including whitespace and Unicode spelling. |
+| `options.prefix` / `options.suffix` | Text immediately before / after the target, for repeated matches. |
+| `options.selection` | `text` (default), `cursor_before` or `cursor_after`. |
+
+Ambiguous or missing text, unsupported selection, text changes and unverified ranges
+return errors. The action verifies the applied UTF-16 range even when full action
+read-back is off; use `getAXState()` for the next UI observation. It does not activate
+the app or fall back to keyboard/pointer input. Linux and Windows do not implement
+`select_text` yet.
 
 ## Software Cursor
 

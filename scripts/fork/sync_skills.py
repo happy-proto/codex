@@ -19,7 +19,7 @@ DEST = ROOT / "codex-rs/skills/src/assets/fork"
 LOCK = ROOT / "scripts/fork/skills.lock.json"
 SOURCES = {
     "open-browser-use": "iFurySt/open-browser-use",
-    "open-computer-use": "iFurySt/open-codex-computer-use",
+    "open-computer-use": "iFurySt/open-computer-use",
 }
 
 

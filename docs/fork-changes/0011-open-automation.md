@@ -24,7 +24,7 @@ CLI 与官方 Desktop 共用配置，直接禁用或卸载官方插件会影响 
   `computer-use`、`cua_repl` 等显式禁用项可能保留在状态列表中，
   出现在列表中不代表已经启动。`node_repl` 的直接配置也不属于插件过滤范围。
 - 内置 [Open Browser Use](https://github.com/iFurySt/open-browser-use) 和
-  [Open Computer Use](https://github.com/iFurySt/open-codex-computer-use) 的完整 skill 目录和许可证。
+  [Open Computer Use](https://github.com/iFurySt/open-computer-use) 的完整 skill 目录和许可证。
   上游原文不打补丁；快照随二进制构建，无需首次启动联网或初始化 submodule。
 - 全部内置 system skills 使用 `$CODEX_HOME/.fork/skills`，与官方 Desktop 的
   `$CODEX_HOME/skills/.system` 分离。已有用户或项目同名开放工具 skill 优先于内置副本。
