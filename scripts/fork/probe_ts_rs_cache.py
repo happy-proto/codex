@@ -74,7 +74,9 @@ def main() -> None:
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=False)
     repository = Path(__file__).resolve().parents[2]
-    lock = tomllib.loads((repository / "codex-rs/Cargo.lock").read_text())
+    lock_path = repository / "codex-rs/Cargo.lock"
+    lock = tomllib.loads(lock_path.read_text())
+    pinned = {(item["name"], item["version"]) for item in lock["package"]}
     versions = {
         item["name"]: item["version"]
         for item in lock["package"]
@@ -113,6 +115,8 @@ def main() -> None:
         env,
         root / "init.log",
     )
+    # Cargo 为 fixture 裁剪锁文件，但保留工作区已有的兼容传递版本。
+    shutil.copyfile(lock_path, fixture / "Cargo.lock")
     run(
         [
             "cargo",
@@ -176,7 +180,11 @@ def main() -> None:
         json.dumps(source_hashes, indent=2) + "\n"
     )
     results = []
+    dependency_versions = {}
     for case in ("baseline", "patched"):
+        if case == "patched":
+            # 原版会裁剪未使用的 indexmap；重新提供工作区 pin 给修复组解析。
+            shutil.copyfile(lock_path, fixture / "Cargo.lock")
         config = (
             []
             if case == "baseline"
@@ -201,6 +209,21 @@ def main() -> None:
                 env,
                 root / f"{case}-{attempt}-build.log",
             )
+            if attempt == 1:
+                resolved = tomllib.loads((fixture / "Cargo.lock").read_text())
+                selected = {
+                    (item["name"], item["version"])
+                    for item in resolved["package"]
+                    if item["name"] != "ts_rs_cache_probe"
+                }
+                if selected - pinned:
+                    raise ValueError(
+                        f"fixture 使用了工作区锁文件以外的版本：{sorted(selected - pinned)}"
+                    )
+                dependency_versions[case] = sorted(selected)
+                (root / "dependency-versions.json").write_text(
+                    json.dumps(dependency_versions, indent=2) + "\n"
+                )
             artifacts = []
             for line in output.splitlines():
                 item = json.loads(line)
@@ -245,7 +268,12 @@ def main() -> None:
                 ),
                 flush=True,
             )
-    summary = {"upstream_fix": UPSTREAM_FIX, "target": args.target, "cases": {}}
+    summary = {
+        "upstream_fix": UPSTREAM_FIX,
+        "target": args.target,
+        "workspace_lock_sha256": digest(lock_path),
+        "cases": {},
+    }
     for case in ("baseline", "patched"):
         group = [item for item in results if item["case"] == case]
         summary["cases"][case] = {
