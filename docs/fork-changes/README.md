@@ -18,6 +18,7 @@
 | 0011 | [WebSocket 连接主动轮转](0011-websocket-rotation.md) |
 | 0012 | [后台压缩失败后的接收器清理](0012-async-compaction-closed-receiver.md)（alpha.8 已吸收） |
 | 0013 | [发布版本与编译缓存分离](0013-build-cache-stability.md) |
+| 0014 | [会话 Skills 自动刷新保持输入响应](0014-session-skills-refresh.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 修改已有改造时更新原记录，新改造使用下一个编号；编号不重用，不对应 PR 或固定 commit SHA。
