@@ -1799,7 +1799,7 @@ impl BottomPane {
     pub(crate) fn set_recent_generation_speed(&mut self, speed: Option<f64>) {
         let label = speed
             .filter(|speed| speed.is_finite() && *speed >= 0.0)
-            .map(|speed| format!("{speed:.1} token/s (5m)"));
+            .map(|speed| format!("{speed:.1} token/s"));
         if self.recent_generation_speed == label {
             return;
         }

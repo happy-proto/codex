@@ -29,7 +29,9 @@ async fn live_generation_speed_survives_streaming_and_resets_between_turns() {
     terminal
         .draw(|frame| chat.bottom_pane.render(frame.area(), frame.buffer_mut()))
         .unwrap();
-    assert!(normalized_backend_snapshot(terminal.backend()).contains("42.3 token/s (5m)"));
+    let snapshot = normalized_backend_snapshot(terminal.backend());
+    assert!(snapshot.contains("42.3 token/s"));
+    assert!(!snapshot.contains("(5m)"));
     chat.set_live_generation_speed(None);
     chat.bottom_pane.hide_status_indicator();
     assert!(!chat.bottom_pane.status_indicator_visible());

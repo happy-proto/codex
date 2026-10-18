@@ -7512,7 +7512,7 @@ async fn live_generation_speed_rejects_old_reads_after_same_turn_recovery_and_re
         .handle_server_notification(turn_started_notification(id, "turn"), None);
     let before_recovery = app.chat_widget.live_generation_speed_target().unwrap();
     app.finish_live_generation_speed(before_recovery.clone(), Some(42.0));
-    assert!(render_bottom_popup(&app.chat_widget, 120).contains("42.0 token/s (5m)"));
+    assert!(render_bottom_popup(&app.chat_widget, 120).contains("42.0 token/s"));
     app.chat_widget
         .handle_server_notification(turn_started_notification(id, "turn"), None);
     let recovered = app.chat_widget.live_generation_speed_target().unwrap();
@@ -7520,7 +7520,7 @@ async fn live_generation_speed_rejects_old_reads_after_same_turn_recovery_and_re
     app.finish_live_generation_speed(before_recovery, Some(999.0));
     assert!(!render_bottom_popup(&app.chat_widget, 120).contains("token/s"));
     app.finish_live_generation_speed(recovered.clone(), Some(12.0));
-    assert!(render_bottom_popup(&app.chat_widget, 120).contains("12.0 token/s (5m)"));
+    assert!(render_bottom_popup(&app.chat_widget, 120).contains("12.0 token/s"));
     app.reconnect.offline = true;
     app.finish_live_generation_speed(recovered.clone(), Some(99.0));
     assert!(!render_bottom_popup(&app.chat_widget, 120).contains("token/s"));

@@ -350,14 +350,14 @@ mod tests {
             Default::default(),
         );
         let timer = StatusTimer::default();
-        row.set_recent_generation_speed(Some("42.3 token/s (5m)".into()));
+        row.set_recent_generation_speed(Some("42.3 token/s".into()));
         row.update_inline_message(Some("1 background terminal".into()));
         let header = |row: &StatusIndicatorWidget, width| {
             StatusIndicator { row, timer: &timer }.lines(width)[0].to_string()
         };
         let text = header(&row, 120);
         assert!(text.contains("esc to interrupt"));
-        assert!(text.contains("42.3 token/s (5m) · 1 background terminal"));
+        assert!(text.contains("42.3 token/s · 1 background terminal"));
         for width in [10, 30, 120] {
             assert!(display_width(&header(&row, width)) <= usize::from(width));
         }
