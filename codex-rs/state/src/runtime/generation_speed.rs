@@ -118,6 +118,7 @@ impl StateRuntime {
         &self,
         thread_id: ThreadId,
         turn_id: &str,
+        observed_turn_start_ms: i64,
     ) -> anyhow::Result<Option<f64>> {
         // Wall time is only a reporter heartbeat, never the rolling sampling clock.
         let now_ms = chrono::Utc::now().timestamp_millis();
@@ -127,7 +128,12 @@ impl StateRuntime {
         )
         .bind(thread_id.to_string())
         .bind(turn_id)
-        .bind(now_ms.saturating_sub(3000))
+        // A failed reset must not expose a still-fresh pre-crash row on WAL readers.
+        .bind(
+            now_ms
+                .saturating_sub(3000)
+                .max(observed_turn_start_ms.saturating_add(1)),
+        )
         .bind(now_ms)
         .fetch_optional(self.pool.as_ref())
         .await?
@@ -264,16 +270,16 @@ mod tests {
             .update_live_generation_speed(thread_id, "turn", "old", Some(42.3))
             .await?;
         assert_eq!(
-            reader.live_generation_speed(thread_id, "turn").await?,
+            reader.live_generation_speed(thread_id, "turn", 0).await?,
             Some(42.3)
         );
         assert_eq!(
-            reader.live_generation_speed(thread_id, "other").await?,
+            reader.live_generation_speed(thread_id, "other", 0).await?,
             None
         );
         assert_eq!(
             reader
-                .live_generation_speed(ThreadId::new(), "turn")
+                .live_generation_speed(ThreadId::new(), "turn", 0)
                 .await?,
             None
         );
@@ -283,12 +289,15 @@ mod tests {
         writer
             .update_live_generation_speed(thread_id, "turn", "old", Some(999.0))
             .await?;
-        assert_eq!(reader.live_generation_speed(thread_id, "turn").await?, None);
+        assert_eq!(
+            reader.live_generation_speed(thread_id, "turn", 0).await?,
+            None
+        );
         writer
             .update_live_generation_speed(thread_id, "turn", "recovered", Some(0.0))
             .await?;
         assert_eq!(
-            reader.live_generation_speed(thread_id, "turn").await?,
+            reader.live_generation_speed(thread_id, "turn", 0).await?,
             Some(0.0)
         );
         for invalid in [-1.0, f64::NAN, f64::INFINITY] {
@@ -302,7 +311,10 @@ mod tests {
         writer
             .update_live_generation_speed(thread_id, "turn", "recovered", None)
             .await?;
-        assert_eq!(reader.live_generation_speed(thread_id, "turn").await?, None);
+        assert_eq!(
+            reader.live_generation_speed(thread_id, "turn", 0).await?,
+            None
+        );
         Ok(())
     }
 
@@ -312,6 +324,51 @@ mod tests {
             completed_at: 14,
             duration_ms: 4000,
         }
+    }
+
+    #[tokio::test]
+    async fn live_generation_speed_recovery_rejects_fresh_old_row_when_reset_is_locked()
+    -> anyhow::Result<()> {
+        let home = unique_temp_dir();
+        let _cleanup = scopeguard::guard(home.clone(), |path| {
+            let _ = std::fs::remove_dir_all(path);
+        });
+        let config = crate::SqliteConfig::new_for_testing(home.as_path().abs());
+        let writer = StateRuntime::init(config.clone(), "test".into()).await?;
+        let id = ThreadId::new();
+        writer
+            .upsert_thread(&test_thread_metadata(&home, id, home.clone()))
+            .await?;
+        writer
+            .start_live_generation_speed(id, "turn", "before-crash")
+            .await?;
+        writer
+            .update_live_generation_speed(id, "turn", "before-crash", Some(42.0))
+            .await?;
+        let reader = StateRuntime::init(config, "test".into()).await?;
+        let observed_at_ms = chrono::Utc::now().timestamp_millis();
+        let tx = writer.pool.begin_with("BEGIN IMMEDIATE").await?;
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(20),
+                reader.start_live_generation_speed(id, "turn", "recovered"),
+            )
+            .await
+            .is_err()
+        );
+        // WAL readers can still see the old row despite the failed reset.
+        assert_eq!(
+            reader.live_generation_speed(id, "turn", 0).await?,
+            Some(42.0)
+        );
+        assert_eq!(
+            reader
+                .live_generation_speed(id, "turn", observed_at_ms)
+                .await?,
+            None
+        );
+        tx.rollback().await?;
+        Ok(())
     }
 
     #[tokio::test]

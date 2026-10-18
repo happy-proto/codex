@@ -3,12 +3,25 @@
 
 use super::*;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LiveGenerationSpeedTarget {
+    pub thread_id: ThreadId,
+    pub turn_id: String,
+    pub started_at: Instant,
+    pub observed_at_ms: i64,
+}
+
 impl ChatWidget {
-    pub(crate) fn live_generation_speed_target(&self) -> Option<(ThreadId, String)> {
-        self.turn_lifecycle
-            .agent_turn_running
-            .then(|| Some((self.thread_id?, self.turn_lifecycle.last_turn_id.clone()?)))
-            .flatten()
+    pub(crate) fn live_generation_speed_target(&self) -> Option<LiveGenerationSpeedTarget> {
+        if !self.turn_lifecycle.agent_turn_running {
+            return None;
+        }
+        Some(LiveGenerationSpeedTarget {
+            thread_id: self.thread_id?,
+            turn_id: self.turn_lifecycle.last_turn_id.clone()?,
+            started_at: self.turn_lifecycle.goal_status_active_turn_started_at?,
+            observed_at_ms: self.turn_lifecycle.live_generation_speed_started_at_ms,
+        })
     }
 
     pub(crate) fn set_live_generation_speed(&mut self, speed: Option<f64>) {

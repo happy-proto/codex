@@ -63,7 +63,7 @@ async fn live_generation_speed_is_available_while_a_follow_up_call_is_pending() 
     .await;
     let speed = tokio::time::timeout(Duration::from_secs(4), async {
         loop {
-            if let Some(speed) = db.live_generation_speed(thread_id, &turn_id).await? {
+            if let Some(speed) = db.live_generation_speed(thread_id, &turn_id, 0).await? {
                 break anyhow::Ok(speed);
             }
             tokio::time::sleep(Duration::from_millis(25)).await;

@@ -19,10 +19,9 @@ async fn live_generation_speed_survives_streaming_and_resets_between_turns() {
     chat.turn_lifecycle.last_turn_id = Some("turn-1".into());
     assert_eq!(chat.live_generation_speed_target(), None);
     chat.on_task_started();
-    assert_eq!(
-        chat.live_generation_speed_target(),
-        Some((thread_id, "turn-1".into()))
-    );
+    let first_target = chat.live_generation_speed_target().expect("active turn");
+    assert_eq!(first_target.thread_id, thread_id);
+    assert_eq!(first_target.turn_id, "turn-1");
     chat.set_live_generation_speed(Some(42.34));
     chat.bottom_pane.hide_status_indicator();
     assert!(chat.bottom_pane.status_indicator_visible());
@@ -36,6 +35,7 @@ async fn live_generation_speed_survives_streaming_and_resets_between_turns() {
     assert!(!chat.bottom_pane.status_indicator_visible());
     chat.set_live_generation_speed(Some(12.0));
     chat.on_task_started();
+    assert_ne!(chat.live_generation_speed_target(), Some(first_target));
     terminal
         .draw(|frame| chat.bottom_pane.render(frame.area(), frame.buffer_mut()))
         .unwrap();

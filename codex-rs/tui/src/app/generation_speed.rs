@@ -9,7 +9,7 @@ impl App {
             .state_db
             .clone()
             .filter(|_| !self.app_server_target.uses_remote_workspace() && !self.reconnect.offline);
-        let (Some((thread_id, turn_id)), Some(state_db)) = (target, state_db) else {
+        let (Some(target), Some(state_db)) = (target, state_db) else {
             self.chat_widget.set_live_generation_speed(None);
             return;
         };
@@ -17,27 +17,26 @@ impl App {
         tokio::spawn(async move {
             let speed = tokio::time::timeout(
                 Duration::from_millis(100),
-                state_db.live_generation_speed(thread_id, &turn_id),
+                state_db.live_generation_speed(
+                    target.thread_id,
+                    &target.turn_id,
+                    target.observed_at_ms,
+                ),
             )
             .await
             .ok()
             .and_then(Result::ok)
             .flatten();
-            tx.send(AppEvent::LiveGenerationSpeedUpdated {
-                thread_id,
-                turn_id,
-                speed,
-            });
+            tx.send(AppEvent::LiveGenerationSpeedUpdated { target, speed });
         });
     }
 
     pub(super) fn finish_live_generation_speed(
         &mut self,
-        thread_id: ThreadId,
-        turn_id: String,
+        target: crate::chatwidget::LiveGenerationSpeedTarget,
         speed: Option<f64>,
     ) {
-        if self.chat_widget.live_generation_speed_target() != Some((thread_id, turn_id)) {
+        if self.chat_widget.live_generation_speed_target() != Some(target) {
             return;
         }
         let speed = speed

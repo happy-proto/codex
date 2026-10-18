@@ -811,12 +811,12 @@ pub(crate) enum AppEvent {
         result: Result<ThreadUsageOutcome, String>,
     },
 
-    /// Metadata-only read for low-frequency status-line and terminal-title reconciliation.
+    /// A background read bound to one local observation of an active turn.
     LiveGenerationSpeedUpdated {
-        thread_id: ThreadId,
-        turn_id: String,
+        target: crate::chatwidget::LiveGenerationSpeedTarget,
         speed: Option<f64>,
     },
+    /// Metadata-only read for low-frequency status-line and terminal-title reconciliation.
     ThreadNameRefreshed {
         request_id: uuid::Uuid,
         thread_id: ThreadId,

@@ -135,10 +135,10 @@ class GenerationSpeedStorageTests(unittest.TestCase):
         )
         self.writer.commit()
 
-    def read_live(self, connection, thread, turn):
+    def read_live(self, connection, thread, turn, observed_at=0):
         row = connection.execute(
             production_query("SELECT speed FROM fork_live_generation_speeds"),
-            (thread, turn, 7000, 10000),
+            (thread, turn, max(7000, observed_at + 1), 10000),
         ).fetchone()
         return row[0] if row else None
 
@@ -180,6 +180,23 @@ class GenerationSpeedStorageTests(unittest.TestCase):
                 (timestamp,),
             )
             self.assertIsNone(self.read_live(self.writer, "first", "turn"))
+
+    def test_live_recovery_rejects_fresh_old_row_when_reset_is_locked(self):
+        self.start_live("first", "turn", "before-crash")
+        self.update_live("first", "turn", "before-crash", 42.0)
+        locker = sqlite3.connect(self.path)
+        self.addCleanup(locker.close)
+        reader = sqlite3.connect(self.path, timeout=0.01)
+        self.addCleanup(reader.close)
+        locker.execute("BEGIN IMMEDIATE")
+        with self.assertRaises(sqlite3.OperationalError):
+            reader.execute(
+                production_query("INSERT INTO fork_live_generation_speeds"),
+                ("first", "turn", "recovered", 10000),
+            )
+        self.assertEqual(self.read_live(reader, "first", "turn"), 42.0)
+        self.assertIsNone(self.read_live(reader, "first", "turn", observed_at=10000))
+        locker.rollback()
 
 
 if __name__ == "__main__":

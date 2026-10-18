@@ -357,6 +357,7 @@ mod recap;
 mod reset_credits;
 pub(crate) use self::rate_limits::limit_label_for_window;
 mod completion;
+pub(crate) use completion::LiveGenerationSpeedTarget;
 mod realtime;
 mod realtime_settings;
 mod realtime_split_flap;
