@@ -6,8 +6,8 @@
 已发布版本不覆盖，失败构建允许序号空缺；并发构建发生序号冲突时拒绝覆盖，重新运行选择新序号。
 Release 内使用固定平台包名，发布清单的 `packages` 记录各平台摘要；顶层包字段继续描述 macOS。
 旧 `.fork` 安装首次手动执行 `codex update` 迁移。
-发布后清理超过 7 天的 fork Release 和 tag，按发布时间最新三个已发布版本始终保留；
-独立旧 tag 按 tagger 时间或轻量 tag 的提交时间清理，不影响本地安装回退。
+发布后仅按发布时间保留最新 10 个已发布 fork 版本及其 tag，不设时间窗口。
+draft 不占名额；清理遗留 draft 和没有 Release 的孤立 fork tag，不影响上游 tag 或本地安装回退。
 使用 `release.py prune` 查看候选，`prune --apply` 执行清理。
 
 构建复用上游完整 package builder，包含 CLI、code-mode host 和 rg 等必要资源。

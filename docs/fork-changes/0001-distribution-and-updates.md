@@ -16,6 +16,9 @@ macOS 构建显式使用 `macos-latest`，跟随 GitHub 当前稳定 runner 镜�
 不把不同系统的耗时直接归因于缓存优化。标签对应的系统与架构见
 [GitHub runner 映像说明](https://github.com/actions/runner-images#available-images)。
 版本使用上游 alpha 加 `.fork.N`，不覆盖已发布版本；平台包和 SHA-256 由 `fork-release.json` 描述。
+发布后仅按发布时间保留最新 10 个已发布版本及其 tag，不设时间窗口。
+draft 不占名额；清理遗留 draft 和没有 Release 的孤立 fork tag，不影响上游 tag。
+清理脚本默认只预览，`prune --apply` 才删除；自动发布完成后执行清理。
 发布版本写入 `codex-package.json`，CLI、TUI、exec 展示和 daemon 身份在运行时读取。
 发布包使用多线程 xz 等级 8，保留 tar.xz 格式和签名后的完整资源；在压缩耗时与下载
 体积之间取平衡。调整等级前用真实平台包的相同 tar 字节流做对照，校验无损往返，

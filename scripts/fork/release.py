@@ -10,7 +10,7 @@ import selectors
 import subprocess
 import tempfile
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +18,7 @@ REPO = "happy-proto/codex"
 TARGET = "aarch64-apple-darwin"
 TARGETS = (TARGET, "x86_64-unknown-linux-gnu")
 VERSION_PATTERN = r"\d+\.\d+\.\d+-alpha(?:\.\d+){1,2}"
+RELEASES_TO_KEEP = 10
 
 
 def run(*args, **kwargs):
@@ -410,7 +411,7 @@ def publish():
         f"- Fork 源提交：{source}\n\n"
         "每个上游 alpha 独立递增 fork.N；每次发布使用独立 Release 和固定平台包名。"
         "包摘要见 fork-release.json。macOS 采用 ad-hoc 签名，未经 Apple 公证。"
-        "通过 `codex update` 手动更新。超过 7 天的 fork Release 和 tag 会清理，最新三个版本始终保留。\n"
+        f"通过 `codex update` 手动更新。仅保留最新 {RELEASES_TO_KEEP} 个已发布版本及其 tag。\n"
     )
     run(
         "gh",
@@ -435,32 +436,24 @@ def fork_tag(tag):
     )
 
 
-def parse_date(value):
-    return datetime.fromisoformat(value)
-
-
-def expired_releases(existing, now):
+def expired_releases(existing):
     published = sorted(
         (item for item in existing if fork_tag(item["tag_name"]) and not item["draft"]),
-        key=lambda item: parse_date(item["published_at"]),
+        key=lambda item: datetime.fromisoformat(item["published_at"]),
         reverse=True,
     )
-    keep = {item["tag_name"] for item in published[:3]}
-    cutoff = now - timedelta(days=7)
+    keep = {item["tag_name"] for item in published[:RELEASES_TO_KEEP]}
     expired = [
         item
         for item in existing
-        if fork_tag(item["tag_name"])
-        and item["tag_name"] not in keep
-        and parse_date(item["published_at"] or item["created_at"]) < cutoff
+        if fork_tag(item["tag_name"]) and item["tag_name"] not in keep
     ]
     return keep, expired
 
 
 def prune(apply=False):
     existing = releases()
-    now = datetime.now(UTC)
-    keep, expired = expired_releases(existing, now)
+    keep, expired = expired_releases(existing)
     # Tags without Releases can remain after failed or historical publication.
     pages = api(
         f"repos/{REPO}/git/matching-refs/tags/fork-v?per_page=100",
@@ -471,18 +464,9 @@ def prune(apply=False):
         ref["ref"].removeprefix("refs/tags/") for page in pages for ref in page
     }
     associated = {item["tag_name"] for item in existing}
-    orphaned = []
-    for reference in (ref for page in pages for ref in page):
-        tag = reference["ref"].removeprefix("refs/tags/")
-        if not fork_tag(tag) or tag in keep or tag in associated:
-            continue
-        obj = reference["object"]
-        if obj["type"] == "tag":
-            date = api(f"repos/{REPO}/git/tags/{obj['sha']}")["tagger"]["date"]
-        else:
-            date = api(f"repos/{REPO}/git/commits/{obj['sha']}")["committer"]["date"]
-        if parse_date(date) < now - timedelta(days=7):
-            orphaned.append(tag)
+    orphaned = sorted(
+        tag for tag in known_tags if fork_tag(tag) and tag not in associated
+    )
     print(
         json.dumps(
             {

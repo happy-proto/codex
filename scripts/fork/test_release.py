@@ -181,48 +181,74 @@ sys.stdin.read()
 
 
 class RetentionTests(unittest.TestCase):
-    def test_keep_latest_three_and_all_versions_within_seven_days(self):
+    @staticmethod
+    def item(number, published_at, draft=False):
+        return {
+            "tag_name": f"fork-v0.164.0-alpha.3.fork.{number}",
+            "draft": draft,
+            "published_at": None if draft else published_at,
+            "created_at": published_at,
+        }
+
+    def test_only_ten_latest_published_versions_survive_even_when_all_are_recent(self):
         now = datetime(2026, 10, 10, tzinfo=UTC)
-
-        def item(number, age, draft=False):
-            date = (now - timedelta(days=age)).isoformat()
-            return {
-                "tag_name": f"fork-v0.163.0-alpha.5.fork.{number}",
-                "draft": draft,
-                "published_at": None if draft else date,
-                "created_at": date,
-            }
-
         existing = [
-            item(1, 12),
-            item(3, 9),
-            item(4, 8),
-            item(5, 8),
-            item(6, 7),
-            item(7, 1, True),
+            self.item(i, (now - timedelta(hours=i)).isoformat())
+            for i in range(12, 0, -1)
         ]
-        existing.append(
-            {
-                "tag_name": "rust-v0.163.0-alpha.1",
-                "draft": False,
-                "published_at": "2020-01-01T00:00:00Z",
-            }
-        )
-        keep, expired = release.expired_releases(existing, now)
-        self.assertEqual(keep, {existing[i]["tag_name"] for i in (2, 3, 4)})
+        existing[0]["tag_name"] = "fork-v0.164.0-alpha.2.fork.99"
+        keep, expired = release.expired_releases(existing)
+        self.assertEqual(expired, existing[:2])
+        self.assertEqual(keep, {item["tag_name"] for item in existing[2:]})
+
+    def test_fewer_than_ten_old_versions_are_kept_and_other_tags_are_untouched(self):
+        existing = [self.item(i, "2020-01-01T00:00:00Z") for i in range(1, 5)]
+        existing.append({"tag_name": "rust-v0.164.0-alpha.3"})
+        keep, expired = release.expired_releases(existing)
+        self.assertEqual(keep, {item["tag_name"] for item in existing[:4]})
+        self.assertEqual(expired, [])
+
+    def test_recent_draft_is_removed_without_displacing_ten_old_published_versions(
+        self,
+    ):
+        now = datetime(2026, 10, 10, tzinfo=UTC)
+        existing = [self.item(i, "2020-01-01T00:00:00Z") for i in range(1, 11)]
+        existing.append(self.item(11, now.isoformat(), draft=True))
+        keep, expired = release.expired_releases(existing)
+        self.assertEqual(expired, [existing[-1]])
+        self.assertEqual(keep, {item["tag_name"] for item in existing[:10]})
+
+    def test_orphaned_fork_tags_are_removed_without_age_lookups(self):
+        published = self.item(3, "2020-01-01T00:00:00Z")
+        tags = [
+            "fork-v0.164.0-alpha.3.fork.1",
+            "fork-v0.164.0-alpha.3.fork.2",
+            published["tag_name"],
+            "fork-v-unrelated",
+        ]
+        refs = [{"ref": f"refs/tags/{tag}"} for tag in tags]
+        with (
+            mock.patch.object(release, "releases", return_value=[published]),
+            mock.patch.object(release, "api", return_value=[refs]),
+            mock.patch.object(release, "run") as write,
+        ):
+            release.prune(apply=True)
         self.assertEqual(
-            [r["tag_name"] for r in expired], [existing[i]["tag_name"] for i in (0, 1)]
+            write.call_args_list,
+            [
+                mock.call(
+                    "gh",
+                    "api",
+                    f"repos/{release.REPO}/git/refs/tags/{tag}",
+                    "--method",
+                    "DELETE",
+                )
+                for tag in tags[:2]
+            ],
         )
 
-    def test_old_draft_without_a_tag_can_be_cleaned_up(self):
-        existing = [
-            {
-                "tag_name": "fork-v0.163.0-alpha.4.fork.1",
-                "draft": True,
-                "published_at": None,
-                "created_at": "2020-01-01T00:00:00Z",
-            }
-        ]
+    def test_draft_without_a_tag_can_be_cleaned_up(self):
+        existing = [self.item(1, "2026-10-10T00:00:00Z", draft=True)]
         with (
             mock.patch.object(release, "releases", return_value=existing),
             mock.patch.object(release, "api", return_value=[[]]),
@@ -238,27 +264,6 @@ class RetentionTests(unittest.TestCase):
             release.REPO,
             "--yes",
         )
-
-    def test_recent_fourth_release_is_kept_and_old_draft_is_removed(self):
-        now = datetime(2026, 10, 10, tzinfo=UTC)
-        existing = [
-            {
-                "tag_name": f"fork-v0.163.0-alpha.5.fork.{i}",
-                "draft": False,
-                "published_at": (now - timedelta(days=i)).isoformat(),
-            }
-            for i in range(1, 5)
-        ]
-        existing.append(
-            {
-                "tag_name": "fork-v0.163.0-alpha.4.fork",
-                "draft": True,
-                "published_at": None,
-                "created_at": (now - timedelta(days=8)).isoformat(),
-            }
-        )
-        _, expired = release.expired_releases(existing, now)
-        self.assertEqual(expired, [existing[-1]])
 
 
 class PublicationTests(unittest.TestCase):
