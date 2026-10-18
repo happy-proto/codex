@@ -8,6 +8,44 @@ use pretty_assertions::assert_eq;
 
 const COMPLETED_AT: i64 = 1_700_000_000;
 
+#[tokio::test]
+async fn live_generation_speed_survives_streaming_and_resets_between_turns() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let (mut chat, _rx, _) = make_chatwidget_manual(None).await;
+    let thread_id = ThreadId::new();
+    chat.thread_id = Some(thread_id);
+    chat.turn_lifecycle.last_turn_id = Some("turn-1".into());
+    assert_eq!(chat.live_generation_speed_target(), None);
+    chat.on_task_started();
+    assert_eq!(
+        chat.live_generation_speed_target(),
+        Some((thread_id, "turn-1".into()))
+    );
+    chat.set_live_generation_speed(Some(42.34));
+    chat.bottom_pane.hide_status_indicator();
+    assert!(chat.bottom_pane.status_indicator_visible());
+    let mut terminal = Terminal::new(TestBackend::new(100, 10)).unwrap();
+    terminal
+        .draw(|frame| chat.bottom_pane.render(frame.area(), frame.buffer_mut()))
+        .unwrap();
+    assert!(normalized_backend_snapshot(terminal.backend()).contains("42.3 token/s (5m)"));
+    chat.set_live_generation_speed(None);
+    chat.bottom_pane.hide_status_indicator();
+    assert!(!chat.bottom_pane.status_indicator_visible());
+    chat.set_live_generation_speed(Some(12.0));
+    chat.on_task_started();
+    terminal
+        .draw(|frame| chat.bottom_pane.render(frame.area(), frame.buffer_mut()))
+        .unwrap();
+    assert!(!normalized_backend_snapshot(terminal.backend()).contains("token/s"));
+    chat.turn_lifecycle.finish();
+    chat.update_task_running_state();
+    assert_eq!(chat.live_generation_speed_target(), None);
+    assert!(!chat.bottom_pane.status_indicator_visible());
+}
+
 fn generation_speed_record(speed: f64) -> codex_state::GenerationSpeedRecord {
     codex_state::GenerationSpeedRecord::new(
         speed,

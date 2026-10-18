@@ -60,10 +60,81 @@ pub(super) async fn initialize(pool: &SqlitePool) -> anyhow::Result<()> {
     sqlx::query(include_str!("generation_speed.sql"))
         .execute(pool)
         .await?;
+    sqlx::query(include_str!("live_generation_speed.sql"))
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
 impl StateRuntime {
+    /// Reset the transient snapshot before a new local turn starts, including recovery.
+    pub async fn start_live_generation_speed(
+        &self,
+        thread_id: ThreadId,
+        turn_id: &str,
+        run_id: &str,
+    ) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO fork_live_generation_speeds_v1 (thread_id, turn_id, run_id, updated_at_ms, speed)
+             VALUES (?, ?, ?, ?, NULL)
+             ON CONFLICT(thread_id) DO UPDATE SET
+               turn_id = excluded.turn_id, run_id = excluded.run_id,
+               updated_at_ms = excluded.updated_at_ms, speed = NULL",
+        )
+        .bind(thread_id.to_string())
+        .bind(turn_id)
+        .bind(run_id)
+        .bind(chrono::Utc::now().timestamp_millis())
+        .execute(self.pool.as_ref())
+        .await?;
+        Ok(())
+    }
+
+    /// An old reporter cannot overwrite a replacement turn or a recovered run.
+    pub async fn update_live_generation_speed(
+        &self,
+        thread_id: ThreadId,
+        turn_id: &str,
+        run_id: &str,
+        speed: Option<f64>,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(speed.is_none_or(|speed| speed.is_finite() && speed >= 0.0));
+        sqlx::query(
+            "UPDATE fork_live_generation_speeds_v1 SET speed = ?, updated_at_ms = ?
+             WHERE thread_id = ? AND turn_id = ? AND run_id = ?",
+        )
+        .bind(speed)
+        .bind(chrono::Utc::now().timestamp_millis())
+        .bind(thread_id.to_string())
+        .bind(turn_id)
+        .bind(run_id)
+        .execute(self.pool.as_ref())
+        .await?;
+        Ok(())
+    }
+
+    /// Only the displayed active turn may use a transient metric.
+    pub async fn live_generation_speed(
+        &self,
+        thread_id: ThreadId,
+        turn_id: &str,
+    ) -> anyhow::Result<Option<f64>> {
+        // Wall time is only a reporter heartbeat, never the rolling sampling clock.
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let speed = sqlx::query_scalar::<_, Option<f64>>(
+            "SELECT speed FROM fork_live_generation_speeds_v1 WHERE thread_id = ? AND turn_id = ?
+             AND updated_at_ms BETWEEN ? AND ?",
+        )
+        .bind(thread_id.to_string())
+        .bind(turn_id)
+        .bind(now_ms.saturating_sub(3000))
+        .bind(now_ms)
+        .fetch_optional(self.pool.as_ref())
+        .await?
+        .flatten();
+        Ok(speed.filter(|speed| speed.is_finite() && *speed >= 0.0))
+    }
+
     /// Remove any pre-crash measurement when the same turn resumes or becomes invalid.
     pub async fn clear_generation_speed(
         &self,
@@ -171,6 +242,69 @@ mod tests {
     use crate::runtime::test_support::test_thread_metadata;
     use crate::runtime::test_support::unique_temp_dir;
     use codex_utils_absolute_path::test_support::PathExt;
+
+    #[tokio::test]
+    async fn live_generation_speed_is_shared_isolated_and_rejects_old_reporters()
+    -> anyhow::Result<()> {
+        let home = unique_temp_dir();
+        let _cleanup = scopeguard::guard(home.clone(), |path| {
+            let _ = std::fs::remove_dir_all(path);
+        });
+        let config = crate::SqliteConfig::new_for_testing(home.as_path().abs());
+        let writer = StateRuntime::init(config.clone(), "test".into()).await?;
+        let thread_id = ThreadId::new();
+        writer
+            .upsert_thread(&test_thread_metadata(&home, thread_id, home.clone()))
+            .await?;
+        let reader = StateRuntime::init(config, "test".into()).await?;
+        writer
+            .start_live_generation_speed(thread_id, "turn", "old")
+            .await?;
+        writer
+            .update_live_generation_speed(thread_id, "turn", "old", Some(42.3))
+            .await?;
+        assert_eq!(
+            reader.live_generation_speed(thread_id, "turn").await?,
+            Some(42.3)
+        );
+        assert_eq!(
+            reader.live_generation_speed(thread_id, "other").await?,
+            None
+        );
+        assert_eq!(
+            reader
+                .live_generation_speed(ThreadId::new(), "turn")
+                .await?,
+            None
+        );
+        writer
+            .start_live_generation_speed(thread_id, "turn", "recovered")
+            .await?;
+        writer
+            .update_live_generation_speed(thread_id, "turn", "old", Some(999.0))
+            .await?;
+        assert_eq!(reader.live_generation_speed(thread_id, "turn").await?, None);
+        writer
+            .update_live_generation_speed(thread_id, "turn", "recovered", Some(0.0))
+            .await?;
+        assert_eq!(
+            reader.live_generation_speed(thread_id, "turn").await?,
+            Some(0.0)
+        );
+        for invalid in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(
+                writer
+                    .update_live_generation_speed(thread_id, "turn", "recovered", Some(invalid))
+                    .await
+                    .is_err()
+            );
+        }
+        writer
+            .update_live_generation_speed(thread_id, "turn", "recovered", None)
+            .await?;
+        assert_eq!(reader.live_generation_speed(thread_id, "turn").await?, None);
+        Ok(())
+    }
 
     fn completion() -> GenerationSpeedCompletion {
         GenerationSpeedCompletion {

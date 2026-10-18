@@ -14,7 +14,7 @@
 | 0007 | [工作中显式 skill 正文注入](0007-steered-skills.md) |
 | 0008 | [容量错误无限退避重试](0008-capacity-retries.md) |
 | 0009 | [已打开会话的名称同步](0009-thread-name-refresh.md) |
-| 0010 | [回合平均生成速度](0010-generation-speed.md) |
+| 0010 | [回合与近期平均生成速度](0010-generation-speed.md) |
 | 0011 | [默认使用开放的浏览器与电脑操作工具](0011-open-automation.md) |
 | 0012 | [Responses Lite 请求来源字段兼容](0012-responses-lite-content-metadata.md) |
 | 0013 | [WebSocket 连接主动轮转](0013-websocket-rotation.md) |

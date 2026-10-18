@@ -2075,6 +2075,9 @@ impl App {
             } => {
                 self.finish_thread_usage_refresh(tui, thread_id, request_id, result)?;
             }
+            AppEvent::LiveGenerationSpeedUpdated { thread_id, turn_id, speed } => {
+                self.finish_live_generation_speed(thread_id, turn_id, speed);
+            }
             AppEvent::ThreadNameRefreshed {
                 request_id,
                 thread_id,

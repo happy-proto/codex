@@ -4,6 +4,17 @@
 use super::*;
 
 impl ChatWidget {
+    pub(crate) fn live_generation_speed_target(&self) -> Option<(ThreadId, String)> {
+        self.turn_lifecycle
+            .agent_turn_running
+            .then(|| Some((self.thread_id?, self.turn_lifecycle.last_turn_id.clone()?)))
+            .flatten()
+    }
+
+    pub(crate) fn set_live_generation_speed(&mut self, speed: Option<f64>) {
+        self.bottom_pane.set_recent_generation_speed(speed);
+    }
+
     pub(crate) fn completion_cell(
         &mut self,
         turn: &Turn,

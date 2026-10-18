@@ -12,7 +12,9 @@ SCHEMA = STORAGE.with_suffix(".sql")
 
 
 def production_query(prefix):
-    queries = re.findall(r'sqlx::query\(\s*"([^"]+)"', STORAGE.read_text())
+    queries = re.findall(
+        r'sqlx::query(?:_scalar[^\n(]*)?\(\s*"([^"]+)"', STORAGE.read_text()
+    )
     return next(query for query in queries if query.startswith(prefix))
 
 
@@ -27,6 +29,9 @@ class GenerationSpeedStorageTests(unittest.TestCase):
         self.writer.execute("PRAGMA journal_mode = WAL")
         self.writer.execute("CREATE TABLE threads (id TEXT PRIMARY KEY)")
         self.writer.executescript(SCHEMA.read_text())
+        self.writer.executescript(
+            SCHEMA.with_name("live_generation_speed.sql").read_text()
+        )
         self.writer.executemany(
             "INSERT INTO threads VALUES (?)", [("first",), ("second",)]
         )
@@ -34,7 +39,7 @@ class GenerationSpeedStorageTests(unittest.TestCase):
 
     def save(self, thread, turn, tokens, duration):
         self.writer.execute(
-            production_query("INSERT INTO"),
+            production_query("INSERT INTO fork_generation_speeds_v1"),
             (thread, turn, tokens, duration, 10, 14, 4000),
         )
         self.writer.execute(
@@ -115,6 +120,66 @@ class GenerationSpeedStorageTests(unittest.TestCase):
         self.assertEqual(
             self.read(self.writer, "second"), [("retained", 30, 1_000_000)]
         )
+
+    def start_live(self, thread, turn, run):
+        self.writer.execute(
+            production_query("INSERT INTO fork_live_generation_speeds"),
+            (thread, turn, run, 10000),
+        )
+        self.writer.commit()
+
+    def update_live(self, thread, turn, run, speed):
+        self.writer.execute(
+            production_query("UPDATE fork_live_generation_speeds"),
+            (speed, 10000, thread, turn, run),
+        )
+        self.writer.commit()
+
+    def read_live(self, connection, thread, turn):
+        row = connection.execute(
+            production_query("SELECT speed FROM fork_live_generation_speeds"),
+            (thread, turn, 7000, 10000),
+        ).fetchone()
+        return row[0] if row else None
+
+    def test_live_cross_connection_isolation_reset_and_expiry(self):
+        reader = sqlite3.connect(self.path)
+        self.addCleanup(reader.close)
+        self.start_live("first", "turn", "run-1")
+        self.start_live("second", "turn", "run-2")
+        self.update_live("first", "turn", "run-1", 42.3)
+        self.update_live("second", "turn", "run-2", 10.0)
+        self.assertEqual(self.read_live(reader, "first", "turn"), 42.3)
+        self.assertEqual(self.read_live(reader, "second", "turn"), 10.0)
+        self.assertIsNone(self.read_live(reader, "first", "different"))
+        self.start_live("first", "turn", "recovered")
+        self.update_live("first", "turn", "run-1", 999.0)
+        self.assertIsNone(self.read_live(reader, "first", "turn"))
+        self.update_live("first", "turn", "recovered", 0.0)
+        self.assertEqual(self.read_live(reader, "first", "turn"), 0.0)
+        self.update_live("first", "turn", "recovered", None)
+        self.assertIsNone(self.read_live(reader, "first", "turn"))
+        self.start_live("first", "next-turn", "next-run")
+        self.update_live("first", "turn", "recovered", 999.0)
+        self.assertIsNone(self.read_live(reader, "first", "next-turn"))
+        self.writer.execute("DELETE FROM threads WHERE id = 'first'")
+        self.writer.commit()
+        self.assertEqual(
+            self.writer.execute(
+                "SELECT COUNT(*) FROM fork_live_generation_speeds_v1"
+            ).fetchone()[0],
+            1,
+        )
+
+    def test_live_reporter_heartbeat_hides_stale_or_future_snapshots(self):
+        self.start_live("first", "turn", "run")
+        self.update_live("first", "turn", "run", 20.0)
+        for timestamp in [6999, 10001]:
+            self.writer.execute(
+                "UPDATE fork_live_generation_speeds_v1 SET updated_at_ms = ?",
+                (timestamp,),
+            )
+            self.assertIsNone(self.read_live(self.writer, "first", "turn"))
 
 
 if __name__ == "__main__":

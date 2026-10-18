@@ -89,6 +89,21 @@ pub(crate) struct TurnProfileTimingGuard {
 }
 
 impl TurnTimingState {
+    pub(crate) async fn start_generation_speed_reporter(
+        &self,
+        state_db: crate::StateDbHandle,
+        thread_id: codex_protocol::ThreadId,
+        turn_id: String,
+    ) -> crate::generation_speed::GenerationSpeedReporter {
+        crate::generation_speed::GenerationSpeedReporter::start(
+            &self.generation_speed,
+            state_db,
+            thread_id,
+            turn_id,
+        )
+        .await
+    }
+
     pub(crate) fn begin_generation_measurement(
         &self,
     ) -> crate::generation_speed::GenerationSpeedMeasurement {

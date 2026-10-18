@@ -10,6 +10,76 @@ use serde_json::json;
 use wiremock::ResponseTemplate;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn live_generation_speed_is_available_while_a_follow_up_call_is_pending() -> anyhow::Result<()>
+{
+    use codex_protocol::user_input::UserInput;
+    use core_test_support::wait_for_event_match;
+    use std::time::Duration;
+
+    skip_if_no_network!(Ok(()));
+    let server = responses::start_mock_server().await;
+    responses::mount_response_sequence(
+        &server,
+        vec![
+            responses::sse_response(responses::sse(vec![
+                responses::ev_response_created("first"),
+                responses::ev_assistant_message("partial", "working"),
+                json!({"type": "response.completed", "response": {"id": "first", "end_turn": false,
+                "usage": {"input_tokens": 10, "output_tokens": 100, "total_tokens": 110}}}),
+            ])),
+            responses::sse_response(responses::sse(vec![
+                responses::ev_response_created("second"),
+                responses::ev_assistant_message("final", "done"),
+                json!({"type": "response.completed", "response": {"id": "second",
+                "usage": {"input_tokens": 10, "output_tokens": 200, "total_tokens": 210}}}),
+            ]))
+            .set_delay(Duration::from_secs(5)),
+        ],
+    )
+    .await;
+    let test = test_codex()
+        .with_config(|config| {
+            config
+                .features
+                .enable(Feature::Sqlite)
+                .expect("enable sqlite");
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    let db = test.codex.state_db().expect("state db enabled");
+    let thread_id = test.session_configured.thread_id;
+    test.codex
+        .start_or_steer_turn(codex_core::TurnInputRequest::user_input(vec![
+            UserInput::Text {
+                text: "continue working".into(),
+                text_elements: Vec::new(),
+            },
+        ]))
+        .await?;
+    let turn_id = wait_for_event_match(&test.codex, |event| match event {
+        EventMsg::TurnStarted(event) => Some(event.turn_id.clone()),
+        _ => None,
+    })
+    .await;
+    let speed = tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            if let Some(speed) = db.live_generation_speed(thread_id, &turn_id).await? {
+                break anyhow::Ok(speed);
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await??;
+    assert!(speed.is_finite() && speed > 0.0);
+    assert!(db.generation_speeds(thread_id).await?.is_empty());
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn generation_speed_is_saved_before_completion_and_missing_usage_hides_next_turn()
 -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));

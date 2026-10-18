@@ -322,6 +322,23 @@ impl Session {
             .set_turn_started_at_unix_ms(turn_started_at_unix_ms);
         let token_usage_at_turn_start = self.total_token_usage().await.unwrap_or_default();
 
+        let generation_speed_reporter = if task_kind == TaskKind::Regular
+            && let Some(state_db) = self.state_db()
+        {
+            Some(
+                turn_context
+                    .turn_timing_state
+                    .start_generation_speed_reporter(
+                        state_db,
+                        self.thread_id,
+                        turn_context.sub_id.clone(),
+                    )
+                    .await,
+            )
+        } else {
+            None
+        };
+
         let cancellation_token = CancellationToken::new();
         let done = Arc::new(Notify::new());
 
@@ -383,6 +400,7 @@ impl Session {
         );
         let storage_originator = AuthStorageOriginator::from_client_name(&turn_context.originator);
         let task_future = async move {
+            let _generation_speed_reporter = generation_speed_reporter;
             let ctx_for_finish = Arc::clone(&ctx);
             let task_result = task_for_run
                 .run(

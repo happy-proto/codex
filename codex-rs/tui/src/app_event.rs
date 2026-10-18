@@ -812,6 +812,11 @@ pub(crate) enum AppEvent {
     },
 
     /// Metadata-only read for low-frequency status-line and terminal-title reconciliation.
+    LiveGenerationSpeedUpdated {
+        thread_id: ThreadId,
+        turn_id: String,
+        speed: Option<f64>,
+    },
     ThreadNameRefreshed {
         request_id: uuid::Uuid,
         thread_id: ThreadId,

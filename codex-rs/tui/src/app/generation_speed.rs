@@ -3,6 +3,48 @@
 use super::*;
 
 impl App {
+    pub(super) fn refresh_live_generation_speed(&mut self) {
+        let target = self.chat_widget.live_generation_speed_target();
+        let state_db = self
+            .state_db
+            .clone()
+            .filter(|_| !self.app_server_target.uses_remote_workspace() && !self.reconnect.offline);
+        let (Some((thread_id, turn_id)), Some(state_db)) = (target, state_db) else {
+            self.chat_widget.set_live_generation_speed(None);
+            return;
+        };
+        let tx = self.app_event_tx.clone();
+        tokio::spawn(async move {
+            let speed = tokio::time::timeout(
+                Duration::from_millis(100),
+                state_db.live_generation_speed(thread_id, &turn_id),
+            )
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .flatten();
+            tx.send(AppEvent::LiveGenerationSpeedUpdated {
+                thread_id,
+                turn_id,
+                speed,
+            });
+        });
+    }
+
+    pub(super) fn finish_live_generation_speed(
+        &mut self,
+        thread_id: ThreadId,
+        turn_id: String,
+        speed: Option<f64>,
+    ) {
+        if self.chat_widget.live_generation_speed_target() != Some((thread_id, turn_id)) {
+            return;
+        }
+        let speed = speed
+            .filter(|_| !self.app_server_target.uses_remote_workspace() && !self.reconnect.offline);
+        self.chat_widget.set_live_generation_speed(speed);
+    }
+
     pub(super) async fn refresh_generation_speeds(&mut self, thread_id: ThreadId) {
         self.chat_widget.generation_speeds.clear();
         if self.app_server_target.uses_remote_workspace() {
