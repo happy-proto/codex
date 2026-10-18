@@ -262,18 +262,11 @@ impl GenerationSpeedReporter {
         turn_id: String,
     ) -> Self {
         let run_id = uuid::Uuid::new_v4().to_string();
-        // Fixed at reporter creation, not at each retry or eventual SQLite execution.
-        let run_started_at_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
         // Reset before publishing TurnStarted, so replay cannot reuse a pre-crash value.
         let initialized = matches!(
             tokio::time::timeout(
                 Duration::from_millis(100),
-                state_db.start_live_generation_speed(
-                    thread_id,
-                    &turn_id,
-                    &run_id,
-                    run_started_at_ns
-                ),
+                state_db.start_live_generation_speed(thread_id, &turn_id, &run_id),
             )
             .await,
             Ok(Ok(()))
@@ -290,12 +283,7 @@ impl GenerationSpeedReporter {
                     initialized = matches!(
                         tokio::time::timeout(
                             Duration::from_millis(100),
-                            state_db.start_live_generation_speed(
-                                thread_id,
-                                &turn_id,
-                                &run_id,
-                                run_started_at_ns
-                            ),
+                            state_db.start_live_generation_speed(thread_id, &turn_id, &run_id),
                         )
                         .await,
                         Ok(Ok(()))

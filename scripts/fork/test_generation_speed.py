@@ -36,7 +36,6 @@ class GenerationSpeedStorageTests(unittest.TestCase):
             "INSERT INTO threads VALUES (?)", [("first",), ("second",)]
         )
         self.writer.commit()
-        self.live_generation = 0
 
     def save(self, thread, turn, tokens, duration):
         self.writer.execute(
@@ -122,14 +121,17 @@ class GenerationSpeedStorageTests(unittest.TestCase):
             self.read(self.writer, "second"), [("retained", 30, 1_000_000)]
         )
 
-    def start_live(self, thread, turn, run, generation=None):
-        if generation is None:
-            self.live_generation += 1
-            generation = self.live_generation
-        self.writer.execute(
-            production_query("INSERT INTO fork_live_generation_speeds"),
-            (thread, turn, run, generation, 10000),
-        )
+    def start_live(self, thread, turn, run):
+        self.writer.execute("BEGIN IMMEDIATE")
+        current = self.writer.execute(
+            production_query("SELECT run_id FROM fork_live_generation_speeds"),
+            (thread,),
+        ).fetchone()
+        if not current or current[0] != run:
+            self.writer.execute(
+                production_query("INSERT INTO fork_live_generation_speeds"),
+                (thread, turn, run, 10000),
+            )
         self.writer.commit()
 
     def update_live(self, thread, turn, run, speed):
@@ -196,21 +198,41 @@ class GenerationSpeedStorageTests(unittest.TestCase):
         with self.assertRaises(sqlite3.OperationalError):
             reader.execute(
                 production_query("INSERT INTO fork_live_generation_speeds"),
-                ("first", "turn", "recovered", 2, 10000),
+                ("first", "turn", "recovered", 10000),
             )
         self.assertEqual(self.read_live(reader, "first", "turn"), 42.0)
         self.assertIsNone(self.read_live(reader, "first", "turn", observed_at=10000))
         locker.rollback()
 
-    def test_live_late_initialization_and_same_run_retry_preserve_current_run(self):
-        self.start_live("first", "old-turn", "old", generation=1)
-        self.start_live("first", "new-turn", "new", generation=2)
+    def test_live_same_run_retry_preserves_current_run(self):
+        self.start_live("first", "old-turn", "old")
+        self.start_live("first", "new-turn", "new")
         self.update_live("first", "new-turn", "new", 42.0)
-        self.start_live("first", "old-turn", "old", generation=1)
         self.update_live("first", "old-turn", "old", 999.0)
         self.assertEqual(self.read_live(self.writer, "first", "new-turn"), 42.0)
-        self.start_live("first", "new-turn", "new", generation=2)
+        self.start_live("first", "new-turn", "new")
         self.assertEqual(self.read_live(self.writer, "first", "new-turn"), 42.0)
+
+    def test_live_new_run_can_claim_after_wall_clock_moves_backwards(self):
+        self.start_live("first", "old-turn", "old")
+        self.writer.execute(
+            "UPDATE fork_live_generation_speeds_v1 SET updated_at_ms = 999999"
+        )
+        self.writer.commit()
+        self.start_live("first", "new-turn", "new")
+        self.update_live("first", "new-turn", "new", 42.0)
+        self.assertEqual(self.read_live(self.writer, "first", "new-turn"), 42.0)
+
+    def test_live_cancelled_initialization_transaction_preserves_old_run(self):
+        self.start_live("first", "old-turn", "old")
+        self.update_live("first", "old-turn", "old", 42.0)
+        self.writer.execute("BEGIN IMMEDIATE")
+        self.writer.execute(
+            production_query("INSERT INTO fork_live_generation_speeds"),
+            ("first", "new-turn", "new", 10000),
+        )
+        self.writer.rollback()
+        self.assertEqual(self.read_live(self.writer, "first", "old-turn"), 42.0)
 
 
 if __name__ == "__main__":

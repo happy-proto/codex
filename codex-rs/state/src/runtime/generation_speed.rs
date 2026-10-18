@@ -73,24 +73,36 @@ impl StateRuntime {
         thread_id: ThreadId,
         turn_id: &str,
         run_id: &str,
-        run_started_at_ns: i64,
     ) -> anyhow::Result<()> {
+        // Serialize claims inside a transaction. A cancelled SQLite worker can finish its
+        // statement, but rollback (including a cancelled BEGIN) releases the lock before a
+        // replacement claim can commit. No wall-clock ordering is needed.
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let current =
+            sqlx::query("SELECT run_id FROM fork_live_generation_speeds_v1 WHERE thread_id = ?")
+                .bind(thread_id.to_string())
+                .fetch_optional(&mut *tx)
+                .await?;
+        if let Some(row) = &current
+            && row.try_get::<String, _>("run_id")? == run_id
+        {
+            tx.commit().await?;
+            return Ok(());
+        }
         sqlx::query(
-            "INSERT INTO fork_live_generation_speeds_v1 (thread_id, turn_id, run_id, run_started_at_ns, updated_at_ms, speed)
-             VALUES (?, ?, ?, ?, ?, NULL)
+            "INSERT INTO fork_live_generation_speeds_v1 (thread_id, turn_id, run_id, updated_at_ms, speed)
+             VALUES (?, ?, ?, ?, NULL)
              ON CONFLICT(thread_id) DO UPDATE SET
                turn_id = excluded.turn_id, run_id = excluded.run_id,
-               run_started_at_ns = excluded.run_started_at_ns,
-               updated_at_ms = excluded.updated_at_ms, speed = NULL
-             WHERE fork_live_generation_speeds_v1.run_started_at_ns < excluded.run_started_at_ns",
+               updated_at_ms = excluded.updated_at_ms, speed = NULL",
         )
         .bind(thread_id.to_string())
         .bind(turn_id)
         .bind(run_id)
-        .bind(run_started_at_ns)
         .bind(chrono::Utc::now().timestamp_millis())
-        .execute(self.pool.as_ref())
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -268,7 +280,7 @@ mod tests {
             .await?;
         let reader = StateRuntime::init(config, "test".into()).await?;
         writer
-            .start_live_generation_speed(thread_id, "turn", "old", 1)
+            .start_live_generation_speed(thread_id, "turn", "old")
             .await?;
         writer
             .update_live_generation_speed(thread_id, "turn", "old", Some(42.3))
@@ -288,7 +300,7 @@ mod tests {
             None
         );
         writer
-            .start_live_generation_speed(thread_id, "turn", "recovered", 2)
+            .start_live_generation_speed(thread_id, "turn", "recovered")
             .await?;
         writer
             .update_live_generation_speed(thread_id, "turn", "old", Some(999.0))
@@ -344,7 +356,7 @@ mod tests {
             .upsert_thread(&test_thread_metadata(&home, id, home.clone()))
             .await?;
         writer
-            .start_live_generation_speed(id, "turn", "before-crash", 1)
+            .start_live_generation_speed(id, "turn", "before-crash")
             .await?;
         writer
             .update_live_generation_speed(id, "turn", "before-crash", Some(42.0))
@@ -355,7 +367,7 @@ mod tests {
         assert!(
             tokio::time::timeout(
                 std::time::Duration::from_millis(20),
-                reader.start_live_generation_speed(id, "turn", "recovered", 2),
+                reader.start_live_generation_speed(id, "turn", "recovered"),
             )
             .await
             .is_err()
@@ -393,7 +405,7 @@ mod tests {
         assert!(
             tokio::time::timeout(
                 std::time::Duration::from_millis(20),
-                old_writer.start_live_generation_speed(id, "old-turn", "old", 1),
+                old_writer.start_live_generation_speed(id, "old-turn", "old"),
             )
             .await
             .is_err()
@@ -401,8 +413,8 @@ mod tests {
         // Install a replacement while the cancelled old SQLite statement is still blocked.
         sqlx::query(
             "INSERT INTO fork_live_generation_speeds_v1
-                    (thread_id, turn_id, run_id, run_started_at_ns, updated_at_ms, speed)
-                    VALUES (?, 'new-turn', 'new', 2, ?, 42.0)",
+                    (thread_id, turn_id, run_id, updated_at_ms, speed)
+                    VALUES (?, 'new-turn', 'new', ?, 42.0)",
         )
         .bind(id.to_string())
         .bind(chrono::Utc::now().timestamp_millis())
@@ -417,7 +429,7 @@ mod tests {
         );
         // Retrying the current generation must not reset an already published sample.
         current
-            .start_live_generation_speed(id, "new-turn", "new", 2)
+            .start_live_generation_speed(id, "new-turn", "new")
             .await?;
         assert_eq!(
             current.live_generation_speed(id, "new-turn", 0).await?,
