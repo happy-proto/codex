@@ -2733,10 +2733,12 @@ async fn try_run_sampling_request(
     let effort = sess
         .reasoning_effort_for_request(&step_context.settings, super::RequestEffortUsage::Sampling)
         .await;
-    let generation_measurement = turn_context
-        .turn_timing_state
-        .begin_generation_measurement()
-        .observe_failures(client_session.generation_failure_counter());
+    let mut generation_measurement = Some(
+        turn_context
+            .turn_timing_state
+            .begin_generation_measurement()
+            .observe_failures(client_session.generation_failure_counter()),
+    );
     let mut stream = client_session
         .stream(
             prompt,
@@ -3158,12 +3160,15 @@ async fn try_run_sampling_request(
                     output_tokens = token_usage.as_ref().map(|usage| usage.output_tokens),
                     "generation speed response completed"
                 );
-                generation_measurement.complete(
-                    &response_id,
-                    // end_turn controls follow-up sampling, not the validity of terminal usage.
-                    // A drained interruption can still provide exact usage for this request.
-                    token_usage.as_ref().map(|usage| usage.output_tokens),
-                );
+                generation_measurement
+                    .take()
+                    .expect("response measurement is active")
+                    .complete(
+                        &response_id,
+                        // end_turn controls follow-up sampling, not the validity of terminal usage.
+                        // A drained interruption can still provide exact usage for this request.
+                        token_usage.as_ref().map(|usage| usage.output_tokens),
+                    );
                 sess.services
                     .analytics_events_client
                     .track_code_mode_tool_call(
@@ -3358,6 +3363,8 @@ async fn try_run_sampling_request(
             }
         }
     };
+    // A failed/closed/preempted stream must stop the clock before tool or user waits.
+    drop(generation_measurement);
     drop(sampling_span);
     drop(sampling_timing_guard);
 

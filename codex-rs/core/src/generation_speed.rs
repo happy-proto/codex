@@ -262,11 +262,18 @@ impl GenerationSpeedReporter {
         turn_id: String,
     ) -> Self {
         let run_id = uuid::Uuid::new_v4().to_string();
+        // Fixed at reporter creation, not at each retry or eventual SQLite execution.
+        let run_started_at_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX);
         // Reset before publishing TurnStarted, so replay cannot reuse a pre-crash value.
         let initialized = matches!(
             tokio::time::timeout(
                 Duration::from_millis(100),
-                state_db.start_live_generation_speed(thread_id, &turn_id, &run_id),
+                state_db.start_live_generation_speed(
+                    thread_id,
+                    &turn_id,
+                    &run_id,
+                    run_started_at_ns
+                ),
             )
             .await,
             Ok(Ok(()))
@@ -283,7 +290,12 @@ impl GenerationSpeedReporter {
                     initialized = matches!(
                         tokio::time::timeout(
                             Duration::from_millis(100),
-                            state_db.start_live_generation_speed(thread_id, &turn_id, &run_id),
+                            state_db.start_live_generation_speed(
+                                thread_id,
+                                &turn_id,
+                                &run_id,
+                                run_started_at_ns
+                            ),
                         )
                         .await,
                         Ok(Ok(()))
@@ -419,6 +431,23 @@ mod tests {
             Some((0, Duration::from_secs(1))),
         );
         assert_eq!(empty.speed(start + Duration::from_secs(1)), Some(0.0));
+    }
+
+    #[test]
+    fn dropped_generation_measurement_freezes_recent_clock_during_following_tool_wait() {
+        let state = Arc::new(Mutex::new(GenerationSpeedState::default()));
+        GenerationSpeedState::measurement(&state).complete("valid", Some(200));
+        drop(GenerationSpeedState::measurement(&state));
+        let mut state = state.lock().unwrap();
+        let now = Instant::now();
+        let after_tools = now + Duration::from_secs(1800);
+        let speed = state.recent_speed(now);
+        assert!(speed.is_some());
+        assert_eq!(state.recent_speed(after_tools), speed);
+        assert_eq!(
+            state.recent.elapsed_at(after_tools),
+            state.recent.elapsed_at(now)
+        );
     }
 
     #[test]

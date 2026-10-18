@@ -352,18 +352,17 @@ mod tests {
         let timer = StatusTimer::default();
         row.set_recent_generation_speed(Some("42.3 token/s (5m)".into()));
         row.update_inline_message(Some("1 background terminal".into()));
-        let text = row.with_timer(&timer).lines(120)[0].to_string();
+        let header = |row: &StatusIndicatorWidget, width| {
+            StatusIndicator { row, timer: &timer }.lines(width)[0].to_string()
+        };
+        let text = header(&row, 120);
         assert!(text.contains("esc to interrupt"));
         assert!(text.contains("42.3 token/s (5m) · 1 background terminal"));
         for width in [10, 30, 120] {
-            assert!(line_width(&row.with_timer(&timer).lines(width)[0]) <= usize::from(width));
+            assert!(display_width(&header(&row, width)) <= usize::from(width));
         }
         row.set_recent_generation_speed(None);
-        assert!(
-            !row.with_timer(&timer).lines(120)[0]
-                .to_string()
-                .contains("token/s")
-        );
+        assert!(!header(&row, 120).contains("token/s"));
     }
 
     #[test]
