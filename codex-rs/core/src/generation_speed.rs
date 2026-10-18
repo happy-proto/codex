@@ -252,9 +252,21 @@ impl Drop for GenerationSpeedMeasurement {
 }
 
 /// Private local side channel; the upstream app-server protocol stays unchanged.
-pub(crate) struct GenerationSpeedReporter(tokio::task::JoinHandle<()>);
+#[derive(Clone)]
+pub(crate) struct GenerationSpeedReporter {
+    task: Arc<tokio::sync::Mutex<Option<tokio_util::task::AbortOnDropHandle<()>>>>,
+}
 
 impl GenerationSpeedReporter {
+    pub(crate) async fn stop(&self) {
+        let mut task = self.task.lock().await;
+        if let Some(handle) = task.as_mut() {
+            handle.abort();
+            let _ = handle.await;
+        }
+        task.take();
+    }
+
     pub(crate) async fn start(
         state: &Arc<Mutex<GenerationSpeedState>>,
         state_db: crate::StateDbHandle,
@@ -272,7 +284,7 @@ impl GenerationSpeedReporter {
             Ok(Ok(()))
         );
         let state = Arc::downgrade(state);
-        Self(tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let mut initialized = initialized;
             let mut interval = tokio::time::interval(Duration::from_secs(1));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -311,19 +323,38 @@ impl GenerationSpeedReporter {
                     Err(err) => tracing::debug!(%err, "live generation speed write timed out"),
                 }
             }
-        }))
-    }
-}
-
-impl Drop for GenerationSpeedReporter {
-    fn drop(&mut self) {
-        self.0.abort();
+        });
+        Self {
+            task: Arc::new(tokio::sync::Mutex::new(Some(
+                tokio_util::task::AbortOnDropHandle::new(task),
+            ))),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn recent_generation_speed_reporter_stop_waits_for_shared_publisher_to_exit() {
+        let (tx, mut rx) = tokio::sync::oneshot::channel::<()>();
+        let task = tokio::spawn(async move {
+            let _publisher_lifetime = tx;
+            std::future::pending::<()>().await;
+        });
+        let reporter = GenerationSpeedReporter {
+            task: Arc::new(tokio::sync::Mutex::new(Some(
+                tokio_util::task::AbortOnDropHandle::new(task),
+            ))),
+        };
+        let other_owner = reporter.clone();
+        tokio::join!(reporter.stop(), other_owner.stop());
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+        ));
+    }
 
     #[test]
     fn recent_generation_speed_weights_completed_calls_and_freezes_during_tools() {

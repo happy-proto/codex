@@ -399,8 +399,8 @@ impl Session {
             codex.turn.token_usage.total_tokens = field::Empty,
         );
         let storage_originator = AuthStorageOriginator::from_client_name(&turn_context.originator);
+        let generation_speed_reporter_for_task = generation_speed_reporter.clone();
         let task_future = async move {
-            let _generation_speed_reporter = generation_speed_reporter;
             let ctx_for_finish = Arc::clone(&ctx);
             let task_result = task_for_run
                 .run(
@@ -411,6 +411,11 @@ impl Session {
                 )
                 .instrument(trace_span!("session_task.run"))
                 .await;
+            // Finalization can start a queued turn. Stop and join the old publisher first,
+            // including any initialization retry that could claim the next turn's snapshot.
+            if let Some(reporter) = generation_speed_reporter_for_task {
+                reporter.stop().await;
+            }
             let sess = Arc::clone(&session);
             // Private reviewers save their transcript together with the terminal event.
             // Errors and cancellation retain their existing save path.
@@ -446,6 +451,7 @@ impl Session {
         let running_task = RunningTask {
             done,
             handle: AbortOnDropHandle::new(handle),
+            generation_speed_reporter,
             kind: task_kind,
             task,
             cancellation_token,
@@ -1037,6 +1043,10 @@ impl Session {
         error: Option<ErrorEvent>,
     ) {
         let sub_id = task.turn_context.sub_id.clone();
+        // Also join the publisher when the sampling task needs a forced abort.
+        if let Some(reporter) = &task.generation_speed_reporter {
+            reporter.stop().await;
+        }
         if task.cancellation_token.is_cancelled() {
             self.emit_turn_abort_lifecycle(reason, task.turn_context.extension_data.as_ref())
                 .await;
