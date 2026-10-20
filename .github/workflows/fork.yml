@@ -278,7 +278,7 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libcap-dev libasound2-dev
+          sudo apt-get install -y --no-install-recommends pkg-config libcap-dev libasound2-dev fish
       - uses: dtolnay/rust-toolchain@1.95.0
       - name: 记录 sccache 缓存键与存储错误
         run: |
@@ -363,6 +363,7 @@ jobs:
         working-directory: codex-rs
         run: |
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --lib
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test completion
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test features features_list_
       - name: 验证 MCP 列表展示与旧格式兼容
         if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
