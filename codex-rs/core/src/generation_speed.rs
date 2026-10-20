@@ -16,7 +16,6 @@ pub(crate) struct GenerationSpeedState {
     active_requests: usize,
     response_ids: HashSet<String>,
     invalid: bool,
-    recent_disabled: bool,
     recent: RecentGenerationSpeed,
 }
 
@@ -130,16 +129,13 @@ impl GenerationSpeedState {
     }
 
     pub(crate) fn invalidate(&mut self) {
-        self.recent_disabled = true;
+        // Recovery cannot reconstruct turn totals, but new requests can rebuild the recent window.
+        self.recent = RecentGenerationSpeed::default();
         self.invalidate_with_reason("daemon_recovery");
     }
 
     fn recent_speed(&mut self, now: Instant) -> Option<f64> {
-        if self.recent_disabled {
-            None
-        } else {
-            self.recent.speed(now)
-        }
+        self.recent.speed(now)
     }
 
     fn invalidate_with_reason(&mut self, reason: &'static str) {
@@ -605,11 +601,48 @@ mod tests {
     }
 
     #[test]
-    fn recovered_turn_does_not_publish_only_its_new_requests() {
+    fn recovered_turn_totals_remain_unavailable_after_new_requests() {
         let mut state = GenerationSpeedState::default();
         state.invalidate();
         state.active_requests = 1;
         state.record("after-recovery", Some(100), Duration::from_secs(1));
+        assert_eq!(state.totals(), None);
+    }
+
+    #[test]
+    fn recovered_turn_rebuilds_recent_speed_from_new_completed_requests() {
+        let state = Arc::new(Mutex::new(GenerationSpeedState::default()));
+        GenerationSpeedState::measurement(&state).complete("before-recovery", Some(10_000));
+        {
+            let mut state = state.lock().unwrap();
+            assert!(state.recent_speed(Instant::now()).is_some());
+            state.invalidate();
+            assert_eq!(state.recent_speed(Instant::now()), None);
+            assert!(state.recent.samples.is_empty());
+        }
+
+        GenerationSpeedState::measurement(&state).complete("missing-usage", None);
+        drop(GenerationSpeedState::measurement(&state));
+        assert_eq!(state.lock().unwrap().recent_speed(Instant::now()), None);
+
+        let first = GenerationSpeedState::measurement(&state);
+        assert_eq!(state.lock().unwrap().recent_speed(Instant::now()), None);
+        first.complete("after-recovery-1", Some(100));
+        assert!(state.lock().unwrap().recent_speed(Instant::now()).is_some());
+
+        GenerationSpeedState::measurement(&state).complete("after-recovery-2", Some(300));
+        let mut state = state.lock().unwrap();
+        let duration: Duration = state
+            .recent
+            .samples
+            .iter()
+            .map(|sample| sample.request_duration)
+            .sum();
+        assert_eq!(state.recent.samples.len(), 2);
+        assert_eq!(
+            state.recent_speed(Instant::now()),
+            Some(400.0 / duration.as_secs_f64())
+        );
         assert_eq!(state.totals(), None);
     }
 }
