@@ -31,7 +31,7 @@ codex-utils-process = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
-clap_complete = { workspace = true }
+clap_complete = { workspace = true, features = ["unstable-dynamic"] }
 codex-app-server = { workspace = true }
 codex-app-server-daemon = { workspace = true }
 codex-app-server-protocol = { workspace = true }
