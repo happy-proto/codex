@@ -1515,7 +1515,7 @@ See the Codex keymap documentation for supported actions and examples."
                         None => std::future::pending().await,
                     }
                 } => {
-                    app.refresh_current_thread_name(&app_server);
+                    app.refresh_current_thread_name(backends.session_at(displayed_session));
                     AppRunControl::Continue
                 }
                 () = async {
