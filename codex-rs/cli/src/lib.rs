@@ -58,6 +58,7 @@ use supports_color::Stream;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod app_cmd;
 mod cloud_config;
+mod completion;
 mod daemon_install;
 mod daemon_telemetry;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -1045,6 +1046,7 @@ fn stage_str(stage: Stage) -> &'static str {
 }
 
 pub fn run() -> anyhow::Result<()> {
+    completion::complete();
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
         // Keep the CLI dispatcher off the runtime's stack while the TUI rebuilds a thread.
