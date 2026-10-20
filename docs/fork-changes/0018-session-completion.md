@@ -24,8 +24,11 @@
 Fish（保存到 `~/.config/fish/completions/codex.fish`）：
 
 ```fish
-COMPLETE=fish codex | source
+COMPLETE=fish command codex | source
 ```
+
+`codex completion fish` 默认输出上述一行动态入口，已有调用该命令的补全更新流程无需修改。
+该入口同时支持普通选项、子命令与枚举值补全，包括 `--worktree`，不限于会话候选。
 
 Zsh（在 `.zshrc` 的 `compinit` 之后）：
 
@@ -39,7 +42,8 @@ Bash（在 `.bashrc`）：
 source <(COMPLETE=bash codex)
 ```
 
-静态 `codex completion <shell>` 保留原有行为；动态注册采用 clap 官方 `COMPLETE` 协议。
+其它 shell 的 `codex completion <shell>` 仍生成静态脚本；也可按上述方式使用
+clap 官方 `COMPLETE` 协议注册动态补全。
 
 ## 实现边界
 
@@ -68,7 +72,8 @@ UUID/唯一名称填入、重名与控制字符、配置路径解析。
 [集成测试](../../codex-rs/cli/tests/completion.rs) 使用临时最小数据库和真实 CLI 补全协议，
 覆盖来源/目录/归档筛选、中文名称查询、Fish/Zsh 返回值、`fork`、空数据库与 `--last`，
 并比较数据库内容，确认读取未触发迁移或写入。两组测试接入 fork CI。
-集成测试还使用实际 Fish 加载生成脚本，验证中文、未闭合单双引号和转义空格；
+集成测试还使用实际 Fish 加载 `codex completion fish` 生成的入口，验证中文、
+未闭合单双引号、转义空格、`--worktree`、普通子命令和枚举值；
 CI 安装 Fish，本地缺少 Fish 时跳过这一项，也可用 `CODEX_FISH_TEST_BINARY` 指定可执行文件。
 
 真实交互验收覆盖 Fish 4.9.3 / 3.7.0、Zsh 5.9 和 Bash 5.2.21；通过伪终端发送 Tab，

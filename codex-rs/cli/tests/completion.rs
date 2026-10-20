@@ -8,6 +8,21 @@ const FIRST: &str = "11111111-1111-4111-8111-111111111111";
 const SECOND: &str = "22222222-2222-4222-8222-222222222222";
 const EXEC: &str = "33333333-3333-4333-8333-333333333333";
 
+#[test]
+fn fish_completion_command_installs_dynamic_entrypoint() -> anyhow::Result<()> {
+    let home = tempfile::tempdir()?;
+    let output = Command::new(codex_utils_cargo_bin::cargo_bin("codex")?)
+        .args(["completion", "fish"])
+        .env("CODEX_HOME", home.path())
+        .env_remove("COMPLETE")
+        .output()?;
+    assert!(output.status.success());
+    let script = String::from_utf8(output.stdout)?;
+    assert_eq!(script.lines().count(), 1);
+    assert_eq!(script, "COMPLETE=fish command codex | source\n");
+    Ok(())
+}
+
 async fn fixture(home: &Path) -> anyhow::Result<SqliteConfig> {
     let sqlite = SqliteConfig::from_sqlite_home(AbsolutePathBuf::try_from(home)?);
     let pool = sqlite.open_read_write_pool(&sqlite.state_db_path()).await?;
@@ -110,16 +125,27 @@ async fn fish_registration_matches_quoted_and_escaped_session_names() -> anyhow:
     };
     let home = tempfile::tempdir()?;
     fixture(home.path()).await?;
-    for line in [
-        "codex resume --all 修复",
-        "codex resume --all '修复 sh",
-        "codex resume --all \"修复 sh",
-        r"codex resume --all 修复\ sh",
-        "codex resume --all 1111",
+    let binary = codex_utils_cargo_bin::cargo_bin("codex")?;
+    let mut paths = vec![binary.parent().expect("CLI binary directory").to_path_buf()];
+    paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let path = std::env::join_paths(paths)?;
+    for (line, expected) in [
+        ("codex resume --all 修复", FIRST),
+        ("codex resume --all '修复 sh", FIRST),
+        ("codex resume --all \"修复 sh", FIRST),
+        (r"codex resume --all 修复\ sh", FIRST),
+        ("codex resume --all 1111", FIRST),
+        ("codex --work", "--worktree"),
+        ("codex fork --work", "--worktree"),
+        ("codex --sandbox r", "read-only"),
+        ("codex res", "resume"),
     ] {
         let output = Command::new(&fish)
-            .args(["--no-config", "-c", "COMPLETE=fish \"$CODEX_COMPLETION_TEST_BINARY\" | source; complete -C \"$CODEX_COMPLETION_TEST_LINE\""])
-            .env("CODEX_COMPLETION_TEST_BINARY", codex_utils_cargo_bin::cargo_bin("codex")?)
+            .args(["--no-config", "-c", "set -g fish_complete_path; \"$CODEX_COMPLETION_TEST_BINARY\" completion fish | source; complete -C \"$CODEX_COMPLETION_TEST_LINE\""])
+            .env("CODEX_COMPLETION_TEST_BINARY", &binary)
+            .env("PATH", &path)
             .env("CODEX_COMPLETION_TEST_LINE", line)
             .env("CODEX_HOME", home.path())
             .env("XDG_CONFIG_HOME", home.path().join("config"))
@@ -134,7 +160,9 @@ async fn fish_registration_matches_quoted_and_escaped_session_names() -> anyhow:
         );
         let candidates = String::from_utf8(output.stdout)?;
         assert!(
-            candidates.starts_with(&format!("{FIRST}\t")),
+            candidates
+                .lines()
+                .any(|candidate| candidate.split('\t').next() == Some(expected)),
             "{line}: {candidates}"
         );
     }

@@ -2783,6 +2783,10 @@ fn merge_interactive_cli_flags(interactive: &mut TuiCli, subcommand_cli: TuiCli)
 }
 
 fn print_completion(cmd: CompletionCommand) {
+    if cmd.shell == Shell::Fish {
+        println!("COMPLETE=fish command codex | source");
+        return;
+    }
     let mut app = MultitoolCli::command();
     let name = "codex";
     generate(cmd.shell, &mut app, name, &mut std::io::stdout());
