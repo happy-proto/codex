@@ -26,7 +26,8 @@ async fn live_generation_speed_is_available_while_a_follow_up_call_is_pending() 
                 responses::ev_assistant_message("partial", "working"),
                 json!({"type": "response.completed", "response": {"id": "first", "end_turn": false,
                 "usage": {"input_tokens": 10, "output_tokens": 100, "total_tokens": 110}}}),
-            ])),
+            ]))
+            .set_delay(Duration::from_secs(10)),
             responses::sse_response(responses::sse(vec![
                 responses::ev_response_created("second"),
                 responses::ev_assistant_message("final", "done"),
@@ -61,7 +62,11 @@ async fn live_generation_speed_is_available_while_a_follow_up_call_is_pending() 
         _ => None,
     })
     .await;
-    let speed = tokio::time::timeout(Duration::from_secs(4), async {
+    assert_eq!(
+        db.live_generation_speed(thread_id, &turn_id, 0).await?,
+        None
+    );
+    let speed = tokio::time::timeout(Duration::from_secs(14), async {
         loop {
             if let Some(speed) = db.live_generation_speed(thread_id, &turn_id, 0).await? {
                 break anyhow::Ok(speed);

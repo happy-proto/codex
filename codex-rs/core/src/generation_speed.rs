@@ -20,6 +20,7 @@ pub(crate) struct GenerationSpeedState {
 }
 
 const RECENT_WINDOW: Duration = Duration::from_secs(5 * 60);
+const RECENT_MIN_DURATION: Duration = Duration::from_secs(10);
 
 /// A clock that advances only while ordinary model requests are in flight.
 #[derive(Debug, Default)]
@@ -91,7 +92,7 @@ impl RecentGenerationSpeed {
                 ))
             },
         )?;
-        (!duration.is_zero()).then(|| tokens as f64 / duration.as_secs_f64())
+        (duration >= RECENT_MIN_DURATION).then(|| tokens as f64 / duration.as_secs_f64())
     }
 }
 
@@ -332,6 +333,39 @@ impl GenerationSpeedReporter {
 mod tests {
     use super::*;
 
+    fn complete_measured_request(state: &Arc<Mutex<GenerationSpeedState>>, id: &str, tokens: i64) {
+        let mut measurement = GenerationSpeedState::measurement(state);
+        measurement.started_at -= Duration::from_secs(10);
+        measurement.complete(id, Some(tokens));
+    }
+
+    #[test]
+    fn recent_generation_speed_requires_ten_seconds_of_retained_completed_samples() {
+        let start = Instant::now();
+        let mut recent = RecentGenerationSpeed::default();
+        recent.begin(start);
+        recent.finish(
+            start + Duration::from_millis(9999),
+            Some((100, Duration::from_millis(9999))),
+        );
+        // Tool time, failed requests and unfinished requests cannot satisfy the minimum.
+        assert_eq!(recent.speed(start + Duration::from_secs(1000)), None);
+        recent.begin(start + Duration::from_secs(1000));
+        assert_eq!(recent.speed(start + Duration::from_secs(1010)), None);
+        recent.finish(start + Duration::from_secs(1010), None);
+        assert_eq!(recent.speed(start + Duration::from_secs(1010)), None);
+        recent.begin(start + Duration::from_secs(1010));
+        recent.finish(
+            start + Duration::from_millis(1010001),
+            Some((0, Duration::from_millis(1))),
+        );
+        assert_eq!(recent.speed(start + Duration::from_secs(1011)), Some(10.0));
+        // After the larger sample expires, the remaining millisecond must be hidden again.
+        recent.begin(start + Duration::from_secs(1011));
+        assert_eq!(recent.speed(start + Duration::from_secs(1302)), None);
+        assert_eq!(recent.samples.len(), 1);
+    }
+
     #[tokio::test]
     async fn recent_generation_speed_reporter_stop_waits_for_shared_publisher_to_exit() {
         let (tx, mut rx) = tokio::sync::oneshot::channel::<()>();
@@ -445,13 +479,13 @@ mod tests {
             start + Duration::from_secs(1),
             Some((0, Duration::from_secs(1))),
         );
-        assert_eq!(empty.speed(start + Duration::from_secs(1)), Some(0.0));
+        assert_eq!(empty.speed(start + Duration::from_secs(1)), None);
     }
 
     #[test]
     fn dropped_generation_measurement_freezes_recent_clock_during_following_tool_wait() {
         let state = Arc::new(Mutex::new(GenerationSpeedState::default()));
-        GenerationSpeedState::measurement(&state).complete("valid", Some(200));
+        complete_measured_request(&state, "valid", 200);
         drop(GenerationSpeedState::measurement(&state));
         let mut state = state.lock().unwrap();
         let now = Instant::now();
@@ -490,7 +524,7 @@ mod tests {
     fn recent_generation_speed_preserves_valid_samples_around_invalid_calls() {
         for (response_id, tokens) in [("bad", Some(-1)), ("", Some(100)), ("first", Some(100))] {
             let state = Arc::new(Mutex::new(GenerationSpeedState::default()));
-            GenerationSpeedState::measurement(&state).complete("first", Some(100));
+            complete_measured_request(&state, "first", 100);
             GenerationSpeedState::measurement(&state).complete(response_id, tokens);
             GenerationSpeedState::measurement(&state).complete("last", Some(300));
             let mut state = state.lock().unwrap();
@@ -612,7 +646,7 @@ mod tests {
     #[test]
     fn recovered_turn_rebuilds_recent_speed_from_new_completed_requests() {
         let state = Arc::new(Mutex::new(GenerationSpeedState::default()));
-        GenerationSpeedState::measurement(&state).complete("before-recovery", Some(10_000));
+        complete_measured_request(&state, "before-recovery", 10_000);
         {
             let mut state = state.lock().unwrap();
             assert!(state.recent_speed(Instant::now()).is_some());
@@ -625,8 +659,9 @@ mod tests {
         drop(GenerationSpeedState::measurement(&state));
         assert_eq!(state.lock().unwrap().recent_speed(Instant::now()), None);
 
-        let first = GenerationSpeedState::measurement(&state);
+        let mut first = GenerationSpeedState::measurement(&state);
         assert_eq!(state.lock().unwrap().recent_speed(Instant::now()), None);
+        first.started_at -= Duration::from_secs(10);
         first.complete("after-recovery-1", Some(100));
         assert!(state.lock().unwrap().recent_speed(Instant::now()).is_some());
 
