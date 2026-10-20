@@ -23,6 +23,7 @@
 | 0015 | [ts-rs 宏输出与编译元数据稳定性](0015-ts-rs-metadata-stability.md) |
 | 0016 | [异步压缩生命周期诊断](0016-async-compaction-diagnostics.md) |
 | 0017 | [后台压缩失败后的退避重试](0017-async-compaction-retry.md) |
+| 0018 | [会话动态补全](0018-session-completion.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 同步上游使用独立的 [上游同步 skill](../../.agents/skills/codex-upstream-sync/SKILL.md)。
