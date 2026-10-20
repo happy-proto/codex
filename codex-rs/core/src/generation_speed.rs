@@ -340,6 +340,20 @@ mod tests {
     }
 
     #[test]
+    fn recent_generation_speed_shows_a_single_completed_request_at_or_above_ten_seconds() {
+        for duration in [Duration::from_secs(10), Duration::from_millis(10001)] {
+            let start = Instant::now();
+            let mut recent = RecentGenerationSpeed::default();
+            recent.begin(start);
+            let end = start + duration;
+            assert_eq!(recent.speed(end), None);
+            recent.finish(end, Some((200, duration)));
+            assert_eq!(recent.samples.len(), 1);
+            assert_eq!(recent.speed(end), Some(200.0 / duration.as_secs_f64()));
+        }
+    }
+
+    #[test]
     fn recent_generation_speed_requires_ten_seconds_of_retained_completed_samples() {
         let start = Instant::now();
         let mut recent = RecentGenerationSpeed::default();
