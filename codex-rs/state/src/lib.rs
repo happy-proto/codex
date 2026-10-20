@@ -10,6 +10,7 @@ const _: () = assert!(
 );
 
 mod audit;
+mod completion;
 mod delegated_preview;
 mod extract;
 pub mod log_db;
@@ -49,6 +50,8 @@ pub use sqlite::SqlitePoolWriteExt;
 pub use audit::ThreadStateAuditRow;
 pub use audit::read_thread_rollout_paths;
 pub use audit::read_thread_state_audit_rows;
+pub use completion::ThreadCompletion;
+pub use completion::read_thread_completions;
 pub use delegated_preview::delegated_output_preview;
 pub use extract::GUARDIAN_THREAD_PREVIEW;
 pub use extract::GUARDIAN_THREAD_TITLE;
