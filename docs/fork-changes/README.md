@@ -17,7 +17,7 @@
 | 0009 | [回合与近期平均生成速度](0009-generation-speed.md) |
 | 0010 | [默认使用开放的浏览器与电脑操作工具](0010-open-automation.md) |
 | 0011 | [WebSocket 连接主动轮转](0011-websocket-rotation.md) |
-| 0012 | [后台压缩失败后的接收器清理](0012-async-compaction-closed-receiver.md) |
+| 0012 | [后台压缩失败后的接收器清理](0012-async-compaction-closed-receiver.md)（alpha.8 已吸收） |
 | 0013 | [发布版本与编译缓存分离](0013-build-cache-stability.md) |
 | 0014 | [会话 Skills 自动刷新保持输入响应](0014-session-skills-refresh.md) |
 | 0015 | [ts-rs 宏输出与编译元数据稳定性](0015-ts-rs-metadata-stability.md) |
