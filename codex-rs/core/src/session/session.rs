@@ -1833,7 +1833,7 @@ impl Session {
                         .enabled(Feature::ConcurrentReasoningSummaries),
                     config.features.enabled(Feature::OutputTokenReplay),
                     attestation_provider,
-                    config.http_client_factory(),
+                    config.model_http_client_factory(),
                     workspace_routing.as_ref().clone(),
                     extensions.model_request_contributors().to_vec(),
                 )

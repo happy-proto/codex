@@ -520,28 +520,22 @@ impl RouteAwareClientPool {
             // A timed-out caller must not release the slot or discard a successful build.
             let _build_permit = build_permit;
             let client = match (
-                pool.http_client_factory.outbound_proxy_policy(),
+                pool.http_client_factory.uses_transport_default_proxy(),
                 pool.custom_ca_fallback,
             ) {
                 (_, CustomCaFallback::LegacyDirect) => {
                     Ok(client_builder.build_with_custom_ca_fallback(ProxyRouting::Direct))
                 }
-                (OutboundProxyPolicy::ReqwestDefault, CustomCaFallback::LegacyTransportDefault) => {
-                    Ok(
-                        client_builder
-                            .build_with_custom_ca_fallback(ProxyRouting::TransportDefault),
-                    )
-                }
-                (OutboundProxyPolicy::ReqwestDefault, CustomCaFallback::Disabled)
-                | (OutboundProxyPolicy::RespectSystemProxy, CustomCaFallback::Disabled)
-                | (
-                    OutboundProxyPolicy::RespectSystemProxy,
-                    CustomCaFallback::LegacyTransportDefault,
-                ) => client_builder.build_for_resolved_route(
-                    &pool.http_client_factory,
-                    pool.route_class,
-                    &build_route,
+                (true, CustomCaFallback::LegacyTransportDefault) => Ok(
+                    client_builder.build_with_custom_ca_fallback(ProxyRouting::TransportDefault)
                 ),
+                (_, CustomCaFallback::Disabled)
+                | (false, CustomCaFallback::LegacyTransportDefault) => client_builder
+                    .build_for_resolved_route(
+                        &pool.http_client_factory,
+                        pool.route_class,
+                        &build_route,
+                    ),
             }?;
             let mut clients = pool.clients.lock().unwrap_or_else(|error| {
                 panic!("route-aware client cache lock should not be poisoned: {error}")
@@ -561,8 +555,7 @@ impl RouteAwareClientPool {
 
     fn follows_redirects_manually(&self) -> bool {
         self.client_builder.follows_redirects()
-            && (self.http_client_factory.outbound_proxy_policy()
-                == OutboundProxyPolicy::RespectSystemProxy
+            && (!self.http_client_factory.uses_transport_default_proxy()
                 || self.http_client_factory.network_policy().is_managed()
                 || self.rustls_clients.is_some())
     }

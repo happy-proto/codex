@@ -632,20 +632,17 @@ async fn assert_proxy_tunnels_secure_websocket(proxy_tls: bool) {
     let request = format!("wss://{target_authority}/v1/responses")
         .into_client_request()
         .expect("websocket request should build");
-    let (inner, _) = connect(
-        request,
-        WebSocketConfig::default(),
-        Some(tls_config),
-        OutboundProxyRoute::Proxy {
-            url: format!("{proxy_scheme}://localhost:{}", proxy_addr.port()),
-            no_proxy: None,
-        },
-        TcpNodelay::Enabled,
-        /*loopback_direct*/ false,
-    )
-    .await
-    .expect("proxied websocket handshake should succeed");
-    drop(test_connection(inner));
+    // 从默认策略上的显式代理进入公开连接器，覆盖模型 WebSocket 的真实路由路径。
+    let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault)
+        .with_proxy_url(format!("{proxy_scheme}://localhost:{}", proxy_addr.port()));
+    let connector =
+        WebSocketConnector::new_with_tls_mode(&factory, WebSocketTlsMode::Rustls(tls_config))
+            .expect("configured proxy connector should build");
+    let (websocket, _) = connector
+        .connect(request, WebSocketConfig::default())
+        .await
+        .expect("proxied websocket handshake should succeed");
+    drop(websocket);
 
     target_task.await.expect("target task should finish");
     proxy_task.await.expect("proxy task should finish");

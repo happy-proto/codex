@@ -9,7 +9,6 @@ use codex_http_client::ClientRouteClass;
 use codex_http_client::HttpClient;
 use codex_http_client::HttpClientBuilder;
 use codex_http_client::HttpClientFactory;
-use codex_http_client::OutboundProxyPolicy;
 pub use codex_http_client::RequestBuilder as CodexRequestBuilder;
 use codex_http_client::ReqwestTransport;
 use codex_http_client::RouteAwareClientPool;
@@ -233,10 +232,7 @@ pub fn create_client_with_chatgpt_cookies(http_client_factory: &HttpClientFactor
     );
     if is_sandboxed() {
         pool = pool.with_legacy_direct_proxy_and_custom_ca_fallback();
-    } else if matches!(
-        http_client_factory.outbound_proxy_policy(),
-        OutboundProxyPolicy::ReqwestDefault
-    ) {
+    } else if http_client_factory.uses_transport_default_proxy() {
         pool = pool.with_legacy_custom_ca_fallback();
     }
     pool.into_client()
@@ -282,18 +278,12 @@ fn create_client_for_route_with_builder(
         );
         if is_sandboxed() {
             pool = pool.with_legacy_direct_proxy_and_custom_ca_fallback();
-        } else if matches!(
-            http_client_factory.outbound_proxy_policy(),
-            OutboundProxyPolicy::ReqwestDefault
-        ) {
+        } else if http_client_factory.uses_transport_default_proxy() {
             pool = pool.with_legacy_custom_ca_fallback();
         }
         return Ok(pool.into_client());
     }
-    if matches!(
-        http_client_factory.outbound_proxy_policy(),
-        OutboundProxyPolicy::ReqwestDefault
-    ) {
+    if http_client_factory.uses_transport_default_proxy() {
         return Ok(build_default_client(builder));
     }
     if is_sandboxed() {
@@ -387,10 +377,7 @@ pub async fn create_transport_for_routes_async(
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
         let sandboxed = is_sandboxed();
-        let transport_default_proxy = matches!(
-            http_client_factory.outbound_proxy_policy(),
-            OutboundProxyPolicy::ReqwestDefault
-        );
+        let transport_default_proxy = http_client_factory.uses_transport_default_proxy();
         if !http_client_factory.network_policy().is_managed()
             && (transport_default_proxy || sandboxed)
         {

@@ -674,6 +674,9 @@ pub struct Config {
     /// Info needed to make an API request to the model.
     pub model_provider: ModelProviderInfo,
 
+    /// 仅用于内置 OpenAI provider 模型请求的显式代理地址。
+    pub openai_proxy_url: Option<String>,
+
     /// Deprecated: `friendly` and `pragmatic` no longer select a style.
     pub personality: Option<Personality>,
 
@@ -1788,6 +1791,17 @@ impl Config {
         } else {
             factory
         }
+    }
+
+    /// 为模型传输应用 OpenAI 专用代理，保留其它应用请求的网络配置。
+    pub fn model_http_client_factory(&self) -> HttpClientFactory {
+        let factory = self.http_client_factory();
+        if self.model_provider_id == "openai"
+            && let Some(proxy_url) = &self.openai_proxy_url
+        {
+            return factory.with_proxy_url(proxy_url.clone());
+        }
+        factory
     }
 
     /// Build the plugin-manager input from the effective config.
@@ -4002,6 +4016,19 @@ impl Config {
             .clone()
             .filter(|value| !value.is_empty());
 
+        let openai_proxy_url = cfg.openai_proxy_url.as_deref().map(|value| {
+            let parsed = url::Url::parse(value).ok().filter(|url| {
+                matches!(url.scheme(), "http" | "https" | "socks5" | "socks5h")
+                    && url.host_str().is_some()
+            });
+            parsed.map(|url| url.to_string()).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "openai_proxy_url must be an absolute http, https, socks5 or socks5h proxy URL",
+                )
+            })
+        }).transpose()?;
+
         let mut model_providers =
             merge_configured_model_providers(built_in_model_providers(openai_base_url), cfg.model_providers)
                 .map_err(|message| std::io::Error::new(std::io::ErrorKind::InvalidData, message))?;
@@ -4516,6 +4543,7 @@ impl Config {
             async_compaction_threshold_percent,
             model_provider_id,
             model_provider,
+            openai_proxy_url,
             cwd: resolved_cwd,
             workspace_roots: workspace_roots.clone(),
             workspace_roots_explicit,
