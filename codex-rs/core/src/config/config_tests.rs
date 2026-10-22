@@ -1146,6 +1146,80 @@ env_http_headers = { "x-openai-internal-codex-residency" = "CODEX_TEST_UNSET_RES
     Ok(())
 }
 
+/// 验证 OpenAI 专用代理不改变普通网络请求、自定义 provider 或 shell 环境。
+#[tokio::test]
+async fn openai_proxy_is_limited_to_builtin_model_transport() {
+    for provider in ["openai", "custom"] {
+        let cfg = toml::from_str::<ConfigToml>(&format!(
+            r#"
+model_provider = "{provider}"
+openai_base_url = "https://relay.example/backend-api/codex"
+openai_proxy_url = "http://127.0.0.1:7897"
+[model_providers.custom]
+name = "Custom"
+base_url = "https://other.example/v1"
+wire_api = "responses"
+"#
+        ))
+        .unwrap();
+        let config = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides::default(),
+            tempdir().unwrap().abs(),
+        )
+        .await
+        .unwrap();
+        let original = config.http_client_factory();
+        let models = config.model_http_client_factory();
+        if provider == "openai" {
+            assert_eq!(
+                models.resolve_proxy_route("wss://relay.example/backend-api/codex/responses"),
+                codex_http_client::OutboundProxyRoute::Proxy {
+                    url: "http://127.0.0.1:7897/".to_string(),
+                    no_proxy: None,
+                }
+            );
+            assert_ne!(models, original);
+        } else {
+            assert_eq!(models, original);
+        }
+        for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"] {
+            assert!(
+                !config
+                    .permissions
+                    .shell_environment_policy
+                    .r#set
+                    .keys()
+                    .any(|name| name.eq_ignore_ascii_case(key))
+            );
+        }
+    }
+}
+
+/// 验证无效模型代理在加载配置时明确失败，错误不包含代理凭据。
+#[tokio::test]
+async fn invalid_openai_proxy_is_rejected_without_credentials() {
+    for proxy in [
+        "",
+        "localhost:7897",
+        "ftp://proxy-user:proxy-secret@proxy.example",
+    ] {
+        let cfg = ConfigToml {
+            openai_proxy_url: Some(proxy.to_string()),
+            ..Default::default()
+        };
+        let err = Config::load_from_base_config_with_overrides(
+            cfg,
+            ConfigOverrides::default(),
+            tempdir().unwrap().abs(),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("openai_proxy_url"));
+        assert!(!err.to_string().contains("proxy-secret"));
+    }
+}
+
 #[test]
 fn accepts_amazon_bedrock_aws_profile_override() {
     let cfg = toml::from_str::<ConfigToml>(
