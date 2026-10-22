@@ -22,6 +22,7 @@
 | 0014 | [后台压缩失败后的退避重试](0014-async-compaction-retry.md) |
 | 0015 | [会话动态补全](0015-session-completion.md) |
 | 0016 | [会话列表只展示当前 rollout](0016-current-rollout-listing.md) |
+| 0017 | [OpenAI 模型请求专用代理](0017-openai-proxy.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 同步上游按 [同步与发布](../../.agents/skills/codex-fork-maintenance/references/upstream-sync.md) 执行。

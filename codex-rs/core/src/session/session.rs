@@ -1915,7 +1915,7 @@ impl Session {
                 thread_extension_data
                     .get::<crate::guardian::GuardianReviewerInference>()
                     .map_or_else(
-                        || config.http_client_factory(),
+                        || config.model_http_client_factory(),
                         |inference| inference.0.http_client_factory.clone(),
                     ),
                 workspace_routing.as_ref().clone(),
