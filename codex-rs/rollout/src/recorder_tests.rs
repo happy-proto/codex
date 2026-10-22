@@ -1734,6 +1734,195 @@ async fn list_threads_default_filter_returns_filesystem_scan_results() -> std::i
 }
 
 #[tokio::test]
+async fn list_threads_uses_selected_rollout_before_filtering_and_pagination() -> std::io::Result<()>
+{
+    for archived in [false, true] {
+        for compressed in [false, true] {
+            let home = TempDir::new()?;
+            let config = test_config(home.path());
+            let runtime = codex_state::StateRuntime::init(
+                config.sqlite.clone(),
+                config.model_provider_id.clone(),
+            )
+            .await
+            .expect("state db should initialize");
+            runtime.mark_backfill_complete(None).await.unwrap();
+            let uuid = Uuid::from_u128(9020);
+            let thread_id = ThreadId::from_string(&uuid.to_string()).unwrap();
+            let original = write_session_file(home.path(), "2025-01-03T09-00-00", uuid)?;
+            let selected = original.with_file_name(format!(
+                "rollout-2025-01-03T09-00-00-{uuid}_{}.jsonl",
+                Uuid::from_u128(9021)
+            ));
+            fs::rename(original, &selected)?;
+            // 旧 rollout 的创建时间和 mtime 都更新，不能按时间猜测当前路径。
+            let mut historical = Vec::new();
+            for hour in 10..16 {
+                historical.push(write_session_file(
+                    home.path(),
+                    &format!("2025-01-03T{hour:02}-00-00"),
+                    uuid,
+                )?);
+            }
+            let second =
+                write_session_file(home.path(), "2025-01-03T08-00-00", Uuid::from_u128(9022))?;
+            let third =
+                write_session_file(home.path(), "2025-01-03T07-00-00", Uuid::from_u128(9023))?;
+            let mut paths = vec![selected, second, third];
+            paths.extend(historical);
+            if archived {
+                let archive = home.path().join(ARCHIVED_SESSIONS_SUBDIR);
+                fs::create_dir_all(&archive)?;
+                for path in &mut paths {
+                    let target = archive.join(path.file_name().unwrap());
+                    fs::rename(&*path, &target)?;
+                    *path = target;
+                }
+            }
+            let selected = paths[0].clone();
+            if compressed {
+                let encoded = zstd::stream::encode_all(fs::read(&selected)?.as_slice(), 0)?;
+                paths[0] = compression::compressed_rollout_path(&selected);
+                fs::write(&paths[0], encoded)?;
+                fs::remove_file(&selected)?;
+            }
+            for path in &paths {
+                let name = path.file_name().unwrap().to_str().unwrap();
+                let (timestamp, _) = parse_timestamp_uuid_from_filename(name).unwrap();
+                let modified =
+                    std::time::UNIX_EPOCH + Duration::from_secs(timestamp.unix_timestamp() as u64);
+                File::options()
+                    .write(true)
+                    .open(path)?
+                    .set_times(std::fs::FileTimes::new().set_modified(modified))?;
+            }
+            let created = chrono::Utc.with_ymd_and_hms(2025, 1, 3, 9, 0, 0).unwrap();
+            // SQLite 仍可指向未压缩路径，由压缩层解析物理 sibling。
+            let mut builder = codex_state::ThreadMetadataBuilder::new(
+                thread_id,
+                selected.clone(),
+                created,
+                SessionSource::Cli,
+            );
+            builder.model_provider = Some(config.model_provider_id.clone());
+            let mut metadata = builder.build(&config.model_provider_id);
+            metadata.first_user_message = Some("Hello from user".to_string());
+            metadata.preview = metadata.first_user_message.clone();
+            metadata.archived_at = archived.then_some(created);
+            runtime.upsert_thread(&metadata).await.unwrap();
+
+            for sort_key in [ThreadSortKey::CreatedAt, ThreadSortKey::UpdatedAt] {
+                for direction in [SortDirection::Asc, SortDirection::Desc] {
+                    let mut cursor = None;
+                    let mut found = Vec::new();
+                    for expected_len in [2, 1] {
+                        let page = RolloutRecorder::list_threads_with_db_fallback(
+                            Some(runtime.clone()),
+                            &config,
+                            2,
+                            cursor.as_ref(),
+                            sort_key,
+                            direction,
+                            &[SessionSource::Cli],
+                            Some(&[config.model_provider_id.clone()]),
+                            None,
+                            &config.model_provider_id,
+                            if archived {
+                                ThreadListArchiveFilter::Archived
+                            } else {
+                                ThreadListArchiveFilter::Active
+                            },
+                            ThreadListRepairMode::ScanAndRepair,
+                            None,
+                        )
+                        .await?;
+                        assert_eq!(page.items.len(), expected_len);
+                        found.extend(page.items.into_iter().map(|item| item.path));
+                        cursor = page.next_cursor;
+                        assert_eq!(cursor.is_some(), expected_len == 2);
+                    }
+                    let mut expected = paths[..3].to_vec();
+                    if direction == SortDirection::Asc {
+                        expected.reverse();
+                    }
+                    assert_eq!(found, expected);
+                }
+            }
+            // 当前 rollout 不匹配时，匹配旧来源或 provider 的历史文件也不能泄漏进列表。
+            let bytes = fs::read(&paths[0])?;
+            let decoded = if compressed {
+                zstd::stream::decode_all(bytes.as_slice())?
+            } else {
+                bytes
+            };
+            let text = String::from_utf8(decoded).unwrap();
+            let (head, tail) = text.split_once('\n').unwrap();
+            let mut head: Value = serde_json::from_str(head)?;
+            head["payload"]["source"] = serde_json::json!("exec");
+            head["payload"]["model_provider"] = serde_json::json!("other-provider");
+            let rewritten = format!("{head}\n{tail}").into_bytes();
+            fs::write(
+                &paths[0],
+                if compressed {
+                    zstd::stream::encode_all(rewritten.as_slice(), 0)?
+                } else {
+                    rewritten
+                },
+            )?;
+            metadata.source = "exec".to_string();
+            metadata.model_provider = "other-provider".to_string();
+            runtime.upsert_thread(&metadata).await.unwrap();
+            let providers = [config.model_provider_id.clone()];
+            for (sources, provider_filter) in [
+                (&[SessionSource::Cli][..], None),
+                (&[][..], Some(providers.as_slice())),
+            ] {
+                let page = RolloutRecorder::list_threads_with_db_fallback(
+                    Some(runtime.clone()),
+                    &config,
+                    10,
+                    None,
+                    ThreadSortKey::UpdatedAt,
+                    SortDirection::Desc,
+                    sources,
+                    provider_filter,
+                    None,
+                    &config.model_provider_id,
+                    if archived {
+                        ThreadListArchiveFilter::Archived
+                    } else {
+                        ThreadListArchiveFilter::Active
+                    },
+                    ThreadListRepairMode::ScanAndRepair,
+                    None,
+                )
+                .await?;
+                assert_eq!(page.items.len(), 2);
+                assert!(
+                    page.items
+                        .iter()
+                        .all(|item| item.thread_id != Some(thread_id))
+                );
+            }
+            assert_eq!(
+                runtime
+                    .get_thread(thread_id)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .rollout_path,
+                selected
+            );
+            for path in &paths[3..] {
+                assert!(path.exists());
+                assert!(!read_rollout_lines(path)?.is_empty());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn list_threads_metadata_filter_overlays_state_db_list_metadata() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());
