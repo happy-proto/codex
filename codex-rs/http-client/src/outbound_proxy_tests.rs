@@ -22,6 +22,80 @@ struct MapEnv {
     values: HashMap<String, String>,
 }
 
+/// 验证显式代理同时覆盖 HTTP 与 WebSocket 路由，且不修改原工厂。
+#[tokio::test]
+async fn configured_proxy_overrides_default_and_system_routes() {
+    for policy in [
+        OutboundProxyPolicy::ReqwestDefault,
+        OutboundProxyPolicy::RespectSystemProxy,
+    ] {
+        let original = HttpClientFactory::new(policy).with_system_proxy_fallback();
+        let factory = original
+            .clone()
+            .with_proxy_url("http://127.0.0.1:7897".to_string());
+        assert_ne!(factory, original);
+        assert_eq!(factory, factory.clone());
+        assert!(!factory.uses_transport_default_proxy());
+        assert!(!factory.allows_system_proxy_fallback());
+        for endpoint in [
+            "https://relay.example/responses",
+            "wss://relay.example/responses",
+        ] {
+            let expected = OutboundProxyRoute::Proxy {
+                url: "http://127.0.0.1:7897".to_string(),
+                no_proxy: None,
+            };
+            assert_eq!(factory.resolve_proxy_route(endpoint), expected);
+            assert_eq!(
+                factory
+                    .resolve_proxy_route_async(endpoint.to_string())
+                    .await
+                    .unwrap(),
+                expected
+            );
+        }
+        if policy == OutboundProxyPolicy::ReqwestDefault {
+            assert_eq!(
+                original.resolve_proxy_route("https://other.example"),
+                OutboundProxyRoute::TransportDefault
+            );
+        }
+    }
+}
+
+/// 验证模型代理地址中的认证信息不会进入工厂调试输出。
+#[test]
+fn configured_proxy_debug_redacts_credentials() {
+    let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault)
+        .with_proxy_url("http://proxy-user:proxy-password@127.0.0.1:7897".to_string());
+    let debug = format!("{factory:?}");
+    assert!(!debug.contains("proxy-user"));
+    assert!(!debug.contains("proxy-password"));
+    assert!(!debug.contains("7897"));
+}
+
+/// 验证默认策略下配置的代理实际接收请求，目标域名无需本地解析。
+#[tokio::test]
+async fn configured_proxy_forwards_http_requests() {
+    let (address, thread) = spawn_proxy_listener();
+    let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault)
+        .with_proxy_url(format!("http://{address}"));
+    let endpoint = "http://llm-proxy.invalid/responses";
+    let client = factory
+        .build_client(endpoint, ClientRouteClass::Api)
+        .unwrap();
+    let response = tokio::time::timeout(Duration::from_secs(2), client.get(endpoint).send())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(response.status().is_success());
+    let request = only_request(thread, "configured proxy");
+    assert_eq!(
+        request.lines().next(),
+        Some("GET http://llm-proxy.invalid/responses HTTP/1.1")
+    );
+}
+
 fn spawn_proxy_listener() -> (std::net::SocketAddr, std::thread::JoinHandle<Vec<String>>) {
     spawn_http_listener(vec![
         "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_string(),
