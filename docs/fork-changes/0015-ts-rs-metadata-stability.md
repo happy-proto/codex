@@ -9,10 +9,12 @@
 
 ## 实现和边界
 
-- 仅回移 [ts-rs #488](https://github.com/Aleph-Alpha/ts-rs/pull/488) 的确定性修复，
+- 回移 [ts-rs #488](https://github.com/Aleph-Alpha/ts-rs/pull/488) 的确定性修复，
   保留 11.1.0 API，不升级到新的主版本。
 - [宏源码副本](../../codex-rs/vendor/ts-rs-macros/README.fork.md) 保留许可证和来源，
   两处参与输出的 `HashSet` 改为保持插入顺序的 `IndexSet`。
+- 删除 crate 顶层无效的 `#![macro_use]`，保留 `utils` 模块上的宏导入和
+  `#![deny(unused)]`，使副本兼容 Rust 1.99.1 的属性检查。
 - [workspace manifest](../../codex-rs/Cargo.toml) 使用 Cargo source override；
   宏副本不是 workspace 成员，不参与 Codex 内部版本调整。
 - `indexmap 2` 使用锁文件中已有版本，不升级其它依赖。
