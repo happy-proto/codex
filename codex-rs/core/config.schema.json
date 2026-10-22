@@ -8373,6 +8373,10 @@
       "description": "Base URL override for the built-in `openai` model provider.",
       "type": "string"
     },
+    "openai_proxy_url": {
+      "description": "内置 OpenAI provider 的模型请求代理，不注入 shell 或其它服务的环境。",
+      "type": "string"
+    },
     "orchestrator": {
       "allOf": [
         {
