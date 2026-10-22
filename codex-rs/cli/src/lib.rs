@@ -1075,7 +1075,7 @@ async fn cli_main(
         mut interactive,
         subcommand,
     } = config_override_args::try_parse_from(std::env::args_os())
-        .unwrap_or_else(|err| err.exit());
+        .unwrap_or_else(|error| error.exit());
     // Retain the launch target through TUI exit, even if a launcher changes selection.
     let daemon_cli_executable = arg0_paths
         .codex_self_exe
