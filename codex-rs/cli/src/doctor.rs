@@ -2370,7 +2370,7 @@ async fn websocket_reachability_check(
             runtime_provider.as_ref(),
             /*scope*/ None,
             Some(&config.workspace_routing_context()),
-            config.http_client_factory(),
+            config.model_http_client_factory(),
         )
         .await
     }
