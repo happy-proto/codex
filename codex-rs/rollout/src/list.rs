@@ -383,6 +383,17 @@ pub async fn get_threads_in_root(
     sort_key: ThreadSortKey,
     config: ThreadListConfig<'_>,
 ) -> io::Result<ThreadsPage> {
+    get_threads_in_root_with_state_db(root, page_size, cursor, sort_key, config, None).await
+}
+
+pub(crate) async fn get_threads_in_root_with_state_db(
+    root: PathBuf,
+    page_size: usize,
+    cursor: Option<&Cursor>,
+    sort_key: ThreadSortKey,
+    config: ThreadListConfig<'_>,
+    state_db: Option<&codex_state::StateRuntime>,
+) -> io::Result<ThreadsPage> {
     if !root.exists() {
         return Ok(ThreadsPage {
             items: Vec::new(),
@@ -401,6 +412,7 @@ pub async fn get_threads_in_root(
             .and_then(|providers| ProviderMatcher::new(providers, config.default_provider)),
         cwd_filters: config.cwd_filters.map(<[PathBuf]>::to_vec),
         include_attached_threads: config.include_attached_threads,
+        state_db: state_db.cloned(),
     });
 
     let result = match config.layout {
@@ -748,16 +760,36 @@ async fn build_thread_item(
     updated_at: Option<String>,
     preview_filter: PreviewFilter,
 ) -> Option<ThreadItem> {
-    let summary =
-        compression::read_rollout_lines(&path, move |lines| read_head_summary(lines, &filters))
-            .await
-            .ok()??;
+    let summary_filters = Arc::clone(&filters);
+    let summary = compression::read_rollout_lines(&path, move |lines| {
+        read_head_summary(lines, &summary_filters)
+    })
+    .await
+    .ok()??;
     if summary.saw_session_meta
         && (matches!(preview_filter, PreviewFilter::IncludeEmpty)
             || summary.preview.is_some()
             || summary.has_fork_history
             || summary.attached_to_thread_id.is_some())
     {
+        // 回退产生的旧 rollout 仍是有效历史，但只列出 SQLite 选中的当前路径。
+        // 在分页计数前过滤，避免旧文件占满页面；缺行或查询失败时保留文件回退行为。
+        if let Some(state_db) = &filters.state_db
+            && let Some(thread_id) = summary.thread_id
+        {
+            match state_db.get_thread(thread_id).await {
+                Ok(Some(metadata))
+                    if compression::plain_rollout_path(&metadata.rollout_path)
+                        != compression::plain_rollout_path(&path) =>
+                {
+                    return None;
+                }
+                Err(err) => tracing::warn!(
+                    "state db get_thread failed while selecting current rollout for list: {err}"
+                ),
+                _ => {}
+            }
+        }
         let HeadTailSummary {
             originator,
             thread_id,
@@ -825,6 +857,7 @@ pub async fn read_thread_item_from_rollout(path: PathBuf) -> Option<ThreadItem> 
             provider_matcher: None,
             cwd_filters: None,
             include_attached_threads: true,
+            state_db: None,
         }),
         /*updated_at*/ None,
         PreviewFilter::RequirePreview,
@@ -911,6 +944,7 @@ impl ProviderMatcher {
 }
 
 struct SummaryFilters {
+    state_db: Option<codex_state::StateRuntime>,
     allowed_sources: Vec<SessionSource>,
     provider_matcher: Option<ProviderMatcher>,
     cwd_filters: Option<Vec<PathBuf>>,
