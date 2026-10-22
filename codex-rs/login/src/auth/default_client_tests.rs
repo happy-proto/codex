@@ -38,6 +38,53 @@ impl Write for TestLogSink {
     }
 }
 
+/// 验证模型使用的默认客户端适配层不会忽略显式代理。
+#[tokio::test]
+async fn explicit_proxy_routes_default_api_client() {
+    use tokio::io::AsyncReadExt;
+    use tokio::io::AsyncWriteExt;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = Vec::new();
+        while !request.ends_with(b"\r\n\r\n") {
+            request.push(stream.read_u8().await.unwrap());
+        }
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .await
+            .unwrap();
+        String::from_utf8(request).unwrap()
+    });
+    let factory = codex_http_client::HttpClientFactory::new(
+        codex_http_client::OutboundProxyPolicy::ReqwestDefault,
+    )
+    .with_proxy_url(format!("http://{address}"));
+    let endpoint = "http://llm-proxy.invalid/responses";
+    let client = create_client_for_route(
+        &factory,
+        endpoint,
+        ClientRouteClass::Api,
+        ClientRedirectPolicy::Default,
+    )
+    .unwrap();
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        client.get(endpoint).send(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(response.status().is_success());
+    let request = server.await.unwrap();
+    assert_eq!(
+        request.lines().next(),
+        Some("GET http://llm-proxy.invalid/responses HTTP/1.1")
+    );
+}
+
 #[test]
 fn test_get_codex_user_agent() {
     let user_agent = get_codex_user_agent();
