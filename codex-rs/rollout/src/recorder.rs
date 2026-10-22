@@ -46,7 +46,7 @@ use super::list::ThreadListLayout;
 use super::list::ThreadSortKey;
 use super::list::ThreadsPage;
 use super::list::get_threads;
-use super::list::get_threads_in_root;
+use super::list::get_threads_in_root_with_state_db;
 use super::list::parse_cursor;
 use super::list::parse_timestamp_uuid_from_filename;
 use super::metadata;
@@ -597,6 +597,7 @@ impl RolloutRecorder {
         let fs_page = match sort_direction {
             SortDirection::Asc => {
                 list_threads_from_files_asc(
+                    state_db_ctx.as_deref(),
                     codex_home,
                     page_size,
                     cursor,
@@ -612,6 +613,7 @@ impl RolloutRecorder {
             }
             SortDirection::Desc => {
                 list_threads_from_files_desc(
+                    state_db_ctx.as_deref(),
                     codex_home,
                     page_size.saturating_mul(2),
                     cursor,
@@ -1501,6 +1503,7 @@ fn fill_missing_thread_item_metadata(item: &mut ThreadItem, state_item: ThreadIt
 
 #[allow(clippy::too_many_arguments)]
 async fn list_threads_from_files_desc(
+    state_db: Option<&StateRuntime>,
     codex_home: &Path,
     page_size: usize,
     cursor: Option<&Cursor>,
@@ -1521,6 +1524,7 @@ async fn list_threads_from_files_desc(
 
         loop {
             let mut page = list_threads_from_files_desc_unfiltered(
+                state_db,
                 codex_home,
                 scan_page_size,
                 page_cursor.as_ref(),
@@ -1563,6 +1567,7 @@ async fn list_threads_from_files_desc(
     }
 
     list_threads_from_files_desc_unfiltered(
+        state_db,
         codex_home,
         page_size,
         cursor,
@@ -1578,6 +1583,7 @@ async fn list_threads_from_files_desc(
 
 #[allow(clippy::too_many_arguments)]
 async fn list_threads_from_files_desc_unfiltered(
+    state_db: Option<&StateRuntime>,
     codex_home: &Path,
     page_size: usize,
     cursor: Option<&Cursor>,
@@ -1588,39 +1594,31 @@ async fn list_threads_from_files_desc_unfiltered(
     default_provider: &str,
     archived: bool,
 ) -> std::io::Result<ThreadsPage> {
-    if archived {
-        let root = codex_home.join(ARCHIVED_SESSIONS_SUBDIR);
-        get_threads_in_root(
-            root,
-            page_size,
-            cursor,
-            sort_key,
-            ThreadListConfig {
-                allowed_sources,
-                model_providers,
-                cwd_filters,
-                default_provider,
-                layout: ThreadListLayout::Flat,
-            },
-        )
-        .await
+    let (subdir, layout) = if archived {
+        (ARCHIVED_SESSIONS_SUBDIR, ThreadListLayout::Flat)
     } else {
-        get_threads(
-            codex_home,
-            page_size,
-            cursor,
-            sort_key,
+        (SESSIONS_SUBDIR, ThreadListLayout::NestedByDate)
+    };
+    get_threads_in_root_with_state_db(
+        codex_home.join(subdir),
+        page_size,
+        cursor,
+        sort_key,
+        ThreadListConfig {
             allowed_sources,
             model_providers,
             cwd_filters,
             default_provider,
-        )
-        .await
-    }
+            layout,
+        },
+        state_db,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
 async fn list_threads_from_files_asc(
+    state_db: Option<&StateRuntime>,
     codex_home: &Path,
     page_size: usize,
     cursor: Option<&Cursor>,
@@ -1639,6 +1637,7 @@ async fn list_threads_from_files_asc(
     let scan_page_size = page_size.saturating_mul(8).clamp(256, 2048);
     loop {
         let page = list_threads_from_files_desc(
+            state_db,
             codex_home,
             scan_page_size,
             page_cursor.as_ref(),
