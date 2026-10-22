@@ -258,6 +258,7 @@ struct FilesByCreatedAtVisitor<'a> {
     allowed_sources: &'a [SessionSource],
     provider_matcher: Option<&'a ProviderMatcher<'a>>,
     cwd_filters: Option<&'a [PathBuf]>,
+    state_db: Option<&'a codex_state::StateRuntime>,
 }
 
 impl<'a> RolloutFileVisitor for FilesByCreatedAtVisitor<'a> {
@@ -290,6 +291,7 @@ impl<'a> RolloutFileVisitor for FilesByCreatedAtVisitor<'a> {
             self.cwd_filters,
             updated_at,
             PreviewFilter::RequirePreview,
+            self.state_db,
         )
         .await
         {
@@ -374,6 +376,17 @@ pub async fn get_threads_in_root(
     sort_key: ThreadSortKey,
     config: ThreadListConfig<'_>,
 ) -> io::Result<ThreadsPage> {
+    get_threads_in_root_with_state_db(root, page_size, cursor, sort_key, config, None).await
+}
+
+pub(crate) async fn get_threads_in_root_with_state_db(
+    root: PathBuf,
+    page_size: usize,
+    cursor: Option<&Cursor>,
+    sort_key: ThreadSortKey,
+    config: ThreadListConfig<'_>,
+    state_db: Option<&codex_state::StateRuntime>,
+) -> io::Result<ThreadsPage> {
     if !root.exists() {
         return Ok(ThreadsPage {
             items: Vec::new(),
@@ -399,6 +412,7 @@ pub async fn get_threads_in_root(
                 config.allowed_sources,
                 provider_matcher.as_ref(),
                 config.cwd_filters,
+                state_db,
             )
             .await?
         }
@@ -411,6 +425,7 @@ pub async fn get_threads_in_root(
                 config.allowed_sources,
                 provider_matcher.as_ref(),
                 config.cwd_filters,
+                state_db,
             )
             .await?
         }
@@ -430,6 +445,7 @@ async fn traverse_directories_for_paths(
     allowed_sources: &[SessionSource],
     provider_matcher: Option<&ProviderMatcher<'_>>,
     cwd_filters: Option<&[PathBuf]>,
+    state_db: Option<&codex_state::StateRuntime>,
 ) -> io::Result<ThreadsPage> {
     match sort_key {
         ThreadSortKey::CreatedAt => {
@@ -440,6 +456,7 @@ async fn traverse_directories_for_paths(
                 allowed_sources,
                 provider_matcher,
                 cwd_filters,
+                state_db,
             )
             .await
         }
@@ -451,6 +468,7 @@ async fn traverse_directories_for_paths(
                 allowed_sources,
                 provider_matcher,
                 cwd_filters,
+                state_db,
             )
             .await
         }
@@ -465,6 +483,7 @@ async fn traverse_flat_paths(
     allowed_sources: &[SessionSource],
     provider_matcher: Option<&ProviderMatcher<'_>>,
     cwd_filters: Option<&[PathBuf]>,
+    state_db: Option<&codex_state::StateRuntime>,
 ) -> io::Result<ThreadsPage> {
     match sort_key {
         ThreadSortKey::CreatedAt => {
@@ -475,6 +494,7 @@ async fn traverse_flat_paths(
                 allowed_sources,
                 provider_matcher,
                 cwd_filters,
+                state_db,
             )
             .await
         }
@@ -486,6 +506,7 @@ async fn traverse_flat_paths(
                 allowed_sources,
                 provider_matcher,
                 cwd_filters,
+                state_db,
             )
             .await
         }
@@ -505,6 +526,7 @@ async fn traverse_directories_for_paths_created(
     allowed_sources: &[SessionSource],
     provider_matcher: Option<&ProviderMatcher<'_>>,
     cwd_filters: Option<&[PathBuf]>,
+    state_db: Option<&codex_state::StateRuntime>,
 ) -> io::Result<ThreadsPage> {
     let mut items: Vec<ThreadItem> = Vec::with_capacity(page_size);
     let mut scanned_files = 0usize;
@@ -517,6 +539,7 @@ async fn traverse_directories_for_paths_created(
         allowed_sources,
         provider_matcher,
         cwd_filters,
+        state_db,
     };
     walk_rollout_files(&root, &mut scanned_files, &mut visitor).await?;
     more_matches_available = visitor.more_matches_available;
@@ -554,6 +577,7 @@ async fn traverse_directories_for_paths_updated(
     allowed_sources: &[SessionSource],
     provider_matcher: Option<&ProviderMatcher<'_>>,
     cwd_filters: Option<&[PathBuf]>,
+    state_db: Option<&codex_state::StateRuntime>,
 ) -> io::Result<ThreadsPage> {
     let mut items: Vec<ThreadItem> = Vec::with_capacity(page_size);
     let mut scanned_files = 0usize;
@@ -584,6 +608,7 @@ async fn traverse_directories_for_paths_updated(
             cwd_filters,
             updated_at_fallback,
             PreviewFilter::RequirePreview,
+            state_db,
         )
         .await
         {
@@ -616,6 +641,7 @@ async fn traverse_flat_paths_created(
     allowed_sources: &[SessionSource],
     provider_matcher: Option<&ProviderMatcher<'_>>,
     cwd_filters: Option<&[PathBuf]>,
+    state_db: Option<&codex_state::StateRuntime>,
 ) -> io::Result<ThreadsPage> {
     let mut items: Vec<ThreadItem> = Vec::with_capacity(page_size);
     let mut scanned_files = 0usize;
@@ -642,6 +668,7 @@ async fn traverse_flat_paths_created(
             cwd_filters,
             updated_at,
             PreviewFilter::IncludeEmpty,
+            state_db,
         )
         .await
         {
@@ -674,6 +701,7 @@ async fn traverse_flat_paths_updated(
     allowed_sources: &[SessionSource],
     provider_matcher: Option<&ProviderMatcher<'_>>,
     cwd_filters: Option<&[PathBuf]>,
+    state_db: Option<&codex_state::StateRuntime>,
 ) -> io::Result<ThreadsPage> {
     let mut items: Vec<ThreadItem> = Vec::with_capacity(page_size);
     let mut scanned_files = 0usize;
@@ -704,6 +732,7 @@ async fn traverse_flat_paths_updated(
             cwd_filters,
             updated_at_fallback,
             PreviewFilter::IncludeEmpty,
+            state_db,
         )
         .await
         {
@@ -785,6 +814,7 @@ async fn build_thread_item(
     cwd_filters: Option<&[PathBuf]>,
     updated_at: Option<String>,
     preview_filter: PreviewFilter,
+    state_db: Option<&codex_state::StateRuntime>,
 ) -> Option<ThreadItem> {
     // Read head and detect preview-bearing events; goal previews can appear before
     // the first normal user message.
@@ -816,6 +846,24 @@ async fn build_thread_item(
     if summary.saw_session_meta
         && (matches!(preview_filter, PreviewFilter::IncludeEmpty) || summary.preview.is_some())
     {
+        // 回退产生的旧 rollout 仍是有效历史，但只列出 SQLite 选中的当前路径。
+        // 在分页计数前过滤，避免旧文件占满页面；缺行或查询失败时保留文件回退行为。
+        if let Some(state_db) = state_db
+            && let Some(thread_id) = summary.thread_id
+        {
+            match state_db.get_thread(thread_id).await {
+                Ok(Some(metadata))
+                    if compression::plain_rollout_path(&metadata.rollout_path)
+                        != compression::plain_rollout_path(&path) =>
+                {
+                    return None;
+                }
+                Err(err) => tracing::warn!(
+                    "state db get_thread failed while selecting current rollout for list: {err}"
+                ),
+                _ => {}
+            }
+        }
         let HeadTailSummary {
             originator,
             thread_id,
@@ -882,6 +930,7 @@ pub async fn read_thread_item_from_rollout(path: PathBuf) -> Option<ThreadItem> 
         /*cwd_filters*/ None,
         /*updated_at*/ None,
         PreviewFilter::RequirePreview,
+        /*state_db*/ None,
     )
     .await
 }
