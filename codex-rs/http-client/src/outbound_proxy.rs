@@ -166,6 +166,7 @@ impl fmt::Debug for OutboundProxyRoute {
 #[derive(Clone)]
 pub struct HttpClientFactory {
     outbound_proxy_policy: OutboundProxyPolicy,
+    proxy_url: Option<String>,
     system_proxy_fallback: bool,
     chatgpt_cookie_store: Option<Arc<ChatGptCookieStore>>,
     network_policy: NetworkPolicy,
@@ -174,6 +175,7 @@ pub struct HttpClientFactory {
 impl PartialEq for HttpClientFactory {
     fn eq(&self, other: &Self) -> bool {
         self.outbound_proxy_policy == other.outbound_proxy_policy
+            && self.proxy_url == other.proxy_url
             && self.system_proxy_fallback == other.system_proxy_fallback
             && self.network_policy == other.network_policy
             && self
@@ -193,6 +195,7 @@ impl fmt::Debug for HttpClientFactory {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HttpClientFactory")
             .field("outbound_proxy_policy", &self.outbound_proxy_policy)
+            .field("proxy_url", &self.proxy_url.as_ref().map(|_| "<redacted>"))
             .field("system_proxy_fallback", &self.system_proxy_fallback)
             .field("network_policy", &self.network_policy)
             .finish()
@@ -204,6 +207,7 @@ impl HttpClientFactory {
     pub const fn new(outbound_proxy_policy: OutboundProxyPolicy) -> Self {
         Self {
             outbound_proxy_policy,
+            proxy_url: None,
             system_proxy_fallback: false,
             chatgpt_cookie_store: None,
             network_policy: NetworkPolicy::unmanaged(),
@@ -214,6 +218,18 @@ impl HttpClientFactory {
     pub fn with_network_policy(mut self, policy: NetworkPolicy) -> Self {
         self.network_policy = policy;
         self
+    }
+
+    /// 为此工厂的请求指定代理，优先于系统代理及代理环境变量。
+    pub fn with_proxy_url(mut self, proxy_url: String) -> Self {
+        self.proxy_url = Some(proxy_url);
+        self
+    }
+
+    /// 判断是否仍应使用传输库默认代理行为，而非显式路由。
+    pub fn uses_transport_default_proxy(&self) -> bool {
+        self.proxy_url.is_none()
+            && self.outbound_proxy_policy == OutboundProxyPolicy::ReqwestDefault
     }
 
     pub fn network_policy(&self) -> &NetworkPolicy {
@@ -234,8 +250,7 @@ impl HttpClientFactory {
     }
 
     pub fn allows_system_proxy_fallback(&self) -> bool {
-        self.system_proxy_fallback
-            && self.outbound_proxy_policy == OutboundProxyPolicy::ReqwestDefault
+        self.system_proxy_fallback && self.uses_transport_default_proxy()
     }
 
     /// Adds process-scoped cookies to requests made by ChatGPT cookie-store clients.
@@ -268,6 +283,12 @@ impl HttpClientFactory {
     /// to a direct route. Ordered PAC candidates are collapsed to one route on Windows and macOS;
     /// later proxy or `DIRECT` candidates are not retried after a connection failure.
     pub fn resolve_proxy_route(&self, request_url: &str) -> OutboundProxyRoute {
+        if let Some(url) = &self.proxy_url {
+            return OutboundProxyRoute::Proxy {
+                url: url.clone(),
+                no_proxy: None,
+            };
+        }
         resolve_proxy_route(
             &ProcessEnv,
             request_url,
@@ -281,11 +302,8 @@ impl HttpClientFactory {
         &self,
         request_url: String,
     ) -> io::Result<OutboundProxyRoute> {
-        if matches!(
-            self.outbound_proxy_policy,
-            OutboundProxyPolicy::ReqwestDefault
-        ) {
-            return Ok(OutboundProxyRoute::TransportDefault);
+        if self.proxy_url.is_some() || self.uses_transport_default_proxy() {
+            return Ok(self.resolve_proxy_route(&request_url));
         }
 
         if let Some(route) = self.cached_proxy_route(&request_url) {

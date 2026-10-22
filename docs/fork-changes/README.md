@@ -25,6 +25,7 @@
 | 0017 | [后台压缩失败后的退避重试](0017-async-compaction-retry.md) |
 | 0018 | [会话动态补全](0018-session-completion.md) |
 | 0019 | [会话列表只展示当前 rollout](0019-current-rollout-listing.md) |
+| 0020 | [OpenAI 模型请求专用代理](0020-openai-proxy.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 修改已有改造时更新原记录，新改造使用下一个编号；编号不重用，不对应 PR 或固定 commit SHA。
