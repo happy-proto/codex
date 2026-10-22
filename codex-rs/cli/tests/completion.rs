@@ -7,6 +7,7 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 const FIRST: &str = "11111111-1111-4111-8111-111111111111";
 const SECOND: &str = "22222222-2222-4222-8222-222222222222";
 const EXEC: &str = "33333333-3333-4333-8333-333333333333";
+const UUID_V7: &str = "01a1582d-6c70-7e92-b3fa-c461ac05b237";
 
 #[test]
 fn fish_completion_command_installs_dynamic_entrypoint() -> anyhow::Result<()> {
@@ -102,12 +103,59 @@ async fn shell_protocol_returns_ids_and_zsh_exact_names() -> anyhow::Result<()> 
     let home = tempfile::tempdir()?;
     fixture(home.path()).await?;
     let fish = complete(home.path(), "fish", &["codex", "resume", "--all", "修复"])?;
-    assert!(fish.starts_with(&format!("{FIRST}\t")), "{fish}");
-    assert!(fish.contains("修复 shell 补全"));
+    assert_eq!(fish.trim_end(), "修复 shell 补全");
     let zsh = complete(home.path(), "zsh", &["codex", "resume", "--all", "修复"])?;
-    assert!(zsh.starts_with("修复 shell 补全:"), "{zsh}");
+    assert_eq!(zsh, "修复 shell 补全");
     let fork = complete(home.path(), "fish", &["codex", "fork", "--all", "1111"])?;
     assert!(fork.starts_with(FIRST));
+    Ok(())
+}
+
+#[tokio::test]
+async fn shell_protocol_matches_id_suffixes_and_shows_only_the_matching_field() -> anyhow::Result<()>
+{
+    let home = tempfile::tempdir()?;
+    let sqlite = fixture(home.path()).await?;
+    let pool = sqlite.open_read_write_pool(&sqlite.state_db_path()).await?;
+    sqlx::query("UPDATE threads SET id = ?, name = '修复 Shell 补全' WHERE id = ?")
+        .bind(UUID_V7)
+        .bind(FIRST)
+        .execute(&pool)
+        .await?;
+    pool.close().await;
+    for shell in ["fish", "zsh", "bash", "powershell"] {
+        for query in ["c461ac05b237", "C461AC05B237", "6c70-7e92"] {
+            let output = complete(home.path(), shell, &["codex", "resume", "--all", query])?;
+            assert_eq!(output.trim_end(), UUID_V7, "{shell}: {query}");
+        }
+        for query in ["补全", "shell", "SHELL"] {
+            let output = complete(home.path(), shell, &["codex", "resume", "--all", query])?;
+            assert_eq!(output.trim_end(), "修复 Shell 补全", "{shell}: {query}");
+        }
+        let output = complete(home.path(), shell, &["codex", "resume", "--all", ""])?;
+        assert!(!output.contains("修复"), "{shell}: {output}");
+        assert!(output.contains(UUID_V7), "{shell}: {output}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn bash_does_not_offer_a_title_readline_would_turn_into_a_directory() -> anyhow::Result<()> {
+    let home = tempfile::tempdir()?;
+    let directory = tempfile::tempdir()?;
+    let title = directory.path().to_string_lossy().into_owned();
+    let sqlite = fixture(home.path()).await?;
+    let pool = sqlite.open_read_write_pool(&sqlite.state_db_path()).await?;
+    sqlx::query("UPDATE threads SET name = ? WHERE id = ?")
+        .bind(&title)
+        .bind(FIRST)
+        .execute(&pool)
+        .await?;
+    pool.close().await;
+    let words = ["codex", "resume", "--all", title.as_str()];
+    assert!(complete(home.path(), "bash", &words)?.is_empty());
+    assert_eq!(complete(home.path(), "fish", &words)?.trim_end(), title);
+    assert!(complete(home.path(), "bash", &["codex", "resume", "--all", "1111"])?.contains(FIRST));
     Ok(())
 }
 
@@ -125,6 +173,14 @@ async fn fish_registration_matches_quoted_and_escaped_session_names() -> anyhow:
     };
     let home = tempfile::tempdir()?;
     fixture(home.path()).await?;
+    let sqlite = SqliteConfig::from_sqlite_home(AbsolutePathBuf::try_from(home.path())?);
+    let pool = sqlite.open_read_write_pool(&sqlite.state_db_path()).await?;
+    sqlx::query("UPDATE threads SET id = ? WHERE id = ?")
+        .bind(UUID_V7)
+        .bind(FIRST)
+        .execute(&pool)
+        .await?;
+    pool.close().await;
     let binary = codex_utils_cargo_bin::cargo_bin("codex")?;
     let mut paths = vec![binary.parent().expect("CLI binary directory").to_path_buf()];
     paths.extend(std::env::split_paths(
@@ -132,11 +188,15 @@ async fn fish_registration_matches_quoted_and_escaped_session_names() -> anyhow:
     ));
     let path = std::env::join_paths(paths)?;
     for (line, expected) in [
-        ("codex resume --all 修复", FIRST),
-        ("codex resume --all '修复 sh", FIRST),
-        ("codex resume --all \"修复 sh", FIRST),
-        (r"codex resume --all 修复\ sh", FIRST),
-        ("codex resume --all 1111", FIRST),
+        ("codex resume --all 修复", "修复 shell 补全"),
+        ("codex resume --all '修复 sh", "修复 shell 补全"),
+        ("codex resume --all \"修复 sh", "修复 shell 补全"),
+        (r"codex resume --all 修复\ sh", "修复 shell 补全"),
+        ("codex resume --all 补全", "修复 shell 补全"),
+        ("codex resume --all SHELL", "修复 shell 补全"),
+        ("codex resume --all 01a158", UUID_V7),
+        ("codex resume --all c461ac05b237", UUID_V7),
+        ("codex resume --all C461AC05B237", UUID_V7),
         ("codex --work", "--worktree"),
         ("codex fork --work", "--worktree"),
         ("codex --sandbox r", "read-only"),
@@ -182,8 +242,9 @@ async fn names_remain_ambiguous_across_directories_and_results_are_bounded() -> 
     let rows =
         codex_state::read_thread_completions(&sqlite, "same", Some(Path::new("/project")), false)
             .await?;
-    assert_eq!(rows.len(), 1);
-    assert!(!rows[0].unique_label);
+    assert!(rows.is_empty());
+    let rows = codex_state::read_thread_completions(&sqlite, "1111", None, false).await?;
+    assert_eq!(rows[0].id, FIRST);
     for index in 0..105 {
         sqlx::query("INSERT INTO threads VALUES (?, 'bulk', '', '/project', 0, 'cli', ?)")
             .bind(format!("bulk-{index:03}"))
@@ -200,7 +261,7 @@ async fn names_remain_ambiguous_across_directories_and_results_are_bounded() -> 
 }
 
 #[tokio::test]
-async fn unnamed_previews_are_searchable_but_never_inserted_as_zsh_names() -> anyhow::Result<()> {
+async fn unnamed_previews_are_not_offered_as_titles() -> anyhow::Result<()> {
     let home = tempfile::tempdir()?;
     let sqlite = fixture(home.path()).await?;
     let pool = sqlite.open_read_write_pool(&sqlite.state_db_path()).await?;
@@ -210,15 +271,14 @@ async fn unnamed_previews_are_searchable_but_never_inserted_as_zsh_names() -> an
         .await?;
     pool.close().await;
     let rows = codex_state::read_thread_completions(&sqlite, "unnamed", None, false).await?;
-    assert_eq!(rows[0].label, "unnamed preview");
-    assert!(!rows[0].unique_label);
+    assert!(rows.is_empty());
     assert!(
         complete(
             home.path(),
             "fish",
             &["codex", "resume", "--all", "unnamed"]
         )?
-        .starts_with(FIRST)
+        .is_empty()
     );
     assert!(complete(home.path(), "zsh", &["codex", "resume", "--all", "unnamed"])?.is_empty());
     Ok(())
