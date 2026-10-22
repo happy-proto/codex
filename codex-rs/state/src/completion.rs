@@ -1,7 +1,6 @@
 //! Bounded, read-only metadata queries for shell completion.
 
 use std::path::Path;
-use std::path::PathBuf;
 use std::time::Duration;
 
 use sqlx::Row;
@@ -12,7 +11,6 @@ use crate::SqliteConfig;
 pub struct ThreadCompletion {
     pub id: String,
     pub label: String,
-    pub cwd: PathBuf,
     pub unique_label: bool,
 }
 
@@ -29,20 +27,20 @@ pub async fn read_thread_completions(
         .await?;
     let rows = sqlx::query(
         r#"
-SELECT t.id, COALESCE(NULLIF(trim(t.name), ''), trim(t.preview)) AS label, t.cwd,
-       CASE WHEN ? = '' OR instr(t.id, ?) = 1 OR NULLIF(trim(t.name), '') IS NULL
+SELECT t.id, COALESCE(trim(t.name), '') AS label,
+       CASE WHEN ? = '' OR instr(lower(t.id), lower(?)) > 0
+                 OR NULLIF(trim(t.name), '') IS NULL OR t.source NOT IN ('cli', 'vscode')
        THEN 0 ELSE NOT EXISTS (
            SELECT 1 FROM threads other
            WHERE other.archived = 0 AND other.id <> t.id
-             AND COALESCE(NULLIF(trim(other.name), ''), trim(other.preview)) =
-                 COALESCE(NULLIF(trim(t.name), ''), trim(t.preview))
+             AND COALESCE(NULLIF(trim(other.name), ''), trim(other.preview)) = trim(t.name)
        ) END AS unique_label
 FROM threads t
 WHERE t.archived = 0
   AND (t.source IN ('cli', 'vscode') OR (? AND t.source IN ('exec', 'mcp')))
   AND (? IS NULL OR t.cwd = ?)
-  AND (instr(t.id, ?) = 1
-       OR instr(lower(COALESCE(NULLIF(trim(t.name), ''), trim(t.preview))), lower(?)) > 0)
+  AND (instr(lower(t.id), lower(?)) > 0
+       OR (instr(lower(t.name), lower(?)) > 0 AND unique_label))
 ORDER BY t.recency_at_ms DESC, t.id DESC
 LIMIT 100
         "#,
@@ -62,7 +60,6 @@ LIMIT 100
             Ok(ThreadCompletion {
                 id: row.try_get("id")?,
                 label: row.try_get("label")?,
-                cwd: PathBuf::from(row.try_get::<String, _>("cwd")?),
                 unique_label: row.try_get("unique_label")?,
             })
         })

@@ -10,9 +10,12 @@ use clap::Parser;
 use clap_complete::ArgValueCompleter;
 use clap_complete::CompleteEnv;
 use clap_complete::CompletionCandidate;
+use clap_complete::env::Bash;
 use clap_complete::env::EnvCompleter;
 use clap_complete::env::Fish;
+use clap_complete::env::Powershell;
 use clap_complete::env::Shells;
+use clap_complete::env::Zsh;
 use codex_state::SqliteConfig;
 use codex_state::ThreadCompletion;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -26,6 +29,15 @@ use crate::resolve_profile_v2_config_path;
 
 const QUERY_TIMEOUT: Duration = Duration::from_millis(250);
 const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
+// Zsh's native menu can style capture groups without adding escapes to inserted values.
+// Zsh 5.9 misplaces capture styling after wide characters. Only style ASCII matches.
+// ':' and '=' delimit list-colors rules; leave those queries to the user's normal styling.
+const ZSH_MATCH_HIGHLIGHT: &str = r#"        local -a dirs=()
+        if [[ -n $words[CURRENT] && $words[CURRENT] != *[:=]* && $words[CURRENT] != *[^[:ascii:]]* ]]; then
+            zmodload -i zsh/complist
+            local match_pattern=${(b)words[CURRENT]}
+            _comp_colors+=("=(#bi)([ -~]#)($match_pattern)([ -~]#)=0=0=1=0")
+        fi"#;
 
 /// Run before arg0 dispatch, which creates helper files and starts a Tokio runtime.
 pub(super) fn complete() {
@@ -39,13 +51,126 @@ pub(super) fn complete() {
     let index = std::env::var("_CLAP_COMPLETE_INDEX")
         .ok()
         .and_then(|value| value.parse().ok());
-    let completion = CompleteEnv::with_factory(|| command(&args, index, &shell));
+    let completion = CompleteEnv::with_factory(|| command(&args, index));
     if Path::new(&shell).file_stem() == Some(OsStr::new("fish")) {
         completion
             .shells(Shells(&[&FishWithUnescapedToken]))
             .complete();
+    } else if Path::new(&shell).file_stem() == Some(OsStr::new("zsh")) {
+        completion
+            .shells(Shells(&[&ZshWithSubstringMatches]))
+            .complete();
+    } else if Bash.is(&shell.to_string_lossy()) || Powershell.is(&shell.to_string_lossy()) {
+        completion
+            .shells(Shells(&[&QuotingShell(&Bash), &QuotingShell(&Powershell)]))
+            .complete();
     } else {
         completion.complete();
+    }
+}
+
+/// Preserve the display value while making names with spaces a single shell argument.
+struct QuotingShell<'a>(&'a dyn EnvCompleter);
+
+impl EnvCompleter for QuotingShell<'_> {
+    fn name(&self) -> &'static str {
+        self.0.name()
+    }
+
+    fn is(&self, name: &str) -> bool {
+        self.0.is(name)
+    }
+
+    fn write_registration(
+        &self,
+        var: &str,
+        name: &str,
+        bin: &str,
+        completer: &str,
+        buf: &mut dyn std::io::Write,
+    ) -> std::io::Result<()> {
+        let mut script = Vec::new();
+        self.0
+            .write_registration(var, name, bin, completer, &mut script)?;
+        let script = String::from_utf8(script)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        let (old, new) = if self.name() == "bash" {
+            (
+                "complete -o nospace -o bashdefault",
+                "complete -o filenames -o nospace -o bashdefault",
+            )
+        } else {
+            (
+                "::new($cmd, $cmd, 'ParameterValue', $help)",
+                r#"::new(("'" + $cmd.Replace("'", "''") + "'"), $cmd, 'ParameterValue', $help)"#,
+            )
+        };
+        if !script.contains(old) {
+            return Err(std::io::Error::other(
+                "clap shell quoting registration changed",
+            ));
+        }
+        buf.write_all(script.replace(old, new).as_bytes())
+    }
+
+    fn write_complete(
+        &self,
+        cmd: &mut clap::Command,
+        args: Vec<OsString>,
+        current_dir: Option<&Path>,
+        buf: &mut dyn std::io::Write,
+    ) -> std::io::Result<()> {
+        self.0.write_complete(cmd, args, current_dir, buf)
+    }
+}
+
+/// The backend already matches substrings. Do not let Zsh discard them by prefix.
+struct ZshWithSubstringMatches;
+
+impl EnvCompleter for ZshWithSubstringMatches {
+    fn name(&self) -> &'static str {
+        Zsh.name()
+    }
+
+    fn is(&self, name: &str) -> bool {
+        Zsh.is(name)
+    }
+
+    fn write_registration(
+        &self,
+        var: &str,
+        name: &str,
+        bin: &str,
+        completer: &str,
+        buf: &mut dyn std::io::Write,
+    ) -> std::io::Result<()> {
+        let mut script = Vec::new();
+        Zsh.write_registration(var, name, bin, completer, &mut script)?;
+        let script = String::from_utf8(script)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+        let other = "_describe 'values' other";
+        let dirs = "_describe 'values' dirs -S '/' -r '/'";
+        let menu = "        local -a dirs=()";
+        if !script.contains(other) || !script.contains(dirs) || !script.contains(menu) {
+            return Err(std::io::Error::other("clap Zsh registration changed"));
+        }
+        buf.write_all(
+            script
+                .replace(other, "_describe -V 'values' other -U")
+                .replace(dirs, "_describe -V 'values' dirs -U -S '/' -r '/'")
+                .replace(menu, ZSH_MATCH_HIGHLIGHT)
+                .as_bytes(),
+        )
+    }
+
+    fn write_complete(
+        &self,
+        cmd: &mut clap::Command,
+        args: Vec<OsString>,
+        current_dir: Option<&Path>,
+        buf: &mut dyn std::io::Write,
+    ) -> std::io::Result<()> {
+        Zsh.write_complete(cmd, args, current_dir, buf)
     }
 }
 
@@ -99,7 +224,7 @@ impl EnvCompleter for FishWithUnescapedToken {
     }
 }
 
-fn command(args: &[OsString], index: Option<usize>, shell: &OsStr) -> clap::Command {
+fn command(args: &[OsString], index: Option<usize>) -> clap::Command {
     let command = MultitoolCli::command();
     let Some(separator) = args.iter().position(|arg| arg == "--") else {
         return command;
@@ -118,9 +243,21 @@ fn command(args: &[OsString], index: Option<usize>, shell: &OsStr) -> clap::Comm
     let Some(context) = SessionContext::parse(&context_args) else {
         return command;
     };
-    let zsh = Path::new(shell).file_stem() == Some(OsStr::new("zsh"));
     let subcommand = context.subcommand;
-    let completer = ArgValueCompleter::new(move |current: &OsStr| context.candidates(current, zsh));
+    let bash = std::env::var("COMPLETE").is_ok_and(|shell| Bash.is(&shell));
+    let completer = ArgValueCompleter::new(move |current: &OsStr| {
+        let mut candidates = context.candidates(current);
+        if bash {
+            // Readline's filename quoting also appends '/' to existing directories.
+            // Such a name would cease to be an exact resume argument.
+            candidates.retain(|candidate| {
+                codex_protocol::ThreadId::from_string(&candidate.get_value().to_string_lossy())
+                    .is_ok()
+                    || !Path::new(candidate.get_value()).is_dir()
+            });
+        }
+        candidates
+    });
     command.mut_subcommand(subcommand, |command| {
         // mut_arg removes and re-appends its argument, changing inferred positional indexes.
         command.mut_args(|arg| {
@@ -235,7 +372,7 @@ impl SessionContext {
         Ok(SqliteConfig::from_sqlite_home(sqlite_home))
     }
 
-    fn candidates(&self, current: &OsStr, zsh: bool) -> Vec<CompletionCandidate> {
+    fn candidates(&self, current: &OsStr) -> Vec<CompletionCandidate> {
         let Some(query) = current.to_str() else {
             return Vec::new();
         };
@@ -261,7 +398,7 @@ impl SessionContext {
             .await
         });
         match result {
-            Ok(Ok(threads)) => candidates(threads, query, zsh),
+            Ok(Ok(threads)) => candidates(threads, query),
             _ => Vec::new(),
         }
     }
@@ -291,36 +428,28 @@ fn configured_sqlite_home(path: &Path) -> anyhow::Result<Option<AbsolutePathBuf>
         }))
 }
 
-fn candidates(threads: Vec<ThreadCompletion>, query: &str, zsh: bool) -> Vec<CompletionCandidate> {
+fn candidates(threads: Vec<ThreadCompletion>, query: &str) -> Vec<CompletionCandidate> {
+    let query = query.to_ascii_lowercase();
     threads
         .into_iter()
         .filter_map(|thread| {
-            let id_matches = thread.id.starts_with(query);
-            // Zsh filters the inserted value again. For a name prefix, insert the exact
-            // unique label so it remains a valid resume argument. Other shells can insert UUIDs.
-            let value = if !id_matches && zsh {
-                if !thread.unique_label || !thread.label.starts_with(query) {
-                    return None;
-                }
-                thread.label.clone()
+            // Empty queries and ID matches show only IDs. Exact unique names are valid
+            // resume arguments too, so no separate description or hidden ID is needed.
+            let value = if thread.id.to_ascii_lowercase().contains(&query) {
+                thread.id
+            } else if thread.unique_label
+                && thread.label.to_ascii_lowercase().contains(&query)
+                && !thread.label.starts_with('-')
+                && codex_protocol::ThreadId::from_string(&thread.label).is_err()
+            {
+                thread.label
             } else {
-                thread.id.clone()
+                return None;
             };
             if value.chars().any(char::is_control) {
                 return None;
             }
-            let help = format!(
-                "{} · {} · {}",
-                thread.label,
-                thread.cwd.display(),
-                thread.id
-            );
-            let help = help
-                .chars()
-                .map(|ch| if ch.is_control() { ' ' } else { ch })
-                .take(240)
-                .collect::<String>();
-            Some(CompletionCandidate::new(value).help(Some(help.into())))
+            Some(CompletionCandidate::new(value))
         })
         .enumerate()
         .map(|(index, candidate)| candidate.display_order(Some(index)))

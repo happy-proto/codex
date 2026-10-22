@@ -8,7 +8,6 @@ fn thread(id: &str, label: &str, unique_label: bool) -> ThreadCompletion {
     ThreadCompletion {
         id: id.into(),
         label: label.into(),
-        cwd: PathBuf::from("/project"),
         unique_label,
     }
 }
@@ -53,7 +52,6 @@ fn command_attaches_session_completer_to_first_positional() {
         let mut command = command(
             &args(&["codex", "--", "codex", subcommand, "--all", "修复"]),
             Some(3),
-            OsStr::new("fish"),
         );
         command.build();
         let command = command.find_subcommand(subcommand).expect("subcommand");
@@ -85,7 +83,6 @@ fn command_checks_remote_options_after_cursor() {
             "ws://example:1234",
         ]),
         Some(2),
-        OsStr::new("zsh"),
     );
     let arg = command
         .find_subcommand("resume")
@@ -97,36 +94,91 @@ fn command_checks_remote_options_after_cursor() {
 }
 
 #[test]
-fn uuid_candidates_keep_recency_order_and_clean_descriptions() {
+fn empty_query_shows_only_ids_in_recency_order() {
     let candidates = candidates(
         vec![
             thread("02", "修复\n补全\t", false),
             thread("01", "older", true),
         ],
         "",
-        false,
     );
     assert_eq!(candidates[0].get_value(), "02");
     assert_eq!(candidates[1].get_value(), "01");
     assert_eq!(candidates[0].get_display_order(), Some(0));
-    let help = candidates[0].get_help().expect("description").to_string();
-    assert!(!help.chars().any(char::is_control));
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.get_help().is_none())
+    );
 }
 
 #[test]
-fn zsh_name_prefixes_insert_unique_exact_labels() {
-    let results = candidates(vec![thread("01", "修复 shell 补全", true)], "修复", true);
-    assert_eq!(results[0].get_value(), "修复 shell 补全");
-    assert!(candidates(vec![thread("01", "修复", false)], "修复", true).is_empty());
-    assert!(candidates(vec![thread("01", "修复\n补全", true)], "修复", true).is_empty());
+fn substrings_show_and_insert_only_the_matched_field() {
+    for query in ["shell", "SHELL", "补全"] {
+        let results = candidates(vec![thread("01", "修复 Shell 补全", true)], query);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].get_value(), "修复 Shell 补全");
+        assert!(results[0].get_help().is_none());
+    }
+    for query in ["c461ac05b237", "C461AC05B237", "6c70-7e92"] {
+        let id = "01a1582d-6c70-7e92-b3fa-c461ac05b237";
+        let results = candidates(vec![thread(id, "title", false)], query);
+        assert_eq!(results[0].get_value(), id);
+        assert!(results[0].get_help().is_none());
+    }
+    // ID wins when both fields match.
     assert_eq!(
-        candidates(vec![thread("01", "修复", false)], "0", true)[0].get_value(),
+        candidates(vec![thread("01", "title 01", true)], "01")[0].get_value(),
         "01"
     );
-    assert_eq!(
-        candidates(vec![thread("01", "修复", false)], "修复", false)[0].get_value(),
-        "01"
-    );
+}
+
+#[test]
+fn unsafe_or_unmatched_titles_are_not_inserted() {
+    assert!(candidates(vec![thread("01", "修复", false)], "修复").is_empty());
+    assert!(candidates(vec![thread("01", "修复\n补全", true)], "修复").is_empty());
+    assert!(candidates(vec![thread("01", "other", true)], "absent").is_empty());
+    assert!(candidates(vec![thread("01", "--all", true)], "all").is_empty());
+    let title = "01a1582d-6c70-7e92-b3fa-c461ac05b237";
+    assert!(candidates(vec![thread("01", title, true)], "c461ac05b237").is_empty());
+}
+
+#[test]
+fn bash_and_powershell_registration_quote_names_without_changing_display_values()
+-> std::io::Result<()> {
+    let mut script = Vec::new();
+    QuotingShell(&Bash).write_registration("COMPLETE", "codex", "codex", "codex", &mut script)?;
+    let script = String::from_utf8(script).expect("UTF-8 registration");
+    assert!(script.contains("complete -o filenames -o nospace -o bashdefault"));
+    let mut script = Vec::new();
+    QuotingShell(&Powershell).write_registration(
+        "COMPLETE",
+        "codex",
+        "codex",
+        "codex",
+        &mut script,
+    )?;
+    let script = String::from_utf8(script).expect("UTF-8 registration");
+    assert!(script.contains(r#"::new(("'" + $cmd.Replace("'", "''") + "'"), $cmd,"#));
+    Ok(())
+}
+
+#[test]
+fn zsh_registration_does_not_reapply_prefix_filtering() -> std::io::Result<()> {
+    let mut script = Vec::new();
+    ZshWithSubstringMatches.write_registration(
+        "COMPLETE",
+        "codex",
+        "codex",
+        "codex",
+        &mut script,
+    )?;
+    let script = String::from_utf8(script).expect("UTF-8 registration");
+    assert!(script.contains("_describe -V 'values' other -U"));
+    // A title ending in '/' also takes clap's directory branch.
+    assert!(script.contains("_describe -V 'values' dirs -U -S '/' -r '/'"));
+    assert!(script.contains(ZSH_MATCH_HIGHLIGHT));
+    Ok(())
 }
 
 #[test]
