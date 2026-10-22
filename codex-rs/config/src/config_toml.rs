@@ -434,6 +434,9 @@ pub struct ConfigToml {
     /// Base URL override for the built-in `openai` model provider.
     pub openai_base_url: Option<String>,
 
+    /// 内置 OpenAI provider 的模型请求代理，不注入 shell 或其它服务的环境。
+    pub openai_proxy_url: Option<String>,
+
     /// Machine-local realtime audio device preferences used by realtime voice.
     #[serde(default)]
     pub audio: Option<RealtimeAudioToml>,
