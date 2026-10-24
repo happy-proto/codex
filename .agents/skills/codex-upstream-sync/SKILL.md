@@ -1,4 +1,11 @@
-# 同步上游 alpha
+---
+name: codex-upstream-sync
+description: 同步 happy-proto/codex fork 到最新已发布的上游 alpha，检查内置第三方 skills 更新，或分析新旧上游版本的变化。
+---
+
+# Codex 上游同步
+
+先读仓库通用约定 [AGENTS.md](../../../AGENTS.md)。
 
 维护 fork 的改动默认包含同步最新已发布的上游 alpha，无需用户另行提出同步。
 只读调查不改变基线；用户明确要求保留基线、暂不同步或指定版本时，遵循该要求。
@@ -10,15 +17,24 @@ Actions 不自行 rebase 或强推分支。
 将本轮改动与上游同步都准备、验证完毕后，一次推送 `main`，避免重复触发完整 CI。
 本轮确定候选后不反复追逐新发行版。
 
+## 自有脚本
+
+为本 skill 新增或修改可复用 Python CLI 时，使用 `$dcjanus:uv-cli-creator`，
+入口放在本 skill 的 `scripts/` 目录；按该 skill 初始化和维护 PEP 723 依赖、可执行入口、
+参数帮助及验证，不按 `$dcjanus:python-execution` 的临时脚本方式编写。
+环境支持时直接执行脚本路径，其它环境使用 `uv run --script`；通过参数显式传入目标仓库路径。
+仓库与 CI 共用的 `scripts/fork/` Python CLI 同样通过可执行路径或 `uv run --script` 调用；
+运行时要求见仓库约定，测试使用 `scripts/fork/run_tests.py`，可按 `--help` 选择测试模块或文件。
+
 ## 内置第三方 skills
 
-每次同步上游时执行 `python3 scripts/fork/sync_skills.py check --upstream`，
+每次同步上游时执行 `scripts/fork/sync_skills.py check --upstream`，
 按 `scripts/fork/skills.lock.json` 中各来源的跟踪 ref 检查更新；检查失败不能视为没有更新。
-有更新时，用 `python3 scripts/fork/sync_skills.py update <skill> --ref <ref>` 更新对应快照和 lock，
+有更新时，用 `scripts/fork/sync_skills.py update <skill> --ref <ref>` 更新对应快照和 lock，
 保留原有跟踪 ref，避免改为固定 commit 后失去后续更新发现能力。
 审查 skill 指令、引用文件和许可证差异，确认仍适用于 fork 的接入方式及运行程序；
 执行离线 `check` 和 `test_sync_skills.py`，将快照及 lock 与 alpha 同步结果一起验证、交付。
-来源及维护边界见 [0010 改造记录](../../../../docs/fork-changes/0010-open-automation.md)。
+来源及维护边界见 [0010 改造记录](../../../docs/fork-changes/0010-open-automation.md)。
 最终回复简述哪些 skill 已更新、哪些没有更新；兼容性或检查失败时明确说明未完成项。
 
 ## Alpha 同步步骤

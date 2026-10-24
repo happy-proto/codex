@@ -1,17 +1,30 @@
-#!/usr/bin/env python3
-"""Build and publish the alpha-based personal fork using the canonical package."""
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.15"
+# dependencies = [
+#     "typer>=0.27.3",
+# ]
+# ///
+"""构建、验收和发布基于上游 alpha 的个人 fork。"""
 
-import argparse
 import hashlib
 import json
 import os
 import re
-import selectors
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
+from typing import Annotated
+lazy import selectors
+
+import typer
+
+app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
 
 ROOT = Path(__file__).resolve().parents[2]
 REPO = "happy-proto/codex"
@@ -40,7 +53,7 @@ def fork_version(upstream_tag, revision=1):
 
 def releases():
     pages = api(f"repos/{REPO}/releases?per_page=100", "--paginate", "--slurp")
-    return [release for page in pages for release in page]
+    return [*page for page in pages]
 
 
 def next_version(upstream_tag, existing):
@@ -205,7 +218,7 @@ def build(target=TARGET):
     # 发布版本写入包清单；保留内部 Cargo 版本，避免每个 fork 序号使缓存失效。
     os.environ["STABLE_GIT_COMMIT"] = metadata["source_commit"]
     run(
-        "python3",
+        sys.executable,
         "scripts/build_codex_package.py",
         "--target",
         target,
@@ -493,32 +506,72 @@ def prune(apply=False):
             run("gh", "api", f"repos/{REPO}/git/refs/tags/{tag}", "--method", "DELETE")
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "action", choices=["version", "plan", "build", "publish", "smoke", "prune"]
-    )
-    parser.add_argument("--package", type=Path)
-    parser.add_argument("--target", choices=TARGETS, default=TARGET)
-    parser.add_argument(
-        "--apply", action="store_true", help="Apply release/tag retention cleanup"
-    )
-    args = parser.parse_args()
-    if args.action == "version":
-        print(selected_version())
-    elif args.action == "prune":
-        prune(args.apply)
-    elif args.action == "plan":
-        print(json.dumps(plan(args.target), indent=2))
-    elif args.action == "build":
-        build(args.target)
-    elif args.action == "publish":
-        publish()
-    else:
-        if args.package is None:
-            parser.error("smoke requires --package")
-        smoke(args.package.resolve())
+class Target(str, Enum):
+    """支持的原生包目标。"""
+
+    macos = "aarch64-apple-darwin"
+    linux = "x86_64-unknown-linux-gnu"
+
+
+@app.command("version")
+def version_command() -> None:
+    """输出分发版本号；优先使用 CODEX_FORK_VERSION，否则查询远端版本。"""
+    print(selected_version())
+
+
+@app.command("plan")
+def plan_command(
+    target: Annotated[
+        Target, typer.Option("--target", help="原生包目标")
+    ] = Target.macos,
+) -> None:
+    """以 JSON 输出当前仓库的构建计划。"""
+    print(json.dumps(plan(target.value), indent=2))
+
+
+@app.command("build")
+def build_command(
+    target: Annotated[
+        Target, typer.Option("--target", help="原生包目标")
+    ] = Target.macos,
+) -> None:
+    """调用上游 package builder 构建并验收原生包。"""
+    build(target.value)
+
+
+@app.command("publish")
+def publish_command() -> None:
+    """发布 fork-dist 中已验证的平台产物，需要 GitHub 写权限。"""
+    publish()
+
+
+@app.command("smoke")
+def smoke_command(
+    package: Annotated[
+        Path,
+        typer.Option(
+            "--package",
+            exists=True,
+            file_okay=False,
+            resolve_path=True,
+            help="已解包的原生包目录",
+        ),
+    ],
+) -> None:
+    """验证原生包资源、CLI 和 app-server。"""
+    smoke(package)
+
+
+@app.command("prune")
+def prune_command(
+    apply: Annotated[
+        bool,
+        typer.Option("--apply", help="实际删除过期 Release 与孤立 tag；默认仅预览"),
+    ] = False,
+) -> None:
+    """预览或执行版本保留清理。"""
+    prune(apply)
 
 
 if __name__ == "__main__":
-    main()
+    app()

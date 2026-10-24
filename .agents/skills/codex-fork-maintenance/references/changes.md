@@ -8,7 +8,7 @@
 新改造取现有最大编号加一，用中文描述最终行为，避免记录临时调试过程。
 记录上游关联和维护注意事项，但不把编号绑定到 commit SHA；后续修正继续更新原文件。
 
-本轮开始时按 upstream 参考确定上游 alpha 候选。
+本轮开始时按 [codex-upstream-sync](../../codex-upstream-sync/SKILL.md) 确定上游 alpha 候选。
 在 `main` 完成已授权的代码和文档变更，做与风险匹配的检查；
 提交前核对范围，使用英文 Conventional Commit，保留用户已有改动。
 没有 PR 创建步骤，不运行 `gh stack`；只有用户另行要求时才创建 PR。

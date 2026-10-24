@@ -51,18 +51,20 @@ jobs:
       - uses: actions/checkout@v6.0.2
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6.2.0
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
-          python-version: '3.12'
+          version: '0.13.5'
+          python-version: '3.15'
+          enable-cache: false
       - name: Test portable fork version and publication contracts
-        run: python3 -m unittest discover -s scripts/fork -p 'test_*.py' -v
+        run: scripts/fork/run_tests.py
       - name: 校验内置第三方 skill 快照
-        run: python3 scripts/fork/sync_skills.py check
+        run: scripts/fork/sync_skills.py check
       - name: Choose one fork revision for both platforms and tests
         id: version
         env:
           GH_TOKEN: ${{ github.token }}
-        run: echo "version=$(python3 scripts/fork/release.py version)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(scripts/fork/release.py version)" >> "$GITHUB_OUTPUT"
       - name: Check shell syntax
         run: |
           sh -n scripts/fork/install.sh
@@ -107,12 +109,13 @@ jobs:
         run: |
           tag=$(cat scripts/fork/upstream-tag)
           git fetch https://github.com/openai/codex.git "refs/tags/$tag:refs/tags/$tag"
-      - uses: actions/setup-python@v6.2.0
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
-          python-version: '3.12'
+          version: '0.13.5'
+          python-version: '3.15'
+          enable-cache: false
       - name: Test native installer contracts
-        working-directory: scripts/fork
-        run: python3 -m unittest test_release.InstallerTests -v
+        run: scripts/fork/run_tests.py test_release.InstallerTests
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
@@ -145,7 +148,7 @@ jobs:
           CODEX_REPO_ROOT: ${{ github.workspace }}
           PACKAGE_TARGET: ${{ matrix.target }}
         run: |
-          python3 - <<'PY'
+          uv run --no-project --python 3.15 python - <<'PY'
           import os
           from scripts.codex_package.targets import TARGET_SPECS
           from scripts.codex_package.v8 import resolve_codex_v8_cargo_env
@@ -159,15 +162,15 @@ jobs:
         run: cargo clean --manifest-path codex-rs/Cargo.toml --target ${{ matrix.target }} --release -p v8
       - name: Validate source and build complete native package
         id: package
-        run: python3 scripts/fork/build_observer.py --output fork-sccache/progress.ndjson -- python3 scripts/fork/release.py build --target ${{ matrix.target }}
+        run: scripts/fork/build_observer.py --output fork-sccache/progress.ndjson -- scripts/fork/release.py build --target ${{ matrix.target }}
       - name: 验证真实 CLI 启动与 resume 的终端目录
         env:
           CODEX_FORK_TEST_BINARY: ${{ github.workspace }}/fork-dist/package/bin/codex
-        run: python3 -m unittest discover -s scripts/fork -p test_terminal_cwd.py -v
+        run: scripts/fork/run_tests.py --pattern test_terminal_cwd.py
       - name: 验证同一 binary 的发布版本与包清单一致
         env:
           CODEX_FORK_TEST_BINARY: ${{ github.workspace }}/fork-dist/package/bin/codex
-        run: python3 -m unittest discover -s scripts/fork -p test_package_version.py -v
+        run: scripts/fork/run_tests.py --pattern test_package_version.py
       - name: 上传产物构建耗时报告
         uses: actions/upload-artifact@v7.0.0
         if: always()
@@ -180,8 +183,8 @@ jobs:
         run: |
           mkdir -p fork-sccache
           sccache --show-stats --stats-format=json > fork-sccache/build.json
-          python3 scripts/fork/cache_diagnostics.py --log "$SCCACHE_ERROR_LOG" --cwd codex-rs --output fork-sccache/diagnostics.json
-          python3 scripts/fork/build_report.py --directory fork-sccache --stats build.json --timings codex-rs/target/cargo-timings
+          scripts/fork/cache_diagnostics.py --log "$SCCACHE_ERROR_LOG" --cwd codex-rs --output fork-sccache/diagnostics.json
+          scripts/fork/build_report.py --directory fork-sccache --stats build.json --timings codex-rs/target/cargo-timings
       - name: 上传产物编译缓存统计
         if: always() && steps.sccache.outcome == 'success'
         uses: actions/upload-artifact@v7.0.0
@@ -207,9 +210,11 @@ jobs:
       - uses: actions/checkout@v6.0.2
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v6.2.0
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
-          python-version: '3.12'
+          version: '0.13.5'
+          python-version: '3.15'
+          enable-cache: false
       - uses: dtolnay/rust-toolchain@1.99.1
       - name: 恢复 Cargo 下载缓存
         uses: Swatinem/rust-cache@v2.9.2
@@ -220,7 +225,7 @@ jobs:
           shared-key: fork-build-v1-downloads
           save-if: false
       - name: 对照 ts-rs 原版与上游确定性修复
-        run: python3 scripts/fork/build_observer.py --output "$RUNNER_TEMP/fork-cache-probe-progress.ndjson" --interval 5 -- python3 scripts/fork/probe_ts_rs_cache.py --output "$RUNNER_TEMP/fork-cache-probe" --patched-macros codex-rs/vendor/ts-rs-macros
+        run: scripts/fork/build_observer.py --output "$RUNNER_TEMP/fork-cache-probe-progress.ndjson" --interval 5 -- scripts/fork/probe_ts_rs_cache.py --output "$RUNNER_TEMP/fork-cache-probe" --patched-macros codex-rs/vendor/ts-rs-macros
       - name: 保存小型复现与依赖摘要
         if: always()
         uses: actions/upload-artifact@v7.0.0
@@ -272,9 +277,11 @@ jobs:
         run: |
           tag=$(cat scripts/fork/upstream-tag)
           git fetch https://github.com/openai/codex.git "refs/tags/$tag:refs/tags/$tag"
-      - uses: actions/setup-python@v6.2.0
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
-          python-version: '3.12'
+          version: '0.13.5'
+          python-version: '3.15'
+          enable-cache: false
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
@@ -461,8 +468,8 @@ jobs:
         run: |
           mkdir -p fork-sccache
           sccache --show-stats --stats-format=json > fork-sccache/test.json
-          python3 scripts/fork/cache_diagnostics.py --log "$SCCACHE_ERROR_LOG" --cwd codex-rs --output fork-sccache/diagnostics.json
-          python3 scripts/fork/build_report.py --directory fork-sccache --stats test.json --timings codex-rs/target/cargo-timings
+          scripts/fork/cache_diagnostics.py --log "$SCCACHE_ERROR_LOG" --cwd codex-rs --output fork-sccache/diagnostics.json
+          scripts/fork/build_report.py --directory fork-sccache --stats test.json --timings codex-rs/target/cargo-timings
       - name: 上传测试编译缓存统计
         if: always() && steps.sccache.outcome == 'success'
         uses: actions/upload-artifact@v7.0.0
@@ -491,6 +498,11 @@ jobs:
       - uses: actions/checkout@v6.0.2
         with:
           persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: '0.13.5'
+          python-version: '3.15'
+          enable-cache: false
       - uses: actions/download-artifact@v8.0.1
         with:
           pattern: fork-package-*-${{ github.sha }}
@@ -504,8 +516,8 @@ jobs:
       - name: Publish verified build and update channel manifest
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/fork/release.py publish
+        run: scripts/fork/release.py publish
       - name: Prune fork releases and tags older than seven days, keeping the latest three
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/fork/release.py prune --apply
+        run: scripts/fork/release.py prune --apply

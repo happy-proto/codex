@@ -39,6 +39,7 @@ curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/main/scripts/fork
 
 `main` 是唯一长期分支，保存全部改造；定期 rebase 到已发布的上游 alpha，推送后由 CI 验证并发布。
 维护规则见 [AGENTS.md](AGENTS.md)，操作方法见 [维护 skill](.agents/skills/codex-fork-maintenance/SKILL.md)。
+同步上游可直接调用 `$codex-upstream-sync`，步骤见 [上游同步 skill](.agents/skills/codex-upstream-sync/SKILL.md)。
 安装、版本和发布细节见 [分发与更新说明](docs/fork-changes/0001-distribution-and-updates.md)。
 
 [上游介绍与文档](docs/upstream-readme.md) · [Apache-2.0 License](LICENSE)

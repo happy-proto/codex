@@ -1,6 +1,12 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.15"
+# dependencies = [
+#     "typer>=0.27.3",
+# ]
+# ///
 """提取缓存键、命中结果和依赖摘要，不导出原始日志。"""
-
-from __future__ import annotations
 
 import hashlib
 import json
@@ -10,6 +16,12 @@ import subprocess
 import tomllib
 from collections import Counter
 from pathlib import Path
+from typing import Annotated
+
+import typer
+
+app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
+
 
 SELECTED = {
     "ts_rs",
@@ -48,10 +60,9 @@ FLAGS = {
 
 
 def file_digest(path: Path) -> dict:
-    digest = hashlib.sha256()
+    """通过标准库流式计算摘要，避免 Python 层的分块循环。"""
     with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
+        digest = hashlib.file_digest(stream, "sha256")
     return {"bytes": path.stat().st_size, "sha256": digest.hexdigest()}
 
 
@@ -220,15 +231,24 @@ def summarize(log: Path, cwd: Path) -> dict:
     }
 
 
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--log", required=True, type=Path)
-    parser.add_argument("--cwd", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
-    args = parser.parse_args()
-    report = summarize(args.log, args.cwd)
+@app.command()
+def main(
+    log: Annotated[
+        Path, typer.Option("--log", help="sccache daemon 日志路径；允许缺失")
+    ],
+    cwd: Annotated[
+        Path,
+        typer.Option(
+            "--cwd",
+            exists=True,
+            file_okay=False,
+            help="Rust workspace 目录，用于读取 Cargo.toml 和 Git 信息",
+        ),
+    ],
+    output: Annotated[Path, typer.Option("--output", help="诊断 JSON 输出路径")],
+) -> None:
+    """输出经过脱敏的缓存诊断与构建环境。"""
+    report = summarize(log, cwd)
     report["environment"] = {
         name: os.environ.get(name)
         for name in (
@@ -250,16 +270,20 @@ if __name__ == "__main__":
         )
     }
     report["rustc"] = subprocess.check_output(
-        ["rustc", "-vV"], cwd=args.cwd, text=True
+        ["rustc", "-vV"], cwd=cwd, text=True
     ).strip()
     report["rust_source_tree"] = subprocess.check_output(
-        ["git", "rev-parse", "HEAD:codex-rs"], cwd=args.cwd, text=True
+        ["git", "rev-parse", "HEAD:codex-rs"], cwd=cwd, text=True
     ).strip()
     report["source_commit"] = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=args.cwd, text=True
+        ["git", "rev-parse", "HEAD"], cwd=cwd, text=True
     ).strip()
-    report["workspace_version"] = tomllib.loads((args.cwd / "Cargo.toml").read_text())[
+    report["workspace_version"] = tomllib.loads((cwd / "Cargo.toml").read_text())[
         "workspace"
     ]["package"]["version"]
     report["package_version"] = os.environ.get("CODEX_FORK_VERSION")
-    args.output.write_text(json.dumps(report, indent=2) + "\n")
+    output.write_text(json.dumps(report, indent=2) + "\n")
+
+
+if __name__ == "__main__":
+    app()

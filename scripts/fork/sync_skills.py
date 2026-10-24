@@ -1,18 +1,30 @@
-#!/usr/bin/env python3
-"""更新或校验 fork 内置的第三方 skill 快照；沿用 fork 脚本的标准库工具链。"""
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.15"
+# dependencies = [
+#     "typer>=0.27.3",
+# ]
+# ///
+"""更新或校验 fork 内置的第三方 skill 快照。"""
 
-import argparse
 import hashlib
 import io
 import json
 import re
 import shutil
 import subprocess
-import tarfile
 import tempfile
 import urllib.parse
 import urllib.request
+from enum import Enum
 from pathlib import Path, PurePosixPath
+from typing import Annotated
+lazy import tarfile
+
+import typer
+
+app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
 
 ROOT = Path(__file__).resolve().parents[2]
 DEST = ROOT / "codex-rs/skills/src/assets/fork"
@@ -73,11 +85,17 @@ def extract_skill(data, name, destination):
         raise ValueError(f"上游缺少许可证: {name}")
 
 
+def file_digest(path: Path) -> str:
+    """流式计算文件摘要，避免将整个文件读入内存。"""
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
 def fingerprint(directory):
     if any(path.is_symlink() for path in directory.rglob("*")):
         raise ValueError(f"skill 快照中不允许链接: {directory}")
     return {
-        str(path.relative_to(directory)): hashlib.sha256(path.read_bytes()).hexdigest()
+        str(path.relative_to(directory)): file_digest(path)
         for path in sorted(directory.rglob("*"))
         if path.is_file()
     }
@@ -137,30 +155,35 @@ def check(upstream=False):
             )
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    commands = parser.add_subparsers(dest="command", required=True)
-    updater = commands.add_parser(
-        "update", help="更新全部或指定 skill，生成固定 commit 和文件校验值"
-    )
-    updater.add_argument(
-        "skill", nargs="?", choices=sorted(SOURCES), help="省略则更新全部 skill"
-    )
-    updater.add_argument(
-        "--ref", default="main", help="上游分支、tag 或 commit（默认 main）"
-    )
-    checker = commands.add_parser("check", help="离线校验来源清单及全部快照文件")
-    checker.add_argument(
-        "--upstream",
-        action="store_true",
-        help="同时联网查看锁定 ref 是否有更新；不修改文件",
-    )
-    args = parser.parse_args()
-    if args.command == "update":
-        update([args.skill] if args.skill else list(SOURCES), args.ref)
-    else:
-        check(args.upstream)
+class SkillName(str, Enum):
+    """支持导入的第三方 skill。"""
+
+    browser = "open-browser-use"
+    computer = "open-computer-use"
+
+
+@app.command("update")
+def update_command(
+    skill: Annotated[
+        SkillName | None, typer.Argument(help="省略则更新全部 skill")
+    ] = None,
+    ref: Annotated[
+        str, typer.Option("--ref", help="上游分支、tag 或 commit；更新后继续跟踪该 ref")
+    ] = "main",
+) -> None:
+    """更新指定或全部快照，并生成来源与文件摘要。"""
+    update([skill.value] if skill else list(SOURCES), ref)
+
+
+@app.command("check")
+def check_command(
+    upstream: Annotated[
+        bool, typer.Option("--upstream", help="同时联网检查跟踪 ref；不修改文件")
+    ] = False,
+) -> None:
+    """离线校验来源与快照；可选检查上游更新。"""
+    check(upstream)
 
 
 if __name__ == "__main__":
-    main()
+    app()
