@@ -1,8 +1,13 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.15"
+# dependencies = [
+#     "typer>=0.27.3",
+# ]
+# ///
 """只重编译 ts-rs，对照上游确定性修复；不构建 Codex 或修改仓库依赖。"""
 
-from __future__ import annotations
-
-import argparse
 import hashlib
 import json
 import os
@@ -11,6 +16,12 @@ import subprocess
 import time
 import tomllib
 from pathlib import Path
+from typing import Annotated
+
+import typer
+
+app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
+
 
 UPSTREAM_FIX = "https://github.com/Aleph-Alpha/ts-rs/pull/488"
 TS_FEATURES = ("uuid-impl", "serde-json-impl", "no-serde-warnings")
@@ -64,15 +75,26 @@ def patch_macro(directory: Path) -> None:
     )
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--target", default="aarch64-apple-darwin")
-    parser.add_argument(
-        "--patched-macros", type=Path, help="用实际维护的宏源码作为修复组"
-    )
-    args = parser.parse_args()
-    root = args.output.resolve()
+@app.command()
+def main(
+    output: Annotated[
+        Path, typer.Option("--output", help="隔离实验输出目录；必须尚不存在")
+    ],
+    target: Annotated[
+        str, typer.Option("--target", help="传给 Cargo 的 Rust target triple")
+    ] = "aarch64-apple-darwin",
+    patched_macros: Annotated[
+        Path | None,
+        typer.Option(
+            "--patched-macros",
+            exists=True,
+            file_okay=False,
+            help="实际维护的宏源码目录；省略则在副本应用上游修复",
+        ),
+    ] = None,
+) -> None:
+    """对照 ts-rs 宏修复前后的产物确定性；执行隔离的 Cargo 编译。"""
+    root = output.resolve()
     root.mkdir(parents=True, exist_ok=False)
     repository = Path(__file__).resolve().parents[2]
     lock_path = repository / "codex-rs/Cargo.lock"
@@ -163,9 +185,9 @@ def main() -> None:
     if macro["version"] != "11.1.0":
         raise ValueError("宏依赖版本未匹配仓库锁文件")
     vendor = root / "patched-macros"
-    if args.patched_macros:
+    if patched_macros:
         shutil.copytree(
-            args.patched_macros.resolve(),
+            patched_macros.resolve(),
             vendor,
             ignore=shutil.ignore_patterns("target", "Cargo.lock"),
         )
@@ -208,7 +230,7 @@ def main() -> None:
                 str(fixture / "Cargo.toml"),
                 "--release",
                 "--target",
-                args.target,
+                target,
                 *config,
             ]
             run(
@@ -282,7 +304,7 @@ def main() -> None:
             )
     summary = {
         "upstream_fix": UPSTREAM_FIX,
-        "target": args.target,
+        "target": target,
         "workspace_lock_sha256": digest(lock_path),
         "release_profile": profile,
         "ts_rs_features": TS_FEATURES,
@@ -308,4 +330,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    app()

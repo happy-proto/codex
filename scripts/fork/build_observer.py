@@ -1,8 +1,13 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.15"
+# dependencies = [
+#     "typer>=0.27.3",
+# ]
+# ///
 """执行构建，并定期输出不包含原始命令行的 runner 资源与缓存快照。"""
 
-from __future__ import annotations
-
-import argparse
 import json
 import os
 import re
@@ -13,9 +18,13 @@ import time
 from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 from uuid import uuid4
 
+import typer
 from cache_diagnostics import classify_error
+
+app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
 
 COMPILERS = {
     "rustc",
@@ -313,17 +322,36 @@ def observe(command: list[str], output: Path, interval: float) -> int:
                 child.wait()
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--interval", type=float, default=60)
-    parser.add_argument("command", nargs=argparse.REMAINDER)
-    args = parser.parse_args()
-    command = args.command[1:] if args.command[:1] == ["--"] else args.command
-    if not command or args.interval <= 0:
-        parser.error("需要构建命令和大于零的采样间隔")
-    raise SystemExit(observe(command, args.output, args.interval))
+def positive_interval(value: float) -> float:
+    """拒绝零采样间隔，避免忙循环。"""
+    if value <= 0:
+        raise typer.BadParameter("采样间隔必须大于零")
+    return value
+
+
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
+def main(
+    command: Annotated[
+        list[str], typer.Argument(help="待观察命令及参数；使用 -- 分隔，原样透传")
+    ],
+    output: Annotated[
+        Path, typer.Option("--output", help="追加写入的 NDJSON 观察记录路径")
+    ],
+    interval: Annotated[
+        float,
+        typer.Option(
+            "--interval",
+            min=0,
+            callback=positive_interval,
+            help="采样间隔，单位秒，必须大于零",
+        ),
+    ] = 60,
+) -> None:
+    """执行命令并采样资源，透传信号和退出码。"""
+    raise typer.Exit(observe(command, output, interval))
 
 
 if __name__ == "__main__":
-    main()
+    app()

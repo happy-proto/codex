@@ -8,7 +8,10 @@ Release 内使用固定平台包名，发布清单的 `packages` 记录各平台
 旧 `.fork` 安装首次手动执行 `codex update` 迁移。
 发布后仅按发布时间保留最新 10 个已发布 fork 版本及其 tag，不设时间窗口。
 draft 不占名额；清理遗留 draft 和没有 Release 的孤立 fork tag，不影响上游 tag 或本地安装回退。
-使用 `release.py prune` 查看候选，`prune --apply` 执行清理。
+使用 `scripts/fork/release.py prune` 查看候选，`prune --apply` 执行清理。
+发布工具依赖 uv 和 Python >=3.15；CI 显式配置 uv 与 Python 3.15，各 Python CLI 使用 PEP 723 声明依赖。
+脚本接口从 `scripts/fork/release.py --help` 逐层查看；测试统一使用 `scripts/fork/run_tests.py`。
+不支持直接执行时使用 `uv run --script <脚本路径>`。安装器的用户环境要求见 README。
 
 构建复用上游完整 package builder，包含 CLI、code-mode host 和 rg 等必要资源。
 从上游 `0.163.0-alpha.1` 起不再附带补丁 zsh，签名、验收和安装检查遵循当前上游布局。
