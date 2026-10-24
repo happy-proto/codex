@@ -1,7 +1,8 @@
 # Fork 开发
 
-本仓库是个人 fork `happy-proto/codex`。修改 fork、维护改造记录、同步上游 alpha、
-发布或安装时，使用 [维护 skill](.agents/skills/codex-fork-maintenance/SKILL.md)。
+本仓库是个人 fork `happy-proto/codex`。修改 fork、维护改造记录、发布或安装时，
+使用 [维护 skill](.agents/skills/codex-fork-maintenance/SKILL.md)；同步上游 alpha 或分析上游变化时，
+使用独立的 [上游同步 skill](.agents/skills/codex-upstream-sync/SKILL.md)。
 
 - `origin` 指向 `happy-proto/codex`，`upstream` 指向 `openai/codex`。
 - `main` 是唯一长期分支和默认分支，保存上游基线与全部自有改动；直接在此维护，
@@ -23,6 +24,8 @@
   不为少量耗时收益大范围删除上游功能或增加复杂条件分支。
 - 沿用 Rust/Cargo/just 工具链。本机性能有限，只做格式、静态检查、定向脚本测试和已构建产物验收。
   编译、release 构建、全量或其它重型测试交给 GitHub Actions，未经用户明确要求不在本地执行。
+- Fork 自有 Python CLI 使用 uv 管理的 PEP 723 可执行入口，最低 Python 版本为 3.15；
+  按 `uv-cli-creator` 维护，合理使用新版本语法与标准库。脚本测试入口为 `scripts/fork/run_tests.py`。
 - 仅默认分支允许保存编译和下载缓存、发布产物；其它分支手动验证只读取缓存。
   上游完整 CI 与历史实验 workflow 保持禁用，只启用自有发布工作流。
 - Fork 自有维护说明使用中文；用户另行要求 PR 时，标题和正文用中文，commit message 用英文。

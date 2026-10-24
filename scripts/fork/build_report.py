@@ -1,14 +1,23 @@
+#!/usr/bin/env -S uv run --script
+#
+# /// script
+# requires-python = ">=3.15"
+# dependencies = [
+#     "typer>=0.27.3",
+# ]
+# ///
 """把缓存、资源和 Cargo timing 明细汇总到 artifact 与 Actions job summary。"""
 
-from __future__ import annotations
-
-import argparse
 import json
 import os
 from collections import defaultdict
 from pathlib import Path
+from typing import Annotated
 
+import typer
 from build_observer import cache_counters
+
+app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
 
 
 def read_json(path: Path) -> dict:
@@ -145,22 +154,35 @@ def markdown(report: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--directory", type=Path, required=True)
-    parser.add_argument("--stats", required=True)
-    parser.add_argument("--timings", type=Path, required=True)
-    args = parser.parse_args()
+@app.command()
+def main(
+    directory: Annotated[
+        Path,
+        typer.Option(
+            "--directory",
+            exists=True,
+            file_okay=False,
+            help="诊断 artifact 目录；在此写入 report.json",
+        ),
+    ],
+    stats: Annotated[
+        Path, typer.Option("--stats", help="sccache JSON 路径；相对路径基于 directory")
+    ],
+    timings: Annotated[
+        Path, typer.Option("--timings", help="Cargo timing 报告目录；允许缺失")
+    ],
+) -> None:
+    """生成构建汇总，并追加到 GITHUB_STEP_SUMMARY（如已设置）。"""
     try:
-        diagnostics = read_json(args.directory / "diagnostics.json")
+        diagnostics = read_json(directory / "diagnostics.json")
         report = {
             "schema_version": 1,
-            "cache": cache_counters(read_json(args.directory / args.stats)),
+            "cache": cache_counters(read_json(directory / stats)),
             "backend_read_error_kinds": diagnostics.get("backend_read_error_kinds", {}),
-            "resources": resource_summary(args.directory / "progress.ndjson"),
-            "slowest_units": slowest_units(args.timings),
+            "resources": resource_summary(directory / "progress.ndjson"),
+            "slowest_units": slowest_units(timings),
         }
-        (args.directory / "report.json").write_text(
+        (directory / "report.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2) + "\n"
         )
         if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
@@ -171,4 +193,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    app()

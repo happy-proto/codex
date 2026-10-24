@@ -27,6 +27,7 @@
 | 0020 | [OpenAI 模型请求专用代理](0020-openai-proxy.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
+同步上游使用独立的 [上游同步 skill](../../.agents/skills/codex-upstream-sync/SKILL.md)。
 修改已有改造时更新原记录，新改造使用下一个编号；编号不重用，不对应 PR 或固定 commit SHA。
 上游吸收或删除改造时保留原文件，更新状态、吸收版本和残留差异。
 历史 PR 链接仅供追溯讨论，日常维护直接在 `main` 完成。

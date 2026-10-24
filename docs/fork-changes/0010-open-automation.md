@@ -53,18 +53,19 @@ CLI 与官方 Desktop 共用配置，直接禁用或卸载官方插件会影响 
 
 ```sh
 # 离线核对全部文件和来源清单；CI 也执行此命令。
-python3 scripts/fork/sync_skills.py check
+scripts/fork/sync_skills.py check
 
 # 查询当前跟踪 ref 是否有更新，不修改文件。
-python3 scripts/fork/sync_skills.py check --upstream
+scripts/fork/sync_skills.py check --upstream
 
 # 更新两个 skill 到各自 main 的当前提交。
-python3 scripts/fork/sync_skills.py update
+scripts/fork/sync_skills.py update
 
 # 单独更新；也可用 --ref 指定 tag 或 commit。
-python3 scripts/fork/sync_skills.py update open-browser-use --ref main
+scripts/fork/sync_skills.py update open-browser-use --ref main
 ```
 
+快照更新器通过 uv 准备 Python >=3.15 和声明的依赖后运行，入口帮助见 `scripts/fork/sync_skills.py --help`。
 脚本从固定仓库解析 ref 到完整 commit，再按 commit 下载归档；
 所有选定来源下载和校验成功后才替换快照，并生成
 [`skills.lock.json`](../../scripts/fork/skills.lock.json)，记录仓库、ref、commit、路径及全部文件摘要。
