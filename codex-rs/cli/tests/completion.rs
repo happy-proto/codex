@@ -256,7 +256,7 @@ async fn names_remain_ambiguous_across_directories_and_results_are_bounded() -> 
     let rows = codex_state::read_thread_completions(&sqlite, "1111", None, false).await?;
     assert_eq!(rows[0].id, FIRST);
     for index in 0..105 {
-        sqlx::query("INSERT INTO threads VALUES (?, 'bulk', '', '/project', 0, 'cli', ?)")
+        sqlx::query("INSERT INTO threads VALUES (?, 'bulk', '', '/project', 0, 'cli', ?, NULL)")
             .bind(format!("bulk-{index:03}"))
             .bind(index + 100)
             .execute(&pool)
