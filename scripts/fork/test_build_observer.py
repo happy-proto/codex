@@ -140,7 +140,14 @@ class BuildObserverTests(unittest.TestCase):
     def test_live_process_names_are_not_truncated_paths(self):
         with patch(
             "build_observer.COMPILERS",
-            {Path(sys.executable).name, "python3.12", "python3", "python", "Python"},
+            {
+                Path(sys.executable).name,
+                Path(sys.executable).resolve().name,
+                f"python{sys.version_info.major}.{sys.version_info.minor}",
+                "python3",
+                "python",
+                "Python",
+            },
         ):
             processes = snapshot()["processes"]
         self.assertIn(os.getpid(), [item["pid"] for item in processes])
@@ -200,7 +207,9 @@ class BuildObserverTests(unittest.TestCase):
             pidfile = root / "pid"
             process = subprocess.Popen(
                 [
-                    sys.executable,
+                    "uv",
+                    "run",
+                    "--script",
                     str(Path(__file__).with_name("build_observer.py")),
                     "--output",
                     str(root / "progress.ndjson"),

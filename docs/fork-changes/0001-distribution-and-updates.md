@@ -11,6 +11,12 @@
 
 `main` 是唯一长期分支，直接维护全部改造；`scripts/fork/upstream-tag` 记录上游基线，定期 rebase 到新 alpha。
 `fork.yml` 并行执行 Linux Rust 测试、Linux AMD64 和 ARM macOS 完整包构建，通过后自动发布。
+发布、观察和快照更新等 Python CLI 通过 uv 的 PEP 723 入口运行，使用 Typer 定义参数和帮助；
+最低 Python 版本为 3.15，CI 显式安装 uv 与 Python 3.15，构建子进程沿用同一解释器。
+脚本测试通过 `scripts/fork/run_tests.py` 在声明的依赖环境中运行；普通被导入模块和测试不单独声明脚本环境。
+**Breaking change：维护工具不再支持 Python 3.14 及更早版本的裸 `python3` 执行。**
+维护者安装 uv 后直接执行 `scripts/fork/<工具>.py`，或使用 `uv run --script scripts/fork/<工具>.py`；
+最终用户的 Shell 安装入口及其系统依赖不变，不要求安装 uv 或 Python 3.15。
 macOS 构建显式使用 `macos-latest`，跟随 GitHub 当前稳定 runner 镜像；目标仍为
 `aarch64-apple-darwin`。镜像升级后的完整包由 CI 原生验收，性能对照须区分实际镜像，
 不把不同系统的耗时直接归因于缓存优化。标签对应的系统与架构见
@@ -43,6 +49,9 @@ Rust 编译由 Cargo 通过 sccache 的 GitHub Actions 后端缓存，按编译�
 ## 入口和验证
 
 - [发布工作流](../../.github/workflows/fork.yml)、[发布脚本](../../scripts/fork/release.py) 与 [脚本测试](../../scripts/fork/test_release.py)。
+- [脚本测试入口](../../scripts/fork/run_tests.py) 与 [CLI 契约测试](../../scripts/fork/test_cli.py)：
+  覆盖直接执行与 uv 脚本模式、帮助中的参数与可选值、非法参数、版本输出及命令退出码；
+  [观察器测试](../../scripts/fork/test_build_observer.py) 验证经过 uv 启动后的信号转发与子进程回收。
 - [版本解析](../../codex-rs/build-info/src/lib.rs)、[包版本回归测试](../../scripts/fork/test_package_version.py)：
   将同一个未修改的 binary 放入不同版本的包，验证 `--version` 随清单变化；两个平台的原生产物都执行此检查。
 - [安装器](../../scripts/fork/install.sh)、[终端产物验收](../../scripts/fork/test_terminal_cwd.py)。
