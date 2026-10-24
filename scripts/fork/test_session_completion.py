@@ -31,6 +31,7 @@ class SessionCompletionTests(unittest.TestCase):
                 ("agent-id", "子代理", "", "/project", 0, "subagent", 60),
             ],
         )
+        self.db.execute("ALTER TABLE threads ADD COLUMN attached_thread_parent_id TEXT")
 
     def query(self, query, cwd=None, include_non_interactive=False):
         sql = re.search(r'r#"(.*?)"#', STORAGE.read_text(), re.S).group(1)
@@ -78,6 +79,20 @@ class SessionCompletionTests(unittest.TestCase):
         )
         self.assertEqual(self.query("c461ac05b237", cwd="/other"), [])
 
+    def test_attached_threads_are_not_completion_candidates(self):
+        self.db.execute(
+            "UPDATE threads SET attached_thread_parent_id = ? WHERE id = ?",
+            (FIRST, SECOND),
+        )
+        for include_non_interactive in [False, True]:
+            with self.subTest(include_non_interactive=include_non_interactive):
+                self.assertEqual(
+                    self.query("abcdef123456", include_non_interactive=include_non_interactive),
+                    [],
+                )
+        self.db.execute("UPDATE threads SET name = '修复 Shell 补全' WHERE id = ?", (SECOND,))
+        self.assertEqual([row["id"] for row in self.query("Shell")], [FIRST])
+
     def test_title_resolution_accounts_for_trimmed_names_and_unnamed_previews(self):
         self.db.execute(
             "UPDATE threads SET name = '  修复 Shell 补全  ' WHERE id = ?", (FIRST,)
@@ -90,7 +105,8 @@ class SessionCompletionTests(unittest.TestCase):
 
     def test_limit_applies_after_matching_and_ambiguity_filtering(self):
         self.db.executemany(
-            "INSERT INTO threads VALUES (?, 'duplicate', '', '/project', 0, 'cli', ?)",
+            "INSERT INTO threads (id, name, preview, cwd, archived, source, recency_at_ms) "
+            "VALUES (?, 'duplicate', '', '/project', 0, 'cli', ?)",
             [(f"bulk-{index:03}", index + 100) for index in range(105)],
         )
         self.assertEqual(self.query("duplicate"), [])

@@ -24,6 +24,8 @@
 - `--last` 后的位置是 prompt，不提供会话候选；已有会话参数后的 prompt 也不提供候选。
 - `resume --include-non-interactive` 额外包含 exec 和 app-server 会话；默认排除归档、
   非交互与子 agent 会话。显式 `--remote` 不读取本地候选，包括光标后的选项。
+- 附属于父会话的 attached thread 不作为独立补全候选，也不参与名称冲突判断，
+  与上游普通会话列表的可见性保持一致；仍可通过父会话使用相应接口访问。
 
 ## 启用
 

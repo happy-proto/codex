@@ -32,11 +32,13 @@ SELECT t.id, COALESCE(trim(t.name), '') AS label,
                  OR NULLIF(trim(t.name), '') IS NULL OR t.source NOT IN ('cli', 'vscode')
        THEN 0 ELSE NOT EXISTS (
            SELECT 1 FROM threads other
-           WHERE other.archived = 0 AND other.id <> t.id
+           WHERE other.archived = 0 AND other.attached_thread_parent_id IS NULL
+             AND other.id <> t.id
              AND COALESCE(NULLIF(trim(other.name), ''), trim(other.preview)) = trim(t.name)
        ) END AS unique_label
 FROM threads t
 WHERE t.archived = 0
+  AND t.attached_thread_parent_id IS NULL
   AND (t.source IN ('cli', 'vscode') OR (? AND t.source IN ('exec', 'mcp')))
   AND (? IS NULL OR t.cwd = ?)
   AND (instr(lower(t.id), lower(?)) > 0

@@ -29,7 +29,8 @@ async fn fixture(home: &Path) -> anyhow::Result<SqliteConfig> {
     let pool = sqlite.open_read_write_pool(&sqlite.state_db_path()).await?;
     sqlx::raw_sql(
         "CREATE TABLE threads (id TEXT PRIMARY KEY, name TEXT, preview TEXT NOT NULL, \
-         cwd TEXT NOT NULL, archived INTEGER NOT NULL, source TEXT NOT NULL, recency_at_ms INTEGER NOT NULL);",
+         cwd TEXT NOT NULL, archived INTEGER NOT NULL, source TEXT NOT NULL, recency_at_ms INTEGER NOT NULL, \
+         attached_thread_parent_id TEXT);",
     )
     .execute(&pool)
     .await?;
@@ -40,7 +41,7 @@ async fn fixture(home: &Path) -> anyhow::Result<SqliteConfig> {
         ("archived", "archived", "/project", 1, "cli", 50),
         ("subagent", "child", "/project", 0, "subagent", 60),
     ] {
-        sqlx::query("INSERT INTO threads VALUES (?, ?, '', ?, ?, ?, ?)")
+        sqlx::query("INSERT INTO threads VALUES (?, ?, '', ?, ?, ?, ?, NULL)")
             .bind(id)
             .bind(name)
             .bind(cwd)
@@ -50,6 +51,13 @@ async fn fixture(home: &Path) -> anyhow::Result<SqliteConfig> {
             .execute(&pool)
             .await?;
     }
+    sqlx::query(
+        "INSERT INTO threads VALUES ('44444444-4444-4444-8444-444444444444', \
+         '修复 shell 补全', '', '/project', 0, 'cli', 70, ?)",
+    )
+    .bind(FIRST)
+    .execute(&pool)
+    .await?;
     pool.close().await;
     Ok(sqlite)
 }
@@ -94,6 +102,8 @@ async fn query_filters_sources_directories_and_archived_sessions_without_migrati
     assert!(rows[0].unique_label);
     let rows = codex_state::read_thread_completions(&sqlite, "2222", None, false).await?;
     assert_eq!(rows[0].id, SECOND);
+    let rows = codex_state::read_thread_completions(&sqlite, "4444", None, true).await?;
+    assert!(rows.is_empty());
     assert_eq!(std::fs::read(sqlite.state_db_path())?, before);
     Ok(())
 }
