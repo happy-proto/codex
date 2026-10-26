@@ -51,7 +51,9 @@ pub(super) fn complete() {
     let index = std::env::var("_CLAP_COMPLETE_INDEX")
         .ok()
         .and_then(|value| value.parse().ok());
-    let completion = CompleteEnv::with_factory(|| command(&args, index));
+    // CompleteEnv removes COMPLETE before calling the factory.
+    let bash = Bash.is(&shell.to_string_lossy());
+    let completion = CompleteEnv::with_factory(|| command(&args, index, bash));
     if Path::new(&shell).file_stem() == Some(OsStr::new("fish")) {
         completion
             .shells(Shells(&[&FishWithUnescapedToken]))
@@ -224,7 +226,7 @@ impl EnvCompleter for FishWithUnescapedToken {
     }
 }
 
-fn command(args: &[OsString], index: Option<usize>) -> clap::Command {
+fn command(args: &[OsString], index: Option<usize>, bash: bool) -> clap::Command {
     let command = MultitoolCli::command();
     let Some(separator) = args.iter().position(|arg| arg == "--") else {
         return command;
@@ -244,7 +246,6 @@ fn command(args: &[OsString], index: Option<usize>) -> clap::Command {
         return command;
     };
     let subcommand = context.subcommand;
-    let bash = std::env::var("COMPLETE").is_ok_and(|shell| Bash.is(&shell));
     let completer = ArgValueCompleter::new(move |current: &OsStr| {
         let mut candidates = context.candidates(current);
         if bash {

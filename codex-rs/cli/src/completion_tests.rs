@@ -52,6 +52,7 @@ fn command_attaches_session_completer_to_first_positional() {
         let mut command = command(
             &args(&["codex", "--", "codex", subcommand, "--all", "修复"]),
             Some(3),
+            /*bash*/ false,
         );
         command.build();
         let command = command.find_subcommand(subcommand).expect("subcommand");
@@ -83,6 +84,7 @@ fn command_checks_remote_options_after_cursor() {
             "ws://example:1234",
         ]),
         Some(2),
+        /*bash*/ false,
     );
     let arg = command
         .find_subcommand("resume")

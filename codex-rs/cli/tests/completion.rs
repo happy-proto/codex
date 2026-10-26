@@ -163,7 +163,8 @@ async fn bash_does_not_offer_a_title_readline_would_turn_into_a_directory() -> a
         .await?;
     pool.close().await;
     let words = ["codex", "resume", "--all", title.as_str()];
-    assert!(complete(home.path(), "bash", &words)?.is_empty());
+    let bash = complete(home.path(), "bash", &words)?;
+    assert!(bash.is_empty(), "directory title offered by Bash: {bash:?}");
     assert_eq!(complete(home.path(), "fish", &words)?.trim_end(), title);
     assert!(complete(home.path(), "bash", &["codex", "resume", "--all", "1111"])?.contains(FIRST));
     Ok(())

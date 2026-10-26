@@ -80,6 +80,8 @@ clap 官方 `COMPLETE` 协议注册动态补全。
   升级 clap 时需同时验证 `_describe -U`、末尾为 `/` 的名称和原生菜单颜色。
 - Bash 注册启用 Readline 原生转义，确保空格、引号和 shell 特殊字符仍属于一个参数；
   与当前 shell 目录下真实目录同名的标题不作为候选，避免 Readline 自动追加 `/` 改变目标。
+  shell 类型在进入 `CompleteEnv` 前捕获；clap 会在调用命令工厂前移除 `COMPLETE`，
+  工厂内不能再读取该变量判断是否启用 Bash 目录标题过滤。
   PowerShell 的填入值使用单引号转义，菜单仍显示原始值；不把转义后的值写入状态数据库。
 
 ## 验证与维护
