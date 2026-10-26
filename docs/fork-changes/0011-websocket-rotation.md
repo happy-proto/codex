@@ -35,6 +35,8 @@ Responses WebSocket 连接会跨请求和 turn 复用。
   跨 turn 与长时间空闲、完整消息与工具上下文恢复、轮转后增量续接、
   预连接和预热、跨阈值在途响应完整结束，以及轮转握手被拒绝后
   HTTP fallback 保留完整上下文和同一 turn 的路由 token。
+  工具调用测试保留服务端返回的稳定 item ID，确保后续 prompt 与接收的工具调用一致，
+  避免客户端补 ID 后将测试构造的历史误判为非增量上下文。
 - 原有 `responses_websocket_connection_limit_error_reconnects_and_completes`
   验证上游到期错误发生后的重试恢复。
   [自有 CI](../../.github/workflows/fork.yml) 的常规验证运行整个 `client_websockets`

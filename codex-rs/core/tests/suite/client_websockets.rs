@@ -1982,7 +1982,10 @@ async fn advance_websocket_age(seconds: u64) {
 async fn responses_websocket_rotation_preserves_context(age_seconds: u64, next_turn: bool) {
     skip_if_no_network!();
 
-    let tool_call = core_test_support::responses::ev_function_call("call-1", "test_tool", "{}");
+    let mut tool_call = core_test_support::responses::ev_function_call("call-1", "test_tool", "{}");
+    // Preserve the provider item ID when putting its output back into the prompt.
+    // Otherwise the client assigns an ID that the raw fixture does not contain.
+    tool_call["item"]["id"] = json!("fc_rotation");
     let completed = vec![ev_response_created("resp-2"), ev_completed("resp-2")];
     let server = start_websocket_server(vec![
         vec![
