@@ -3544,7 +3544,7 @@ async fn manual_remote_compact_advice_respects_retry_limit(max_retries: u64) {
     assert_eq!(
         reconnect_messages,
         (1..=max_retries)
-            .map(|retry| format!("Reconnecting... {retry}/{max_retries}"))
+            .map(|retry| format!("Reconnecting... {retry}/{max_retries} (retrying in 0s)"))
             .collect::<Vec<_>>()
     );
     let models = request_log
