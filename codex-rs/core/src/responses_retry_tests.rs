@@ -58,7 +58,7 @@ async fn advised_retry_reports_wait_before_sleeping() {
     }
 }
 
-/// Capacity retries outlive a zero stream budget and settle at five minutes.
+/// Capacity retries outlive a zero stream budget and settle at 128 seconds.
 #[tokio::test(start_paused = true)]
 async fn capacity_retries_are_unbounded_and_capped() {
     let (session, turn_context) = make_session_and_context().await;
@@ -69,7 +69,7 @@ async fn capacity_retries_are_unbounded_and_capped() {
         ResponsesStreamRequest::RemoteCompactionV2,
     ] {
         let mut retry_state = ResponsesStreamRetryState::default();
-        for seconds in [1, 2, 4, 8, 16, 32, 64, 128, 256, 300, 300, 300] {
+        for seconds in [1, 2, 4, 8, 16, 32, 64, 128, 128, 128, 128, 128] {
             let started = Instant::now();
             handle_response_stream_error(
                 &mut retry_state,
@@ -113,13 +113,14 @@ async fn capacity_retries_are_unbounded_and_capped() {
     }
 }
 
-/// Advice cannot cause a tight retry loop or exceed the user's five-minute cap.
+/// Advice cannot cause a tight retry loop or exceed the user's 128-second cap.
 #[tokio::test(start_paused = true)]
 async fn capacity_retry_advice_obeys_backoff_and_cap() {
     let (session, turn_context) = make_session_and_context().await;
     let step_context = StepContext::for_test(Arc::new(turn_context));
     let mut client_session = session.services.model_client.new_session();
-    for (advice_seconds, expected_seconds) in [(0, 1), (17, 17), (600, 300)] {
+    for (advice_seconds, expected_seconds) in [(0, 1), (17, 17), (128, 128), (129, 128), (600, 128)]
+    {
         let mut retry_state = ResponsesStreamRetryState::default();
         let started = Instant::now();
         let advice =
@@ -152,7 +153,7 @@ async fn capacity_retry_wait_can_be_cancelled() {
     let step_context = StepContext::for_test(Arc::new(turn_context));
     let mut client_session = session.services.model_client.new_session();
     let mut retry_state = ResponsesStreamRetryState {
-        capacity_retry_delay: Duration::from_secs(300),
+        capacity_retry_delay: Duration::from_secs(128),
         ..Default::default()
     };
     let cancel = CancellationToken::new();

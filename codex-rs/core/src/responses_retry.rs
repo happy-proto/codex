@@ -24,7 +24,7 @@ use tracing::warn;
 const INITIAL_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(60);
 const INITIAL_CAPACITY_RETRY_DELAY: Duration = Duration::from_secs(1);
-const MAX_CAPACITY_RETRY_DELAY: Duration = Duration::from_secs(300);
+const MAX_CAPACITY_RETRY_DELAY: Duration = Duration::from_secs(128);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ResponsesStreamRequest {
