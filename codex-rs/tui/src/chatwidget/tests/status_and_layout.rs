@@ -2904,7 +2904,7 @@ async fn status_widget_active_snapshot() {
 async fn stream_error_updates_status_indicator() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.bottom_pane.set_task_running(/*running*/ true);
-    let msg = "Reconnecting... 2/5";
+    let msg = "Reconnecting... 2/5 (retrying in 115s)";
     let details = "Idle timeout waiting for SSE";
     handle_stream_error(&mut chat, msg, Some(details.to_string()));
 
@@ -2919,6 +2919,8 @@ async fn stream_error_updates_status_indicator() {
         .expect("status indicator should be visible");
     assert_eq!(status.header(), msg);
     assert_eq!(status.details(), Some(details));
+    let rendered = render_bottom_popup(&chat, 120);
+    assert!(rendered.contains("Retrying in 1m 55s (2/5)"));
 }
 
 #[tokio::test]

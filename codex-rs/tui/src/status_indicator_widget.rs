@@ -6,6 +6,7 @@
 //! Hook activity uses the remaining space or its own line on overflow, so it
 //! never displaces background-process controls.
 
+use std::borrow::Cow;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -128,7 +129,7 @@ impl StatusIndicatorWidget {
 
     /// Update the animated header label (left of the brackets).
     pub(crate) fn update_header(&mut self, header: String) {
-        if self.header != header {
+        if self.header != header || self.retry_wait().is_some() {
             self.header = header;
             self.header_started_at = Instant::now();
         }
@@ -170,6 +171,37 @@ impl StatusIndicatorWidget {
 
     pub(crate) fn header(&self) -> &str {
         &self.header
+    }
+
+    // Reuse the existing retry notification text without extending the wire protocol.
+    // Count down from receipt; the core continues to own the actual retry deadline.
+    fn retry_wait(&self) -> Option<(&str, Duration)> {
+        let message = self.header.strip_prefix("Reconnecting...")?;
+        let (attempt, wait) = message.rsplit_once(" (retrying in ")?;
+        let seconds = wait.strip_suffix("s)")?.parse::<u64>().ok()?;
+        Some((attempt.trim(), Duration::from_secs(seconds)))
+    }
+
+    fn header_at(&self, now: Instant) -> Cow<'_, str> {
+        let Some((attempt, wait)) = self.retry_wait() else {
+            return Cow::Borrowed(&self.header);
+        };
+        let remaining = wait.saturating_sub(now.saturating_duration_since(self.header_started_at));
+        let attempt = if attempt.is_empty() {
+            String::new()
+        } else {
+            format!(" ({attempt})")
+        };
+        if remaining.is_zero() {
+            return Cow::Owned(format!("Reconnecting...{attempt}"));
+        }
+        let seconds = remaining
+            .as_secs()
+            .saturating_add(u64::from(remaining.subsec_nanos() > 0));
+        Cow::Owned(format!(
+            "Retrying in {}{attempt}",
+            fmt_elapsed_compact(seconds),
+        ))
     }
 
     #[cfg(test)]
@@ -253,7 +285,7 @@ impl StatusIndicator<'_> {
             spans.push(" ".into());
         }
         spans.extend(summary_shimmer(
-            &row.header,
+            &row.header_at(now),
             now.saturating_duration_since(row.header_started_at),
             shimmer,
         ));
@@ -313,7 +345,10 @@ impl Renderable for StatusIndicator<'_> {
         if area.is_empty() {
             return;
         }
-        if self.row.animations_enabled || self.timer.display_started_at.is_some() {
+        if self.row.animations_enabled
+            || self.timer.display_started_at.is_some()
+            || self.row.retry_wait().is_some()
+        {
             let interval_ms = if self.row.animations_enabled
                 && (self.row.effects.progress || self.row.effects.shimmer)
             {
@@ -339,6 +374,93 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn retry_countdown_expires_and_clears_on_recovery() {
+        let (tx, _rx) = unbounded_channel();
+        let mut row = StatusIndicatorWidget::new(
+            AppEventSender::new(tx),
+            FrameRequester::test_dummy(),
+            false,
+            Default::default(),
+        );
+        row.update_header("Reconnecting... 1/100 (retrying in 115s)".into());
+        let started = row.header_started_at;
+        assert_eq!(row.header_at(started), "Retrying in 1m 55s (1/100)");
+        assert_eq!(
+            row.header_at(started + Duration::from_millis(114_500)),
+            "Retrying in 1s (1/100)",
+        );
+        assert_eq!(
+            row.header_at(started + Duration::from_secs(115)),
+            "Reconnecting... (1/100)",
+        );
+        assert_eq!(
+            row.header_at(started + Duration::from_secs(120)),
+            "Reconnecting... (1/100)",
+        );
+        row.update_header("Working".into());
+        assert_eq!(row.header_at(Instant::now()), "Working");
+        assert!(row.retry_wait().is_none());
+    }
+
+    #[test]
+    fn retry_countdown_renders_in_status_row_and_fits_narrow_widths() {
+        let (tx, _rx) = unbounded_channel();
+        let mut row = StatusIndicatorWidget::new(
+            AppEventSender::new(tx),
+            FrameRequester::test_dummy(),
+            false,
+            Default::default(),
+        );
+        row.update_header("Reconnecting... 2/100 (retrying in 449s)".into());
+        let timer = StatusTimer::default();
+        let indicator = StatusIndicator {
+            row: &row,
+            timer: &timer,
+        };
+        let header = indicator.lines(120)[0].to_string();
+        assert!(header.starts_with("Retrying in 7m 29s (2/100)"));
+        assert!(header.contains("esc to interrupt"));
+        for width in [10, 30, 120] {
+            assert!(display_width(&indicator.lines(width)[0].to_string()) <= usize::from(width));
+        }
+    }
+
+    #[test]
+    fn retry_countdown_restarts_for_repeated_network_waits() {
+        let (tx, _rx) = unbounded_channel();
+        let mut row = StatusIndicatorWidget::new(
+            AppEventSender::new(tx),
+            FrameRequester::test_dummy(),
+            false,
+            Default::default(),
+        );
+        let header = "Reconnecting... (retrying in 60s)";
+        row.update_header(header.into());
+        row.header_started_at = Instant::now() - Duration::from_secs(60);
+        assert_eq!(row.header_at(Instant::now()), "Reconnecting...");
+        row.update_header(header.into());
+        assert_eq!(row.header_at(row.header_started_at), "Retrying in 1m 00s");
+    }
+
+    #[tokio::test]
+    async fn retry_countdown_redraws_without_animations() {
+        let (tx, _rx) = unbounded_channel();
+        let (requester, mut frames) = FrameRequester::test_channel();
+        let mut row = StatusIndicatorWidget::new(
+            AppEventSender::new(tx),
+            requester,
+            false,
+            Default::default(),
+        );
+        row.update_header("Reconnecting... 1/5 (retrying in 10s)".into());
+        let timer = StatusTimer::default();
+        let area = Rect::new(0, 0, 100, 1);
+        row.with_timer(&timer)
+            .render(area, &mut Buffer::empty(area));
+        assert!(frames.try_recv().is_ok());
+    }
 
     #[test]
     fn recent_generation_speed_renders_with_existing_activity_and_clears() {

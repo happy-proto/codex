@@ -12,7 +12,7 @@
 | 0004 | [功能列表输出格式](0004-features-list.md) |
 | 0005 | [MCP 列表展示](0005-mcp-list.md) |
 | 0006 | [工作中显式 skill 正文注入](0006-steered-skills.md) |
-| 0007 | [容量错误无限退避重试](0007-capacity-retries.md) |
+| 0007 | [容量错误无限退避重试](0007-capacity-retries.md)（已移除，恢复上游规则） |
 | 0008 | [已打开会话的名称同步](0008-thread-name-refresh.md) |
 | 0009 | [回合与近期平均生成速度](0009-generation-speed.md) |
 | 0010 | [默认使用开放的浏览器与电脑操作工具](0010-open-automation.md) |

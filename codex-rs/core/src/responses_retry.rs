@@ -1,7 +1,6 @@
 //! Shared retry and transport fallback decisions for Responses requests.
 //! Content-filter guidance is recorded for sampling requests before retry decisions.
-//! Capacity errors retry indefinitely with capped exponential backoff.
-//! Other errors retain their configured retry limits.
+//! Server advice controls timing without extending configured retry limits.
 
 use std::time::Duration;
 
@@ -23,8 +22,6 @@ use tracing::warn;
 
 const INITIAL_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(5);
 const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(60);
-const INITIAL_CAPACITY_RETRY_DELAY: Duration = Duration::from_secs(1);
-const MAX_CAPACITY_RETRY_DELAY: Duration = Duration::from_secs(128);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ResponsesStreamRequest {
@@ -36,8 +33,6 @@ pub(crate) struct ResponsesStreamRetryState {
     retries: u64,
     connection_retries: u64,
     connection_retry_delay: Duration,
-    capacity_retries: u64,
-    capacity_retry_delay: Duration,
 }
 
 impl Default for ResponsesStreamRetryState {
@@ -46,8 +41,6 @@ impl Default for ResponsesStreamRetryState {
             retries: 0,
             connection_retries: 0,
             connection_retry_delay: INITIAL_CONNECTION_RETRY_DELAY,
-            capacity_retries: 0,
-            capacity_retry_delay: INITIAL_CAPACITY_RETRY_DELAY,
         }
     }
 }
@@ -60,8 +53,7 @@ pub(crate) struct ExhaustedResponseRetry {
 }
 
 /// Returns `Ok(())` when the caller should retry the request loop, or the original error when
-/// it is terminal or the retry budget is exhausted. Non-internal capacity retries have a
-/// separate, unbounded budget; callers can cancel the wait by dropping this future.
+/// it is terminal or the retry budget is exhausted.
 pub(crate) async fn handle_response_stream_error(
     retry_state: &mut ResponsesStreamRetryState,
     max_retries: u64,
@@ -92,42 +84,6 @@ pub(crate) async fn handle_response_stream_error(
         ResponsesStreamRequest::Sampling => RetryOperation::Sampling,
         ResponsesStreamRequest::RemoteCompactionV2 => RetryOperation::RemoteCompactionV2,
     };
-    if matches!(err.details(), CodexErrorDetails::ServerOverloaded)
-        && !turn_context.session_source.is_internal()
-        && !crate::guardian::is_basic_session_source(&turn_context.session_source)
-    {
-        let delay = retry_state
-            .capacity_retry_delay
-            .max(err.server_retry_delay().unwrap_or_default())
-            .min(MAX_CAPACITY_RETRY_DELAY);
-        retry_state.capacity_retries = retry_state.capacity_retries.saturating_add(1);
-        retry_state.capacity_retry_delay = retry_state
-            .capacity_retry_delay
-            .saturating_mul(2)
-            .min(MAX_CAPACITY_RETRY_DELAY);
-        warn!(
-            turn_id = %turn_context.sub_id,
-            retries = retry_state.capacity_retries,
-            ?delay,
-            error = %err,
-            "model at capacity; waiting to retry"
-        );
-        sess.notify_stream_error(
-            turn_context,
-            format!(
-                "Model at capacity. Retrying in {}s (attempt {})...",
-                delay.as_secs(),
-                retry_state.capacity_retries,
-            ),
-            err,
-        )
-        .await;
-        let retry_at = Instant::now() + delay;
-        codex_client::record_retry!(retry_state.capacity_retries, delay, operation);
-        tokio::time::sleep_until(retry_at).await;
-        return Ok(());
-    }
-
     let retry_count = retry_state.retries.saturating_add(1);
     let Some(delay) = err.retry_delay(retry_count) else {
         return Err(err);
@@ -150,8 +106,12 @@ pub(crate) async fn handle_response_stream_error(
             ?retry_delay,
             "stream connection failed; waiting to retry"
         );
-        sess.notify_stream_error(turn_context, "Reconnecting... waiting for network", err)
-            .await;
+        sess.notify_stream_error(
+            turn_context,
+            format!("Reconnecting... (retrying in {}s)", retry_delay.as_secs(),),
+            err,
+        )
+        .await;
         retry_state.connection_retries = retry_state.connection_retries.saturating_add(1);
         codex_client::record_retry!(retry_state.connection_retries, retry_delay, operation);
         tokio::time::sleep(retry_delay).await;
@@ -189,6 +149,15 @@ pub(crate) async fn handle_response_stream_error(
         .await;
         // Changing transport must not bypass the server's retry deadline.
         if let Some(retry_after) = retry_after {
+            sess.notify_stream_error(
+                turn_context,
+                format!(
+                    "Reconnecting... (retrying in {}s)",
+                    retry_after.remaining_delay().as_secs_f64().ceil() as u64,
+                ),
+                err,
+            )
+            .await;
             tokio::time::sleep_until(retry_after.deadline()).await;
         }
         retry_state.retries = 0;
@@ -211,14 +180,10 @@ pub(crate) async fn handle_response_stream_error(
             // happening instead of staring at a seemingly frozen screen.
             sess.notify_stream_error(
                 turn_context,
-                if retry_after.is_some() {
-                    format!(
-                        "Reconnecting... {retry_count}/{max_retries} (retrying in {}s)",
-                        wait.unwrap_or_default().as_secs_f64().ceil() as u64
-                    )
-                } else {
-                    format!("Reconnecting... {retry_count}/{max_retries}")
-                },
+                format!(
+                    "Reconnecting... {retry_count}/{max_retries} (retrying in {}s)",
+                    wait.unwrap_or(delay).as_secs_f64().ceil() as u64,
+                ),
                 err,
             )
             .await;

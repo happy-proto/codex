@@ -4,7 +4,7 @@
 官方 CLI 的一些功能需求和 Bug Issue 长期排不上期，因此在这里维护自己需要的功能和修复。
 
 主要改造包括中文 Markdown、OSC 7 工作目录、列表展示、
-显式 skill 调用、容量错误无限重试，以及会话名称同步。
+显式 skill 调用、重试等待倒计时，以及会话名称同步。
 完整说明见 [编号改造记录](docs/fork-changes/README.md)。
 
 浏览器与电脑操作默认使用 [Open Browser Use 和 Open Computer Use](docs/fork-changes/0010-open-automation.md)。

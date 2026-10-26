@@ -97,7 +97,6 @@ impl<T: HttpTransport> EndpointSession<T> {
 
         let response = run_with_request_telemetry(
             self.provider.retry.to_policy(),
-            false,
             self.request_telemetry.clone(),
             make_request,
             |req| {
@@ -139,7 +138,6 @@ impl<T: HttpTransport> EndpointSession<T> {
 
         let stream = run_with_request_telemetry(
             self.provider.retry.to_policy(),
-            true,
             self.request_telemetry.clone(),
             make_request,
             |req| {
