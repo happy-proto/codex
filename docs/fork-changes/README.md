@@ -24,6 +24,7 @@
 | 0016 | [会话列表只展示当前 rollout](0016-current-rollout-listing.md) |
 | 0017 | [OpenAI 模型请求专用代理](0017-openai-proxy.md) |
 | 0018 | [每次重试等待提示](0018-advised-retry-visibility.md) |
+| 0019 | [容量错误缺省等待重试](0019-overload-default-retry.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 同步上游按 [同步与发布](../../.agents/skills/codex-fork-maintenance/references/upstream-sync.md) 执行。
