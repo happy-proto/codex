@@ -6,6 +6,20 @@ use std::num::NonZeroU64;
 use tempfile::tempdir;
 
 #[test]
+fn stream_retry_budget_defaults_to_fifty_and_preserves_overrides() {
+    let provider = ModelProviderInfo::create_openai_provider(None);
+    assert_eq!(provider.stream_max_retries(), 50);
+    assert_eq!(provider.request_max_retries(), 4);
+    for (configured, expected) in [(0, 0), (7, 7), (50, 50), (100, 100), (101, 100)] {
+        let provider = ModelProviderInfo {
+            stream_max_retries: Some(configured),
+            ..provider.clone()
+        };
+        assert_eq!(provider.stream_max_retries(), expected);
+    }
+}
+
+#[test]
 fn runtime_internal_metadata_opt_in_is_not_serialized_or_configurable() {
     let trusted = ModelProviderInfo {
         include_internal_metadata: true,
