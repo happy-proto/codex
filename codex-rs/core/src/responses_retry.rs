@@ -1,6 +1,7 @@
 //! Shared retry and transport fallback decisions for Responses requests.
 //! Content-filter guidance is recorded for sampling requests before retry decisions.
 //! Server advice controls timing without extending configured retry limits.
+//! Headerless capacity errors use a one-minute deadline in this shared retry loop.
 
 use std::time::Duration;
 
@@ -21,7 +22,8 @@ use tokio::time::Instant;
 use tracing::warn;
 
 const INITIAL_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(5);
-const MAX_CONNECTION_RETRY_DELAY: Duration = Duration::from_secs(60);
+const MAX_LOCAL_RETRY_DELAY: Duration = Duration::from_secs(60);
+const DEFAULT_OVERLOAD_RETRY_DELAY: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum ResponsesStreamRequest {
@@ -64,6 +66,17 @@ pub(crate) async fn handle_response_stream_error(
     step_context: &StepContext,
     request: ResponsesStreamRequest,
 ) -> Result<(), CodexErr> {
+    // 将本地默认等待接入现有期限、提示和预算逻辑，不覆盖服务端的有效建议。
+    let err = if matches!(err.details(), CodexErrorDetails::ServerOverloaded)
+        && err.retry_after().is_none()
+    {
+        err.with_retry_after(
+            RetryAfter::from_delay(DEFAULT_OVERLOAD_RETRY_DELAY)
+                .expect("one-minute retry deadline"),
+        )
+    } else {
+        err
+    };
     let turn_context = &step_context.turn;
     if matches!(request, ResponsesStreamRequest::Sampling)
         && matches!(err.details(), CodexErrorDetails::ContentFilter)
@@ -90,6 +103,12 @@ pub(crate) async fn handle_response_stream_error(
         return Err(err);
     };
     let retry_after = err.retry_after();
+    // 只限制本地退避；服务端的有效等待期限仍完整保留。
+    let delay = if retry_after.is_none() {
+        delay.min(MAX_LOCAL_RETRY_DELAY)
+    } else {
+        delay
+    };
 
     if turn_context
         .config
@@ -116,9 +135,8 @@ pub(crate) async fn handle_response_stream_error(
         retry_state.connection_retries = retry_state.connection_retries.saturating_add(1);
         codex_client::record_retry!(retry_state.connection_retries, retry_delay, operation);
         tokio::time::sleep(retry_delay).await;
-        retry_state.connection_retry_delay = retry_delay
-            .saturating_mul(2)
-            .min(MAX_CONNECTION_RETRY_DELAY);
+        retry_state.connection_retry_delay =
+            retry_delay.saturating_mul(2).min(MAX_LOCAL_RETRY_DELAY);
         return Ok(());
     }
 
