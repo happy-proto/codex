@@ -167,17 +167,30 @@ pub(crate) async fn handle_response_stream_error(
             turn_context.model_info(),
         )
     {
+        let wait = retry_after.map(|advice| {
+            format!(
+                " (retrying in {}s)",
+                advice
+                    .deadline()
+                    .saturating_duration_since(Instant::now())
+                    .as_secs_f64()
+                    .ceil() as u64
+            )
+        });
+        sess.send_event(
+            turn_context,
+            EventMsg::Warning(WarningEvent {
+                message: format!(
+                    "Falling back from WebSockets to HTTPS transport{}. {err:#}",
+                    wait.unwrap_or_default()
+                ),
+            }),
+        )
+        .await;
         // Changing transport must not bypass the server's retry deadline.
         if let Some(retry_after) = retry_after {
             tokio::time::sleep_until(retry_after.deadline()).await;
         }
-        sess.send_event(
-            turn_context,
-            EventMsg::Warning(WarningEvent {
-                message: format!("Falling back from WebSockets to HTTPS transport. {err:#}"),
-            }),
-        )
-        .await;
         retry_state.retries = 0;
         return Ok(());
     }
@@ -186,22 +199,31 @@ pub(crate) async fn handle_response_stream_error(
         retry_state.retries = retry_count;
         log_retry(request, turn_context, &err, retry_count, max_retries, delay);
 
-        // In release builds, hide the first websocket retry notification to reduce noisy
-        // transient reconnect messages. In debug builds, keep full visibility for diagnosis.
+        let wait =
+            retry_after.map(|advice| advice.deadline().saturating_duration_since(Instant::now()));
+        // 只隐藏没有服务端等待建议的首次短暂重连，避免限流退避表现为静默卡住。
         let report_error = retry_count > 1
             || cfg!(debug_assertions)
-            || !sess.services.model_client.responses_websocket_enabled();
+            || !sess.services.model_client.responses_websocket_enabled()
+            || retry_after.is_some();
         if report_error {
             // Surface retry information to any UI/front-end so the user understands what is
             // happening instead of staring at a seemingly frozen screen.
             sess.notify_stream_error(
                 turn_context,
-                format!("Reconnecting... {retry_count}/{max_retries}"),
+                if retry_after.is_some() {
+                    format!(
+                        "Reconnecting... {retry_count}/{max_retries} (retrying in {}s)",
+                        wait.unwrap_or_default().as_secs_f64().ceil() as u64
+                    )
+                } else {
+                    format!("Reconnecting... {retry_count}/{max_retries}")
+                },
                 err,
             )
             .await;
         }
-        // Use one clock sample so local backoff telemetry retains the selected delay.
+        // 提示耗时计入服务端期限；本地退避仍从提示送达后开始。
         let now = Instant::now();
         let retry_at = retry_after.map(RetryAfter::deadline).unwrap_or(now + delay);
         let delay = retry_at.saturating_duration_since(now);

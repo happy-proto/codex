@@ -1756,6 +1756,14 @@ async fn websocket_error_uses_nested_retry_after() -> Result<()> {
         .await;
     assert_eq!(warmup.body_json()["generate"].as_bool(), Some(false));
     submit_user_input(&test, "recover from the websocket error").await?;
+    let notice = wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::StreamError(_))
+    })
+    .await;
+    let EventMsg::StreamError(notice) = notice else {
+        unreachable!("stream error notification")
+    };
+    assert!(notice.message.contains("retrying in 1s"));
     let retry = telemetry.next_retry().await;
     assert!(retry.delay <= Duration::from_secs(1));
     assert_eq!(
