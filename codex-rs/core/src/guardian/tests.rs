@@ -3100,11 +3100,29 @@ async fn guardian_review_retries_transient_session_failure_then_approves() -> an
     let request_log = mount_sse_sequence(
         &server,
         vec![
-            sse_failed(
-                "resp-session-failure",
-                "server_is_overloaded",
-                "temporary reviewer overload",
-            ),
+            // 耗尽 reviewer 固定的一次流重试，再验证会话级重试；无需等待默认一分钟。
+            sse(vec![serde_json::json!({
+                "type": "response.failed",
+                "response": {
+                    "id": "resp-session-failure",
+                    "error": {
+                        "code": "server_is_overloaded",
+                        "message": "temporary reviewer overload",
+                        "headers": {"Retry-After": "0"}
+                    }
+                }
+            })]),
+            sse(vec![serde_json::json!({
+                "type": "response.failed",
+                "response": {
+                    "id": "resp-stream-retry-failure",
+                    "error": {
+                        "code": "server_is_overloaded",
+                        "message": "temporary reviewer overload",
+                        "headers": {"Retry-After": "0"}
+                    }
+                }
+            })]),
             sse(vec![
                 ev_response_created("resp-approved"),
                 ev_assistant_message("msg-approved", &approval),
@@ -3136,7 +3154,7 @@ async fn guardian_review_retries_transient_session_failure_then_approves() -> an
         metadata.guardian_session_kind,
         Some(codex_analytics::GuardianReviewSessionKind::TrunkReused)
     ));
-    assert_eq!(request_log.requests().len(), 2);
+    assert_eq!(request_log.requests().len(), 3);
     Ok(())
 }
 
