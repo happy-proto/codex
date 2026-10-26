@@ -15,6 +15,156 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tracing_test::internal::MockWriter;
 
+/// 缺少建议的容量错误仍受原预算约束，首次等待与传输回退都必须显示倒计时。
+#[test_case::test_case(ResponsesStreamRequest::Sampling; "sampling")]
+#[test_case::test_case(ResponsesStreamRequest::RemoteCompactionV2; "compaction")]
+#[tokio::test]
+async fn overload_without_advice_waits_one_minute(request: ResponsesStreamRequest) {
+    for max_retries in [1, 0] {
+        let (session, turn_context, events) = make_session_and_context_with_rx().await;
+        let step_context = StepContext::for_test(turn_context);
+        let mut client_session = session.services.model_client.new_session();
+        let mut retry_state = ResponsesStreamRetryState::default();
+        tokio::time::pause();
+        let retry = handle_response_stream_error(
+            &mut retry_state,
+            max_retries,
+            CodexErr::ServerOverloaded,
+            &mut client_session,
+            &session,
+            &step_context,
+            request,
+        );
+        tokio::pin!(retry);
+        assert!(futures::poll!(&mut retry).is_pending());
+        let mut messages = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            match event.msg {
+                EventMsg::StreamError(error) => messages.push(error.message),
+                EventMsg::Warning(warning) => messages.push(warning.message),
+                _ => {}
+            }
+        }
+        assert!(
+            messages
+                .iter()
+                .any(|message| message.contains("retrying in 60s")),
+            "missing overload wait notification: {messages:?}"
+        );
+        tokio::time::advance(Duration::from_secs(59)).await;
+        assert!(futures::poll!(&mut retry).is_pending());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        retry.await.expect("overload should retry after one minute");
+        tokio::time::resume();
+    }
+}
+
+/// 默认等待不能绕过已耗尽的重试预算或重复启用传输回退。
+#[tokio::test]
+async fn overload_default_wait_does_not_extend_retry_budget() {
+    let (session, turn_context) = make_session_and_context().await;
+    let step_context = StepContext::for_test(Arc::new(turn_context));
+    let mut client_session = session.services.model_client.new_session();
+    client_session.try_switch_fallback_transport(
+        &step_context.turn.session_telemetry,
+        step_context.turn.model_info(),
+    );
+    let mut retry_state = ResponsesStreamRetryState {
+        retries: 1,
+        ..Default::default()
+    };
+    tokio::time::pause();
+    let started = Instant::now();
+    let error = handle_response_stream_error(
+        &mut retry_state,
+        /*max_retries*/ 1,
+        CodexErr::ServerOverloaded,
+        &mut client_session,
+        &session,
+        &step_context,
+        ResponsesStreamRequest::Sampling,
+    )
+    .await
+    .expect_err("exhausted overload must remain terminal");
+    assert_eq!(error.to_string(), CodexErr::ServerOverloaded.to_string());
+    assert_eq!(retry_state.retries, 1);
+    assert_eq!(Instant::now(), started);
+}
+
+/// 包括零等待在内的有效建议必须保留原期限，不能被默认一分钟替换。
+#[test_case::test_case(0; "zero")]
+#[test_case::test_case(10; "short")]
+#[test_case::test_case(120; "long")]
+#[tokio::test]
+async fn overload_preserves_server_retry_deadline(seconds: u64) {
+    let (session, turn_context) = make_session_and_context().await;
+    let step_context = StepContext::for_test(Arc::new(turn_context));
+    let mut client_session = session.services.model_client.new_session();
+    let mut retry_state = ResponsesStreamRetryState::default();
+    tokio::time::pause();
+    let advice = RetryAfter::from_delay(Duration::from_secs(seconds)).expect("retry deadline");
+    let elapsed = seconds.min(4);
+    tokio::time::advance(Duration::from_secs(elapsed)).await;
+    let retry = handle_response_stream_error(
+        &mut retry_state,
+        /*max_retries*/ 1,
+        CodexErr::ServerOverloaded.with_retry_after(advice),
+        &mut client_session,
+        &session,
+        &step_context,
+        ResponsesStreamRequest::Sampling,
+    );
+    tokio::pin!(retry);
+    if seconds > elapsed {
+        assert!(futures::poll!(&mut retry).is_pending());
+        tokio::time::advance(Duration::from_secs(seconds - elapsed - 1)).await;
+        assert!(futures::poll!(&mut retry).is_pending());
+        tokio::time::advance(Duration::from_secs(1)).await;
+    }
+    retry.await.expect("advised overload should retry");
+    assert!(
+        (advice.deadline()..=advice.deadline() + Duration::from_millis(1))
+            .contains(&Instant::now())
+    );
+}
+
+/// 第五十次重试的本地指数退避不能超过一分钟。
+#[tokio::test]
+async fn local_retry_backoff_is_capped_at_one_minute() {
+    let (session, turn_context, events) = make_session_and_context_with_rx().await;
+    let step_context = StepContext::for_test(turn_context);
+    let mut client_session = session.services.model_client.new_session();
+    let mut retry_state = ResponsesStreamRetryState {
+        retries: 49,
+        ..Default::default()
+    };
+    tokio::time::pause();
+    let retry = handle_response_stream_error(
+        &mut retry_state,
+        /*max_retries*/ 50,
+        CodexErr::Stream("connection reset".into()),
+        &mut client_session,
+        &session,
+        &step_context,
+        ResponsesStreamRequest::Sampling,
+    );
+    tokio::pin!(retry);
+    assert!(futures::poll!(&mut retry).is_pending());
+    let mut messages = Vec::new();
+    while let Ok(event) = events.try_recv() {
+        if let EventMsg::StreamError(error) = event.msg {
+            messages.push(error.message);
+        }
+    }
+    assert_eq!(messages, vec!["Reconnecting... 50/50 (retrying in 60s)"]);
+    tokio::time::advance(Duration::from_secs(59)).await;
+    assert!(futures::poll!(&mut retry).is_pending());
+    tokio::time::advance(Duration::from_secs(1)).await;
+    retry
+        .await
+        .expect("local retry should resume after one minute");
+}
+
 /// 即使没有服务端建议，首次和后续本地退避都报告等待及原始错误。
 #[tokio::test]
 async fn every_local_retry_reports_wait_and_reason() {
@@ -148,7 +298,7 @@ async fn stream_retry_preserves_deadline_across_delayed_notification() {
     let step_context = StepContext::for_test(Arc::new(turn_context));
     session.realtime_history = Some(Mutex::new(RealtimeHistoryState::default()));
     let mut client_session = session.services.model_client.new_session();
-    // The second retry emits a notification even when release builds hide the first.
+    // Use a later retry to verify that reporting time does not restart the deadline.
     let mut retry_state = ResponsesStreamRetryState {
         retries: 1,
         ..Default::default()
