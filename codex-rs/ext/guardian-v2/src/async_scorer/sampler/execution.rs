@@ -108,6 +108,7 @@ impl SamplingExecution {
         retries: &mut usize,
     ) -> bool {
         let retryable = match error {
+            LunaSamplerError::Api(ApiError::WebSocketClosed { code, .. }) => *code != 1009,
             LunaSamplerError::ConnectionTimeout
             | LunaSamplerError::Api(
                 ApiError::Retryable { .. }
