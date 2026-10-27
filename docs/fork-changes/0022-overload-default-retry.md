@@ -12,6 +12,8 @@
 Responses 共用重试入口只为缺少有效等待建议的 `ServerOverloaded` 补上一分钟期限，
 复用现有的等待提示、重试预算和传输回退流程；普通推理与远程压缩 v2 使用同一规则。
 等待前显示原因、次数和倒计时，用户仍可中断回合。
+`PolicyCapacityUnavailable` 沿用上游规则：有有效的服务端等待建议时重试，缺少建议时终止，
+不套用普通过载的一分钟缺省等待。
 
 有效的服务端建议始终优先，包括零等待和超过一分钟的等待，已过去的时间不会重新计时。
 无效建议按缺少建议处理；不改变其他错误的分类，不增加无限重试。
@@ -27,6 +29,7 @@ HTTP 底层请求重试保持上游策略，默认等待在错误进入共用层
 - [默认预算](../../codex-rs/model-provider-info/src/lib.rs) 与 [预算回归](../../codex-rs/model-provider-info/src/model_provider_info_tests.rs)：默认 50 次、显式配置及上限。
 - [定向回归](../../codex-rs/core/src/responses_retry_tests.rs)：默认等待不早于 60 秒、本地退避上限、首次提示、传输回退、预算耗尽，以及保留零、短、长服务端期限。
 - [协议回归](../../codex-rs/core/tests/suite/retry_after.rs)：HTTP 预算、SSE 及 WebSocket 的 `error`、`response.failed`、无效建议和从服务端建议切换到默认等待后的恢复。
+  同时覆盖普通过载切换为无等待建议的策略容量错误时，保留错误分类并终止，不触发传输回退。
 - [等待提示](0021-advised-retry-visibility.md)：每次等待都可见。
 
 ## 上游同步
