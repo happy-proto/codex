@@ -17,6 +17,10 @@ pub enum ApiError {
     Stream(String),
     #[error("websocket request exceeds the peer's message size limit")]
     WebsocketMessageTooLarge,
+    #[error(
+        "WebSocket closed by server before response.completed (close code {code}, reason: {reason})"
+    )]
+    WebSocketClosed { code: u16, reason: String },
     #[error("stream error: Incomplete response returned, reason: content_filter")]
     ContentFilter,
     #[error(transparent)]
