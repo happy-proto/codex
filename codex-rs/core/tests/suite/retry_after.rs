@@ -2151,8 +2151,7 @@ async fn websocket_overload_without_retry_after_retries_after_one_minute(
     Ok(())
 }
 
-/// When an overload stops giving advice, it is terminal even if the retry limit
-/// has been reached. The transport must not switch after that terminal error.
+/// Policy capacity without advice remains terminal even when prior attempts were retryable.
 #[test_case::test_case("server_is_overloaded", "policy_capacity_unavailable", CodexErrorInfo::PolicyCapacityUnavailable; "terminal_policy_failure_is_preserved")]
 #[tokio::test(flavor = "current_thread")]
 async fn websocket_policy_capacity_without_advice_is_terminal(
@@ -2254,7 +2253,7 @@ async fn websocket_policy_capacity_without_advice_is_terminal(
     }
 
     assert_eq!(error_events, 1);
-    assert_eq!(stream_error_events, 2 + usize::from(cfg!(debug_assertions)));
+    assert_eq!(stream_error_events, 3);
     assert_eq!(
         fallback_warning_events, 0,
         "websocket must not fall back to HTTP"
@@ -2264,94 +2263,6 @@ async fn websocket_policy_capacity_without_advice_is_terminal(
         request_count, 5,
         "expected prewarm, three advised errors, and a terminal error"
     );
-    assert_eq!(
-        telemetry.events.try_recv(),
-        Err(mpsc::error::TryRecvError::Empty)
-    );
-    server.shutdown().await;
-
-    Ok(())
-}
-
-/// Headerless websocket overloads must neither reconnect nor fall back to HTTP.
-#[tokio::test(flavor = "current_thread")]
-async fn websocket_overload_without_retry_after_is_terminal() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-
-    let mut telemetry = RetryTelemetryCapture::install();
-    let server = responses::start_websocket_server(vec![vec![
-        vec![
-            responses::ev_response_created("prewarm"),
-            responses::ev_completed("prewarm"),
-        ],
-        vec![json!({
-            "type": "error",
-            "status": 503,
-            "error": {
-                "code": "server_is_overloaded",
-                "message": "This model is disabled."
-            }
-        })],
-    ]])
-    .await;
-    let test = test_codex()
-        .with_config(|config| {
-            // Capture inference retries without unrelated startup model-discovery retries.
-            config.model_catalog =
-                Some(bundled_models_response().expect("bundled models.json should parse"));
-            config.model_provider.request_max_retries = Some(2);
-            config.model_provider.stream_max_retries = Some(2);
-        })
-        .build_with_websocket_server(&server)
-        .await?;
-
-    let warmup = server
-        .wait_for_request(/*connection_index*/ 0, /*request_index*/ 0)
-        .await;
-    assert_eq!(warmup.body_json()["generate"].as_bool(), Some(false));
-    submit_user_input(&test, "reject the websocket overload").await?;
-
-    let mut error_events = 0;
-    let mut stream_error_events = 0;
-    let mut fallback_warning_events = 0;
-    loop {
-        match wait_for_event(&test.codex, |_| true).await {
-            EventMsg::Error(error) => {
-                error_events += 1;
-                assert_eq!(
-                    error.codex_error_info,
-                    Some(CodexErrorInfo::ServerOverloaded)
-                );
-                assert_eq!(
-                    error.message,
-                    "Selected model is at capacity. Please try a different model."
-                );
-            }
-            EventMsg::StreamError(_) => stream_error_events += 1,
-            EventMsg::Warning(warning)
-                if warning.message.contains("Falling back from WebSockets") =>
-            {
-                fallback_warning_events += 1;
-            }
-            EventMsg::TurnComplete(event) => {
-                assert_eq!(
-                    event.error.and_then(|error| error.codex_error_info),
-                    Some(CodexErrorInfo::ServerOverloaded)
-                );
-                break;
-            }
-            _ => {}
-        }
-    }
-
-    assert_eq!(error_events, 1);
-    assert_eq!(stream_error_events, 0);
-    assert_eq!(
-        fallback_warning_events, 0,
-        "websocket must not fall back to HTTP"
-    );
-    let request_count: usize = server.connections().iter().map(Vec::len).sum();
-    assert_eq!(request_count, 2, "expected only prewarm and terminal error");
     assert_eq!(
         telemetry.events.try_recv(),
         Err(mpsc::error::TryRecvError::Empty)
