@@ -15,6 +15,48 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tracing_test::internal::MockWriter;
 
+#[test_case::test_case(ResponsesStreamRequest::Sampling; "sampling")]
+#[test_case::test_case(ResponsesStreamRequest::RemoteCompactionV2; "compaction")]
+#[tokio::test]
+async fn websocket_message_too_large_does_not_retry_or_fallback(request: ResponsesStreamRequest) {
+    for max_retries in [0, 50] {
+        let (session, turn_context, events) = make_session_and_context_with_rx().await;
+        let step_context = StepContext::for_test(turn_context);
+        let mut client_session = session.services.model_client.new_session();
+        let mut retry_state = ResponsesStreamRetryState::default();
+        let error = codex_api::map_api_error(codex_api::ApiError::WebSocketClosed {
+            code: 1009,
+            reason: String::new(),
+        });
+        let expected_message = error.to_string();
+        let error = handle_response_stream_error(
+            &mut retry_state,
+            max_retries,
+            error,
+            &mut client_session,
+            &session,
+            &step_context,
+            request,
+        )
+        .await
+        .expect_err("message too large is terminal");
+        assert_eq!(error.to_string(), expected_message);
+        assert_eq!(retry_state.retries, 0);
+        assert_eq!(retry_state.connection_retries, 0);
+        while let Ok(event) = events.try_recv() {
+            assert!(!matches!(
+                event.msg,
+                EventMsg::StreamError(_) | EventMsg::Warning(_)
+            ));
+        }
+        // Fallback is still available: the terminal error did not activate it.
+        assert!(client_session.try_switch_fallback_transport(
+            &step_context.turn.session_telemetry,
+            step_context.turn.model_info(),
+        ));
+    }
+}
+
 /// 缺少建议的容量错误仍受原预算约束，首次等待与传输回退都必须显示倒计时。
 #[test_case::test_case(ResponsesStreamRequest::Sampling; "sampling")]
 #[test_case::test_case(ResponsesStreamRequest::RemoteCompactionV2; "compaction")]

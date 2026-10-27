@@ -433,6 +433,10 @@ jobs:
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-http-client --lib configured_proxy
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-login --lib explicit_proxy_routes_default_api_client
           ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-websocket-client --lib proxy_tunnels_secure_websocket_before_handshake
+      - name: 验证 WebSocket 关闭码、上传中断与消息大小错误
+        if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter }}
+        working-directory: codex-rs
+        run: ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-api --lib close_tests -- --test-threads=1
       - name: 验证 WebSocket 主动轮转、重连与 HTTP fallback
         if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs

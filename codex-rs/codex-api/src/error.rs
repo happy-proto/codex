@@ -15,6 +15,10 @@ pub enum ApiError {
     Api { status: StatusCode, message: String },
     #[error("stream error: {0}")]
     Stream(String),
+    #[error(
+        "WebSocket closed by server before response.completed (close code {code}, reason: {reason})"
+    )]
+    WebSocketClosed { code: u16, reason: String },
     #[error("stream error: Incomplete response returned, reason: content_filter")]
     ContentFilter,
     #[error(transparent)]

@@ -2466,6 +2466,7 @@ fn websocket_error_detail(err: &ApiError) -> String {
         }
         // These variants format fixed text; retry metadata is typed and never printed.
         ApiError::ContentFilter
+        | ApiError::WebSocketClosed { .. }
         | ApiError::ContextWindowExceeded
         | ApiError::QuotaExceeded
         | ApiError::UsageNotIncluded
