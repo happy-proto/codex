@@ -21,7 +21,6 @@ use crate::telemetry::WebsocketTelemetry;
 use codex_client::TransportError;
 use codex_http_client::HttpClientFactory;
 use codex_http_client::RetryAfter;
-use codex_websocket_client::WebSocketConnection;
 use codex_websocket_client::WebSocketConnector;
 use futures::FutureExt;
 use futures::SinkExt;
@@ -70,61 +69,47 @@ enum WsCommand {
 }
 
 impl WsStream {
-    fn new(inner: WebSocketConnection) -> Self {
-        let routing_affinity = inner.routing_affinity().cloned();
+    fn new(
+        inner: impl futures::Stream<Item = Result<Message, WsError>>
+        + futures::Sink<Message, Error = WsError>
+        + Unpin
+        + Send
+        + 'static,
+        routing_affinity: Option<codex_http_client::ChatGptRoutingAffinity>,
+    ) -> Self {
         let (tx_command, mut rx_command) = mpsc::channel::<WsCommand>(32);
         let (tx_message, rx_message) = mpsc::unbounded_channel::<Result<Message, WsError>>();
 
         let pump_task = tokio::spawn(async move {
-            let mut inner = inner;
-            loop {
-                tokio::select! {
-                    command = rx_command.recv() => {
-                        let Some(command) = command else {
-                            break;
-                        };
-                        match command {
-                            WsCommand::Send { message, tx_result } => {
-                                let result = inner.send(message).await;
-                                let should_break = result.is_err();
-                                let _ = tx_result.send(result);
-                                if should_break {
-                                    break;
-                                }
-                            }
-                        }
+            let (mut writer, mut reader) = inner.split();
+            let read = async {
+                while let Some(message) = reader.next().await {
+                    // tungstenite queues and flushes automatic Pong replies while reading.
+                    if matches!(message, Ok(Message::Ping(_) | Message::Pong(_))) {
+                        continue;
                     }
-                    message = inner.next() => {
-                        let Some(message) = message else {
-                            break;
-                        };
-                        match message {
-                            Ok(Message::Ping(payload)) => {
-                                if let Err(err) = inner.send(Message::Pong(payload)).await {
-                                    let _ = tx_message.send(Err(err));
-                                    break;
-                                }
-                            }
-                            Ok(Message::Pong(_)) => {}
-                            Ok(message @ (Message::Text(_)
-                            | Message::Binary(_)
-                            | Message::Close(_)
-                            | Message::Frame(_))) => {
-                                let is_close = matches!(message, Message::Close(_));
-                                if tx_message.send(Ok(message)).is_err() {
-                                    break;
-                                }
-                                if is_close {
-                                    break;
-                                }
-                            }
-                            Err(err) => {
-                                let _ = tx_message.send(Err(err));
-                                break;
-                            }
-                        }
+                    let terminal = matches!(message, Ok(Message::Close(_)) | Err(_));
+                    if tx_message.send(message).is_err() || terminal {
+                        break;
                     }
                 }
+            };
+            let write = async {
+                while let Some(WsCommand::Send { message, tx_result }) = rx_command.recv().await {
+                    let result = writer.send(message).await;
+                    let terminal = result.is_err();
+                    let _ = tx_result.send(result);
+                    if terminal {
+                        break;
+                    }
+                }
+            };
+            // Keep reading during a blocked upload. A received Close retires the writer,
+            // dropping its pending acknowledgement; request() then recovers the close frame.
+            tokio::select! {
+                biased;
+                () = read => {}
+                () = write => {}
             }
         });
 
@@ -139,20 +124,22 @@ impl WsStream {
     async fn request(
         &mut self,
         make_command: impl FnOnce(oneshot::Sender<Result<(), WsError>>) -> WsCommand,
-    ) -> Result<(), WsError> {
+    ) -> Result<(), ApiError> {
         let (tx_result, rx_result) = oneshot::channel();
         if self.tx_command.send(make_command(tx_result)).await.is_ok()
             && let Ok(result) = rx_result.await
         {
-            return result;
+            return result.map_err(map_ws_stream_error);
         }
         while let Some(message) = self.rx_message.recv().await {
-            message?;
+            if let Message::Close(frame) = message.map_err(map_ws_stream_error)? {
+                return Err(map_ws_close(frame));
+            }
         }
-        Err(WsError::ConnectionClosed)
+        Err(map_ws_stream_error(WsError::ConnectionClosed))
     }
 
-    async fn send(&mut self, message: Message) -> Result<(), WsError> {
+    async fn send(&mut self, message: Message) -> Result<(), ApiError> {
         self.request(|tx_result| WsCommand::Send { message, tx_result })
             .await
     }
@@ -612,8 +599,9 @@ async fn connect_websocket(
     {
         let _ = turn_state.set(header_value.to_string());
     }
+    let routing_affinity = stream.routing_affinity().cloned();
     Ok((
-        WsStream::new(stream),
+        WsStream::new(stream, routing_affinity),
         response,
         reasoning_included,
         server_model,
@@ -633,6 +621,22 @@ fn map_ws_stream_error(error: WsError) -> ApiError {
     match codex_websocket_client::network_policy_denial(&error) {
         Some(denied) => ApiError::Transport(TransportError::Policy(denied)),
         None => ApiError::Stream(error.to_string()),
+    }
+}
+
+fn map_ws_close(frame: Option<CloseFrame>) -> ApiError {
+    match frame {
+        Some(frame) => ApiError::WebSocketClosed {
+            code: frame.code.into(),
+            // Bound rendered text, including escapes, before it reaches terminal output.
+            reason: frame
+                .reason
+                .chars()
+                .flat_map(char::escape_debug)
+                .take(256)
+                .collect(),
+        },
+        None => ApiError::Stream("websocket closed by server before response.completed".into()),
     }
 }
 
@@ -965,11 +969,7 @@ async fn run_websocket_response_stream(
             Message::Binary(_) => {
                 return Err(ApiError::Stream("unexpected binary websocket event".into()));
             }
-            Message::Close(_) => {
-                return Err(ApiError::Stream(
-                    "websocket closed by server before response.completed".into(),
-                ));
-            }
+            Message::Close(frame) => return Err(map_ws_close(frame)),
             Message::Frame(_) => {}
             Message::Ping(_) | Message::Pong(_) => {}
         }
@@ -1034,7 +1034,7 @@ async fn send_websocket_request(
     )
     .await
     .map_err(|_| ApiError::Stream("idle timeout sending websocket request".into()))
-    .and_then(|result| result.map_err(map_ws_stream_error));
+    .and_then(std::convert::identity);
 
     if let Some(t) = telemetry.as_ref() {
         t.on_ws_request(
@@ -1053,6 +1053,10 @@ fn serialize_websocket_request(request: &ResponsesWsRequest<'_>) -> Result<Strin
     serde_json::to_string(request)
         .map_err(|err| ApiError::Stream(format!("failed to encode websocket request: {err}")))
 }
+
+#[cfg(test)]
+#[path = "responses_websocket_close_tests.rs"]
+mod close_tests;
 
 #[cfg(test)]
 mod tests {
