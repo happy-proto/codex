@@ -31,6 +31,7 @@ pub fn map_api_error(err: ApiError) -> CodexErr {
         | ApiError::Api { .. }
         | ApiError::Stream(_)
         | ApiError::WebsocketMessageTooLarge
+        | ApiError::WebSocketClosed { .. }
         | ApiError::ContentFilter
         | ApiError::ResponseIncomplete(_)
         | ApiError::ContextWindowExceeded
@@ -71,6 +72,10 @@ fn map_api_error_details(err: ApiError) -> CodexErr {
         ApiError::WebsocketMessageTooLarge => {
             CodexErr::new(CodexErrorDetails::WebsocketMessageTooLarge)
         }
+        error @ ApiError::WebSocketClosed { code: 1009, .. } => CodexErr::InvalidRequest(format!(
+            "WebSocket message too large. Reduce image sizes or the amount of conversation context, or start a new thread before retrying. {error}"
+        )),
+        error @ ApiError::WebSocketClosed { .. } => CodexErr::Stream(error.to_string()),
         ApiError::ContentFilter => CodexErr::new(CodexErrorDetails::ContentFilter),
         ApiError::ResponseIncomplete(incomplete) => {
             CodexErr::new(CodexErrorDetails::ResponseIncomplete(incomplete))
