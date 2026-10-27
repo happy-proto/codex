@@ -47,6 +47,8 @@ pub(super) fn sampler_failure_reason(error: &LunaSamplerError) -> &'static str {
             ApiError::Transport(TransportError::Policy(_)) => "network_policy_denied",
             ApiError::Stream(_) | ApiError::ContentFilter => "stream_error",
             ApiError::WebsocketMessageTooLarge => "websocket_message_too_large",
+            ApiError::WebSocketClosed { code: 1009, .. } => "message_too_large",
+            ApiError::WebSocketClosed { .. } => "stream_error",
             ApiError::ResponseIncomplete(_) => "incomplete_response",
             ApiError::ContextWindowExceeded => "context_window_exceeded",
             ApiError::QuotaExceeded => "quota_exceeded",
