@@ -55,7 +55,6 @@ use tokio_tungstenite::tungstenite::handshake::client::Response;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::Fragment;
 use tokio_tungstenite::tungstenite::protocol::frame::Frame;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::Data;
 use tracing::Instrument;
 use tracing::Span;
@@ -953,6 +952,22 @@ fn map_ws_stream_error(error: WsError) -> ApiError {
     }
 }
 
+fn map_ws_close(frame: Option<CloseFrame>) -> ApiError {
+    match frame {
+        Some(frame) => ApiError::WebSocketClosed {
+            code: frame.code.into(),
+            // Bound rendered text, including escapes, before it reaches terminal output.
+            reason: frame
+                .reason
+                .chars()
+                .flat_map(char::escape_debug)
+                .take(256)
+                .collect(),
+        },
+        None => ApiError::Stream("websocket closed by server before response.completed".into()),
+    }
+}
+
 fn map_ws_error(err: WsError, url: &Url) -> ApiError {
     if let Some(denied) = codex_websocket_client::network_policy_denial(&err) {
         return ApiError::Transport(TransportError::Policy(denied));
@@ -1115,7 +1130,6 @@ async fn run_websocket_response_stream(
     let mut interrupt_request = interrupt.clone().fuse();
     let mut interruption = None;
     let mut response_id = None;
-    let mut received_text = false;
     let mut awaiting_interrupt_ack = false;
     loop {
         let poll_start = Instant::now();
@@ -1171,7 +1185,6 @@ async fn run_websocket_response_stream(
 
         match message {
             Message::Text(text) => {
-                received_text = true;
                 let event = serde_json::from_str::<ResponsesStreamEvent>(&text);
                 let kind = event.as_ref().ok().map(ResponsesStreamEvent::kind);
                 if let Some(t) = telemetry.as_ref() {
@@ -1294,14 +1307,7 @@ async fn run_websocket_response_stream(
             Message::Binary(_) => {
                 return Err(ApiError::Stream("unexpected binary websocket event".into()));
             }
-            Message::Close(Some(frame)) if frame.code == CloseCode::Size && !received_text => {
-                return Err(ApiError::WebsocketMessageTooLarge);
-            }
-            Message::Close(_) => {
-                return Err(ApiError::Stream(
-                    "websocket closed by server before response.completed".into(),
-                ));
-            }
+            Message::Close(frame) => return Err(map_ws_close(frame)),
             Message::Frame(_) => {}
             Message::Ping(_) | Message::Pong(_) => {}
         }
@@ -1373,6 +1379,10 @@ fn serialize_websocket_request(request: &ResponsesWsRequest<'_>) -> Result<Strin
 #[cfg(test)]
 #[path = "responses_websocket_upload_tests.rs"]
 mod upload_tests;
+
+#[cfg(test)]
+#[path = "responses_websocket_close_tests.rs"]
+mod close_tests;
 
 #[cfg(test)]
 mod tests {
