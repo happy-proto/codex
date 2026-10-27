@@ -82,6 +82,7 @@ pub fn telemetry_api_error_message(error: &ApiError) -> String {
         ApiError::Api { status, .. } => format!("api error {}", status.as_u16()),
         ApiError::Stream(err) => err.to_string(),
         ApiError::WebsocketMessageTooLarge => error.to_string(),
+        ApiError::WebSocketClosed { code, .. } => format!("websocket closed: {code}"),
         ApiError::ContentFilter => {
             "Incomplete response returned, reason: content_filter".to_string()
         }
