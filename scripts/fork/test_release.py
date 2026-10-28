@@ -449,6 +449,67 @@ class PublicationTests(unittest.TestCase):
             query.assert_not_called()
 
 
+class PackageBuildTests(unittest.TestCase):
+    def test_macos_exec_server_is_signed_with_its_entitlements_and_verified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dist = root / "fork-dist"
+            dist.mkdir()
+            archive = dist / "package.tar.xz"
+            archive.write_bytes(b"package")
+            metadata = {
+                "source_commit": "a" * 40,
+                "version": "0.166.0-alpha.4.fork.1",
+            }
+            with (
+                mock.patch.object(release, "ROOT", root),
+                mock.patch.object(release, "plan", return_value=metadata),
+                mock.patch.object(release, "smoke"),
+                mock.patch.object(release, "archive_package", return_value=archive),
+                mock.patch.object(release, "run") as command,
+                mock.patch.dict(os.environ),
+            ):
+                entitlements = (
+                    root
+                    / ".github/scripts/macos-signing/codex-exec-server.entitlements.plist"
+                )
+                entitlements.parent.mkdir(parents=True)
+                entitlements.write_text("entitlements")
+                release.build(release.TARGET)
+            binary = str(dist / "package/bin/codex-exec-server")
+            command.assert_any_call(
+                "codesign",
+                "--force",
+                "--sign",
+                "-",
+                "--options",
+                "runtime",
+                "--entitlements",
+                str(entitlements),
+                binary,
+            )
+            command.assert_any_call("codesign", "--verify", "--strict", binary)
+
+    def test_smoke_rejects_an_exec_server_that_cannot_start(self):
+        with tempfile.TemporaryDirectory() as directory:
+            package = Path(directory)
+            (package / "codex-package.json").write_text(
+                json.dumps({"version": "1.0.0"})
+            )
+
+            def run_binary(*args, **kwargs):
+                if args[0] == str(package / "bin/codex-exec-server"):
+                    raise subprocess.CalledProcessError(37, args)
+                return subprocess.CompletedProcess(args, 0, stdout="codex-cli 1.0.0")
+
+            with (
+                mock.patch.object(release, "run", side_effect=run_binary),
+                mock.patch.object(release, "initialize_app_server"),
+                self.assertRaises(subprocess.CalledProcessError),
+            ):
+                release.smoke(package)
+
+
 class InstallerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
