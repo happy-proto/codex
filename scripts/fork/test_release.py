@@ -450,7 +450,7 @@ class PublicationTests(unittest.TestCase):
 
 
 class PackageBuildTests(unittest.TestCase):
-    def test_macos_exec_server_is_signed_with_its_entitlements_and_verified(self):
+    def test_macos_signing_follows_current_upstream_package_layout(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             dist = root / "fork-dist"
@@ -471,12 +471,12 @@ class PackageBuildTests(unittest.TestCase):
             ):
                 entitlements = (
                     root
-                    / ".github/scripts/macos-signing/codex-exec-server.entitlements.plist"
+                    / ".github/scripts/macos-signing/codex-code-mode-host.entitlements.plist"
                 )
                 entitlements.parent.mkdir(parents=True)
                 entitlements.write_text("entitlements")
                 release.build(release.TARGET)
-            binary = str(dist / "package/bin/codex-exec-server")
+            binary = str(dist / "package/bin/codex-code-mode-host")
             command.assert_any_call(
                 "codesign",
                 "--force",
@@ -489,8 +489,10 @@ class PackageBuildTests(unittest.TestCase):
                 binary,
             )
             command.assert_any_call("codesign", "--verify", "--strict", binary)
+            for call in command.call_args_list:
+                self.assertNotIn(str(dist / "package/bin/codex-exec-server"), call.args)
 
-    def test_smoke_rejects_an_exec_server_that_cannot_start(self):
+    def test_smoke_accepts_current_package_without_standalone_exec_server(self):
         with tempfile.TemporaryDirectory() as directory:
             package = Path(directory)
             (package / "codex-package.json").write_text(
@@ -499,15 +501,15 @@ class PackageBuildTests(unittest.TestCase):
 
             def run_binary(*args, **kwargs):
                 if args[0] == str(package / "bin/codex-exec-server"):
-                    raise subprocess.CalledProcessError(37, args)
+                    raise FileNotFoundError(args[0])
                 return subprocess.CompletedProcess(args, 0, stdout="codex-cli 1.0.0")
 
             with (
                 mock.patch.object(release, "run", side_effect=run_binary),
-                mock.patch.object(release, "initialize_app_server"),
-                self.assertRaises(subprocess.CalledProcessError),
+                mock.patch.object(release, "initialize_app_server") as initialize,
             ):
                 release.smoke(package)
+            initialize.assert_called_once()
 
 
 class InstallerTests(unittest.TestCase):

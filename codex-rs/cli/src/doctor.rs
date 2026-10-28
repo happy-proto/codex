@@ -2461,12 +2461,14 @@ fn websocket_error_detail(err: &ApiError) -> String {
         }
         ApiError::Api { status, .. } => format!("handshake API error: {status} [redacted]"),
         ApiError::Stream(_) => "handshake stream error: [redacted]".to_string(),
+        ApiError::WebSocketClosed { code, .. } => {
+            format!("handshake error: WebSocket closed (code {code}): [redacted]")
+        }
         ApiError::ResponseIncomplete(_) => {
             "handshake error: incomplete response: [redacted]".to_string()
         }
         // These variants format fixed text; retry metadata is typed and never printed.
         ApiError::ContentFilter
-        | ApiError::WebSocketClosed { .. }
         | ApiError::ContextWindowExceeded
         | ApiError::QuotaExceeded
         | ApiError::UsageNotIncluded
@@ -3300,6 +3302,10 @@ mod tests {
                 message: message(),
             },
             ApiError::Stream(message()),
+            ApiError::WebSocketClosed {
+                code: 1009,
+                reason: message(),
+            },
             ApiError::ResponseIncomplete(Box::new(
                 codex_protocol::error::ResponseIncompleteError {
                     reason: message(),
@@ -3339,6 +3345,7 @@ mod tests {
                 "handshake transport error: request build error: [redacted]",
                 "handshake API error: 401 Unauthorized [redacted]",
                 "handshake stream error: [redacted]",
+                "handshake error: WebSocket closed (code 1009): [redacted]",
                 "handshake error: incomplete response: [redacted]",
                 "handshake error: retryable error: [redacted]",
                 "handshake error: rate limit exceeded: [redacted]",
