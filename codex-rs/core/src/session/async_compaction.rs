@@ -88,7 +88,15 @@ pub(super) async fn maybe_start(
     }
 
     let base_instructions = sess.get_prompt_base_instructions().await;
-    let (prepared_input, tasks, shutdown_cancellation, launch, send, background_span, attempt_sequence) = {
+    let (
+        prepared_input,
+        tasks,
+        shutdown_cancellation,
+        launch,
+        send,
+        background_span,
+        attempt_sequence,
+    ) = {
         let mut state = sess.state.lock().await;
         let model_info = &step_context.settings.model_info;
         let attempt = CompactionAttempt {
@@ -159,7 +167,15 @@ pub(super) async fn maybe_start(
         state.async_compaction.last_attempt = Some(attempt);
         let (send, result) = oneshot::channel();
         state.async_compaction.result = Some(result);
-        (prepared_input, tasks, shutdown_cancellation, launch, send, background_span, attempt_sequence)
+        (
+            prepared_input,
+            tasks,
+            shutdown_cancellation,
+            launch,
+            send,
+            background_span,
+            attempt_sequence,
+        )
     };
 
     // Prepare outside the lock on the foreground task so its step cannot advance before tool

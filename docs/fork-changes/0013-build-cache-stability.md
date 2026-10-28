@@ -186,3 +186,5 @@ WSL 可作为额外的快速验证环境：对齐 CI 的 Rust、Python、锁文�
 app-server 验收，避免仅看到 Cargo 构建成功就误报已安装版本正确。
 同步 CLI 时把新增命令和私有模块继续放在库入口，保留 binary 的构建身份与 allocator
 初始化；单元快照使用库 crate 名 `codex_cli`，不能因入口变薄而漏跑原有 CLI 测试。
+执行服务的命令及认证实现由上游独立 `codex-exec-server-cli` crate 提供，CLI 库引用其公开入口；
+不保留已迁出的私有模块，执行服务遥测仍通过集中 getter 读取包版本。
