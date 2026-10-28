@@ -139,6 +139,7 @@ def smoke(package):
         if actual.stdout.strip() != f"codex-cli {version}":
             raise ValueError(f"CLI version mismatch: {actual.stdout}")
         run(str(package / "bin/codex-code-mode-host"), "--help", env=env)
+        run(str(package / "bin/codex-exec-server"), "--help", env=env)
         run(str(package / "codex-path/rg"), "--version", env=env)
         if (package / "codex-resources/bwrap").exists():
             run(str(package / "codex-resources/bwrap"), "--version", env=env)
@@ -236,6 +237,7 @@ def build(target=TARGET):
         for relative in [
             "bin/codex",
             "bin/codex-code-mode-host",
+            "bin/codex-exec-server",
             "codex-path/rg",
         ]:
             binary = package / relative
