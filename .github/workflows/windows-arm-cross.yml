@@ -9,7 +9,6 @@ permissions:
   contents: read
 
 env:
-  RUSTUP_TOOLCHAIN: 1.95.0-aarch64-pc-windows-msvc
   CARGO_BUILD_JOBS: '3'
   CARGO_INCREMENTAL: '0'
   CARGO_PROFILE_RELEASE_DEBUG: '0'
@@ -21,10 +20,22 @@ env:
   MACOSX_DEPLOYMENT_TARGET: '14.0'
 
 jobs:
-  bootstrap:
+  build:
     if: github.ref == 'refs/heads/experiment/windows-arm-cross'
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-unknown-linux-gnu]
     runs-on: windows-11-arm
-    timeout-minutes: 30
+    timeout-minutes: 180
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0-aarch64-pc-windows-msvc
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_VERSION: fork-v1
+      SCCACHE_GHA_RW_MODE: READ_ONLY
+      SCCACHE_SKIP_CACHE_CHECK: 'true'
+      SCCACHE_IDLE_TIMEOUT: '0'
     steps:
       - name: 固定 checkout 行尾与长路径支持
         shell: pwsh
@@ -37,17 +48,89 @@ jobs:
       - name: 安装原生 ARM 工具并核对硬件
         shell: pwsh
         run: ./scripts/fork/windows-arm-setup.ps1
-      - name: 验证两种目标的链接工具链
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: '0.13.5'
+          python-version: '3.15'
+          enable-cache: false
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.18.0
+      - name: 准备 Linux AMD64 系统库
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          cargo new --bin "$env:RUNNER_TEMP/cross-smoke"
-          cargo zigbuild --manifest-path "$env:RUNNER_TEMP/cross-smoke/Cargo.toml" --release --target aarch64-apple-darwin --timings
-          cargo zigbuild --manifest-path "$env:RUNNER_TEMP/cross-smoke/Cargo.toml" --release --target x86_64-unknown-linux-gnu.2.39 --timings
+          choco install pkgconfiglite --version 0.28.0 --yes --no-progress
+          uv run --script scripts/fork/windows_cross.py linux-sysroot --output "$env:RUNNER_TEMP/linux-sysroot"
+      - name: 交叉编译完整平台包的全部二进制
+        shell: pwsh
+        env:
+          PACKAGE_TARGET: ${{ matrix.target }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $arguments = @('run', '--script', 'scripts/fork/windows_cross.py', 'build', '--target', $env:PACKAGE_TARGET, '--output', 'windows-build')
+          if ($env:PACKAGE_TARGET -eq 'x86_64-unknown-linux-gnu') {
+            $arguments += @('--sysroot', "$env:RUNNER_TEMP/linux-sysroot")
+          }
+          uv @arguments
       - uses: actions/upload-artifact@v7.0.0
         if: always()
         with:
-          name: windows-arm-bootstrap-${{ github.sha }}
-          path: runner-inventory.json
+          name: windows-cross-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            runner-inventory.json
+            windows-build/
+          if-no-files-found: error
+
+  package:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-unknown-linux-gnu]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.2
+        with:
+          version: '0.13.5'
+          python-version: '3.15'
+          enable-cache: false
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: windows-cross-${{ matrix.target }}-${{ github.sha }}
+          path: windows-input
+      - name: 安装打包与运行验收工具
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends llvm libcap-dev libasound2-dev
+      - name: 安装相同版本的 macOS 签名工具
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          curl --fail --location --retry 3 https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign/0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz --output "$RUNNER_TEMP/rcodesign.tar.gz"
+          echo "dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002  $RUNNER_TEMP/rcodesign.tar.gz" | sha256sum --check
+          mkdir -p "$RUNNER_TEMP/rcodesign"
+          tar -xzf "$RUNNER_TEMP/rcodesign.tar.gz" --strip-components=1 -C "$RUNNER_TEMP/rcodesign"
+          echo "$RUNNER_TEMP/rcodesign" >> "$GITHUB_PATH"
+      - name: 使用上游打包器完成完整包
+        env:
+          PACKAGE_TARGET: ${{ matrix.target }}
+        run: scripts/fork/windows_cross.py package --target "$PACKAGE_TARGET" --input windows-input/windows-build --output windows-package
+      - name: 验证 Linux 终端目录和分发版本
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        env:
+          CODEX_FORK_TEST_BINARY: ${{ github.workspace }}/windows-package/package/bin/codex
+        run: scripts/fork/run_tests.py test_terminal_cwd test_package_version
+      - uses: actions/upload-artifact@v7.0.0
+        with:
+          name: windows-package-${{ matrix.target }}-${{ github.sha }}
+          path: |
+            windows-package/package.tar.xz
+            windows-package/package-metadata.json
           if-no-files-found: error

@@ -63,5 +63,4 @@ foreach ($tool in $inventory.tools.Values) {
 $inventory | ConvertTo-Json -Depth 6 | Tee-Object -FilePath runner-inventory.json
 & $rustc -vV
 zig version
-cargo zigbuild --version
 Get-Command clang, cmake, ninja, pkg-config -ErrorAction SilentlyContinue | Select-Object Name, Source
