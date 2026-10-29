@@ -10,6 +10,12 @@ workflows:
         - 'astral-sh/setup-uv@v10.3.2'
         - 'mozilla-actions/sccache-action@v0.0.11'
         - 'swatinem/rust-cache@v2.9.2'
+    '.github/workflows/windows-arm-cross.yml':
+        - 'actions/checkout@v6.0.2'
+        - 'actions/download-artifact@v8.0.1'
+        - 'actions/upload-artifact@v7.0.0'
+        - 'astral-sh/setup-uv@v10.3.2'
+        - 'mozilla-actions/sccache-action@v0.0.11'
 dependencies:
     'actions/checkout@v6.0.2':
         ref: 'v6.0.2'
