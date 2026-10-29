@@ -25,6 +25,10 @@
 - 构建和测试共用 sccache 后端命名空间，由编译缓存键区分输入；关闭 incremental。
   Cargo 下载缓存独立维护，不缓存整个 target、bin 或每个 job 的编译对象闭包。
   两类缓存只允许默认分支写入，其它分支的手动验证只读。
+- 通过 `SCCACHE_SKIP_CACHE_CHECK=true` 跳过远端缓存启动探测，直接采用分支明确设置的
+  读写模式。sccache 0.18.0 的探测写入若遇到限流，会将整个进程降为只读，见
+  [上游问题](https://github.com/mozilla/sccache/issues/2593)。这不重试实际对象写入，
+  也不消除 GitHub 缓存服务的限流；仍需核对真实写入错误和后续命中率。
 - Linux 发布构建与测试共用 Cargo 下载缓存，由默认分支的发布构建保存。
   恢复步骤单独排除测试专用的编译参数，避免为同一批源码保存重复 archive；
   它不改变后续 Cargo 命令的环境，也不影响 sccache 对真实编译参数的校验。
@@ -104,6 +108,8 @@ macOS 的压缩内存与 swap 可以放大差距，热缓存无 swap 时不能�
 - 为 ts-rs、absolute-path、V8、code-mode、config、protocol、core、TUI 和 CLI 库保存直接依赖产物的文件名与摘要，
   区分源码或编译参数变化与依赖产物变化。
 - 写入失败只保留存储错误类别、HTTP 状态和已知缓存键，不上传可能含签名 URL 的原始日志。
+- 记录服务实际启动为 `ReadOnly` 还是 `ReadWrite`，将只读写入错误独立分类，
+  与分支声明的读写模式对照，避免把只读降级混同于普通写入限流。
 - 另外采集后端读取警告。sccache 0.18.0 的远端存储会把部分读取异常转成普通 miss，
   只在日志中警告，因此原有 `cache_read_errors` 为零仍不能排除读取异常；
   用 `backend_read_errors` 和 `backend_read_error_kinds` 核对这些被降级的错误。
