@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 
-# 实验固定与 Linux 发布相同的 Rust、Zig 和 cargo-zigbuild。
+# Rust 与 cargo-zigbuild 沿用 Linux 发布版本；Zig 选用通过原生 ARM C 探针的 0.17.0。
 $tools = Join-Path $env:RUNNER_TEMP 'windows-cross-tools'
 New-Item -ItemType Directory -Force $tools | Out-Null
 
@@ -34,7 +34,7 @@ Expand-Archive $archive -DestinationPath (Join-Path $tools 'cargo-zigbuild')
 $cargoZigbuild = Get-ChildItem (Join-Path $tools 'cargo-zigbuild') -Recurse -Filter cargo-zigbuild.exe | Select-Object -First 1
 Add-ToolPath $cargoZigbuild.DirectoryName
 
-$archive = Get-VerifiedArchive 'https://ziglang.org/download/0.16.0/zig-aarch64-windows-0.16.0.zip' 'aee38316ee4111717900f45dd3130145c39289e105541d737eb8c5ed653c78ef' 'zig.zip'
+$archive = Get-VerifiedArchive 'https://ziglang.org/download/0.17.0/zig-aarch64-windows-0.17.0.zip' '0a59d91fa1cb40cf068e9b0954434ce973500c7a2ea749f1e01af62cdab52d26' 'zig.zip'
 Expand-Archive $archive -DestinationPath (Join-Path $tools 'zig')
 $zig = Get-ChildItem (Join-Path $tools 'zig') -Recurse -Filter zig.exe | Select-Object -First 1
 Add-ToolPath $zig.DirectoryName
