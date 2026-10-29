@@ -105,7 +105,6 @@ class CliTests(unittest.TestCase):
                 "build_observer",
                 "build_report",
                 "cache_diagnostics",
-                "probe_ts_rs_cache",
                 "run_tests",
             ):
                 entry = directory / f"{name}.py"

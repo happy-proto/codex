@@ -10,17 +10,20 @@
 ## 如何改
 
 `main` 是唯一长期分支，直接维护全部改造；`scripts/fork/upstream-tag` 记录上游基线，定期 rebase 到新 alpha。
-`fork.yml` 并行执行 Linux Rust 测试、Linux AMD64 和 ARM macOS 完整包构建，通过后自动发布。
+`fork.yml` 在 Linux 并行执行 Rust 测试、Linux AMD64 原生构建和 macOS ARM 交叉构建，通过后自动发布。
+完整平台包构建和发布仅限默认分支，包括手动触发；其它分支默认仅执行脚本检查，Rust 验证需显式选择。
 发布、观察和快照更新等 Python CLI 通过 uv 的 PEP 723 入口运行，使用 Typer 定义参数和帮助；
 最低 Python 版本为 3.15，CI 显式安装 uv 与 Python 3.15，构建子进程沿用同一解释器。
 脚本测试通过 `scripts/fork/run_tests.py` 在声明的依赖环境中运行；普通被导入模块和测试不单独声明脚本环境。
 **Breaking change：维护工具不再支持 Python 3.14 及更早版本的裸 `python3` 执行。**
 维护者安装 uv 后直接执行 `scripts/fork/<工具>.py`，或使用 `uv run --script scripts/fork/<工具>.py`；
 最终用户的 Shell 安装入口及其系统依赖不变，不要求安装 uv 或 Python 3.15。
-macOS 构建显式使用 `macos-latest`，跟随 GitHub 当前稳定 runner 镜像；目标仍为
-`aarch64-apple-darwin`。镜像升级后的完整包由 CI 原生验收，性能对照须区分实际镜像，
-不把不同系统的耗时直接归因于缓存优化。标签对应的系统与架构见
-[GitHub runner 映像说明](https://github.com/actions/runner-images#available-images)。
+两个平台均在 `ubuntu-24.04` 构建。macOS 目标为 `aarch64-apple-darwin`，
+由 cargo-zigbuild、Zig 和校验摘要的 macOS SDK 链接，使用 rcodesign 添加 ad-hoc
+hardened runtime 签名并保留上游 entitlements。打包前检查 ARM64 架构和重复动态库加载命令，
+签名后计算归档摘要；Linux 包在 CI 执行运行与安装契约验收。
+macOS 包的真实运行验收使用目标系统，不能以 Linux 静态校验替代；工具链和 SDK 更新后
+需验证 CLI、code-mode host、app-server、V8 工具调用和终端会话行为。
 版本使用上游 alpha 加 `.fork.N`，不覆盖已发布版本；平台包和 SHA-256 由 `fork-release.json` 描述。
 发布后仅按发布时间保留最新 10 个已发布版本及其 tag，不设时间窗口。
 draft 不占名额；清理遗留 draft 和没有 Release 的孤立 fork tag，不影响上游 tag。
@@ -53,7 +56,7 @@ Rust 编译由 Cargo 通过 sccache 的 GitHub Actions 后端缓存，按编译�
   覆盖直接执行与 uv 脚本模式、帮助中的参数与可选值、非法参数、版本输出及命令退出码；
   [观察器测试](../../scripts/fork/test_build_observer.py) 验证经过 uv 启动后的信号转发与子进程回收。
 - [版本解析](../../codex-rs/build-info/src/lib.rs)、[包版本回归测试](../../scripts/fork/test_package_version.py)：
-  将同一个未修改的 binary 放入不同版本的包，验证 `--version` 随清单变化；两个平台的原生产物都执行此检查。
+  将同一个未修改的 binary 放入不同版本的包，验证 `--version` 随清单变化；Linux CI 执行，macOS 产物在目标系统验收。
 - [安装器](../../scripts/fork/install.sh)、[终端产物验收](../../scripts/fork/test_terminal_cwd.py)。
 - [更新入口](../../codex-rs/tui/src/update_action.rs)、[更新检测](../../codex-rs/tui/src/updates_cache.rs)、[daemon 设置](../../codex-rs/app-server-daemon/src/settings.rs)。
 
@@ -67,6 +70,6 @@ Rust 编译由 Cargo 通过 sccache 的 GitHub Actions 后端缓存，按编译�
 同步时核对上游 package builder、资源布局、签名和更新入口。macOS 包为 ad-hoc 签名，Linux 包依赖 glibc。
 从上游 `0.166.0-alpha.5` 起，完整包不再包含独立的 `codex-exec-server`，
 签名及发布 smoke 遵循该布局；需要启动执行服务时使用 `codex exec-server`。
-macOS 继续使用 CLI、code-mode host 各自的上游 entitlements 签名并校验。
+macOS 使用 CLI、code-mode host 各自的上游 entitlements 交叉签名；升级 Zig、SDK 或签名工具时保留真实运行验收。
 验证必须区分 CI、发布产物和本机实际安装，不能仅凭版本输出判断完整包可用。
 历史设计讨论：[PR #1](https://github.com/happy-proto/codex/pull/1)。
