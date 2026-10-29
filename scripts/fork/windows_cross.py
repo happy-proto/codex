@@ -143,6 +143,7 @@ def build(
     if target == Target.linux:
         environment.update(
             PKG_CONFIG_ALLOW_CROSS="1",
+            CC_SHELL_ESCAPED_FLAGS="1",
             PKG_CONFIG_SYSROOT_DIR=sysroot.resolve().as_posix(),
             PKG_CONFIG_PATH=os.pathsep.join(
                 str(sysroot.resolve() / path)
@@ -173,6 +174,7 @@ def build(
         "--target",
         target.value + (".2.39" if target == Target.linux else ""),
     ]
+    library_check = [*args, "-p", "openssl-sys", "-p", "libz-sys"]
     binaries = ["codex", "codex-code-mode-host"] + (
         ["bwrap"] if target == Target.linux else []
     )
@@ -180,6 +182,11 @@ def build(
         args.extend(("--bin", binary))
     started = time.monotonic()
     try:
+        if target == Target.linux:
+            # 先验证真实 sys crate 的头文件解析，编译结果由完整构建复用。
+            subprocess.run(
+                library_check, cwd=ROOT / "codex-rs", env=environment, check=True
+            )
         subprocess.run(args, cwd=ROOT / "codex-rs", env=environment, check=True)
     finally:
         (output / "build-metadata.json").write_text(
