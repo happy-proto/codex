@@ -92,6 +92,10 @@ pub(super) async fn reconnect(
                         if matches!(
                             error.downcast_ref::<TypedRequestError>(),
                             Some(TypedRequestError::Transport { .. })
+                        ) || matches!(
+                            error.downcast_ref::<TypedRequestError>(),
+                            Some(TypedRequestError::Server { source, .. })
+                                if is_server_shutting_down_error(source)
                         ) =>
                     {
                         return Err(error);
@@ -189,11 +193,14 @@ impl App {
     }
 
     pub(super) fn recover_transport_error(&mut self, error: &color_eyre::Report) -> bool {
-        let disconnected = matches!(
-            error.downcast_ref::<TypedRequestError>(),
-            Some(TypedRequestError::Transport { .. })
-        );
-        disconnected && self.begin_reconnect()
+        // A draining server can refuse work before closing the socket. Treat that refusal
+        // like a disconnect so requests cannot escape the event loop as fatal errors.
+        let reconnect_required = match error.downcast_ref::<TypedRequestError>() {
+            Some(TypedRequestError::Transport { .. }) => true,
+            Some(TypedRequestError::Server { source, .. }) => is_server_shutting_down_error(source),
+            _ => false,
+        };
+        reconnect_required && self.begin_reconnect()
     }
 
     pub(super) fn begin_reconnect(&mut self) -> bool {
