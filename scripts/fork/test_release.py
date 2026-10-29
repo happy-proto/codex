@@ -490,8 +490,13 @@ class PackageBuildTests(unittest.TestCase):
             builder = command.call_args_list[0].args
             self.assertIn(str(root / "scripts/fork/cargo-cross.sh"), builder)
             self.assertIn("llvm-strip", builder)
-            for call in command.call_args_list:
-                self.assertNotIn(str(dist / "package/bin/codex-exec-server"), call.args)
+            command.assert_any_call(
+                "rcodesign",
+                "sign",
+                "--code-signature-flags",
+                "runtime",
+                str(dist / "package/bin/codex-exec-server"),
+            )
 
     def test_macos_signing_failure_does_not_produce_a_distribution_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -518,7 +523,7 @@ class PackageBuildTests(unittest.TestCase):
                 archive.assert_not_called()
                 self.assertFalse((root / "fork-dist/fork-release.json").exists())
 
-    def test_smoke_accepts_current_package_without_standalone_exec_server(self):
+    def test_smoke_rejects_package_without_standalone_exec_server(self):
         with tempfile.TemporaryDirectory() as directory:
             package = Path(directory)
             (package / "codex-package.json").write_text(
@@ -533,9 +538,10 @@ class PackageBuildTests(unittest.TestCase):
             with (
                 mock.patch.object(release, "run", side_effect=run_binary),
                 mock.patch.object(release, "initialize_app_server") as initialize,
+                self.assertRaises(FileNotFoundError),
             ):
                 release.smoke(package)
-            initialize.assert_called_once()
+            initialize.assert_not_called()
 
 
 class InstallerTests(unittest.TestCase):
@@ -639,6 +645,7 @@ shutil.copyfile(pathlib.Path(os.environ["FAKE_NETWORK"]) / filename, args[args.i
         )
         for binary in [
             "bin/codex-code-mode-host",
+            "bin/codex-exec-server",
             "codex-path/rg",
             "codex-resources/bwrap",
         ]:

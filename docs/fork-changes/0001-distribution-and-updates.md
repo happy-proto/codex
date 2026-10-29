@@ -68,8 +68,8 @@ Rust 编译由 Cargo 通过 sccache 的 GitHub Actions 后端缓存，按编译�
 需使用 README 中的 `main` 安装命令更新一次，之后继续使用 `codex update`。
 根 README 只保留使用入口，[上游英文说明](../upstream-readme.md) 独立保存；同步上游时更新该说明并核对相对链接。
 同步时核对上游 package builder、资源布局、签名和更新入口。macOS 包为 ad-hoc 签名，Linux 包依赖 glibc。
-从上游 `0.166.0-alpha.5` 起，完整包不再包含独立的 `codex-exec-server`，
-签名及发布 smoke 遵循该布局；需要启动执行服务时使用 `codex exec-server`。
+完整包包含上游 `0.166.0-alpha.6` 恢复分发的独立 `bin/codex-exec-server`，
+与其它自有二进制一起检查架构、签名并执行发布 smoke；CLI 仍支持 `codex exec-server`。
 macOS 使用 CLI、code-mode host 各自的上游 entitlements 交叉签名；升级 Zig、SDK 或签名工具时保留真实运行验收。
 验证必须区分 CI、发布产物和本机实际安装，不能仅凭版本输出判断完整包可用。
 历史设计讨论：[PR #1](https://github.com/happy-proto/codex/pull/1)。
