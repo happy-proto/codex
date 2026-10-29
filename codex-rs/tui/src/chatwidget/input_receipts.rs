@@ -101,13 +101,36 @@ impl ChatWidget {
     }
 
     pub(crate) fn hold_unconfirmed_user_message(&mut self, client_id: &str) {
+        self.requeue_submitted_user_message(
+            client_id,
+            MessageDelivery::Unconfirmed(Some(client_id.to_owned())),
+            QueuedInputAction::Plain,
+        );
+    }
+
+    pub(crate) fn requeue_unsubmitted_user_message(&mut self, client_id: &str) {
+        // This input already went through composer dispatch. Preserve it as model input
+        // even if its literal text starts with a shell escape.
+        self.requeue_submitted_user_message(
+            client_id,
+            MessageDelivery::Unsent,
+            QueuedInputAction::Literal,
+        );
+    }
+
+    fn requeue_submitted_user_message(
+        &mut self,
+        client_id: &str,
+        delivery: MessageDelivery,
+        action: QueuedInputAction,
+    ) {
         if let Some((message, record, source)) = self.take_submitted_message(client_id) {
             self.input_queue
                 .queued_user_messages
                 .push_front(QueuedUserMessage {
                     source,
-                    delivery: MessageDelivery::Unconfirmed(Some(client_id.to_owned())),
-                    ..message.into()
+                    delivery,
+                    ..QueuedUserMessage::new(message, action)
                 });
             self.input_queue
                 .queued_user_message_history_records
