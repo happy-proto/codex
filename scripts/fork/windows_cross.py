@@ -75,7 +75,7 @@ def linux_sysroot(
         Path, typer.Option("--output", help="Ubuntu 24.04 AMD64 系统库解包目录")
     ],
 ):
-    """获取目标平台的 libcap、ALSA 和 Linux 头文件，核对仓库 SHA256。"""
+    """获取 Ubuntu 目标库及头文件，核对仓库 SHA256。"""
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     wanted = {
@@ -84,6 +84,10 @@ def linux_sysroot(
         "libasound2-dev",
         "libasound2t64",
         "linux-libc-dev",
+        "libssl-dev",
+        "libssl3t64",
+        "zlib1g-dev",
+        "zlib1g",
     }
     packages = {}
     base = "https://archive.ubuntu.com/ubuntu/"
@@ -147,6 +151,18 @@ def build(
                     "usr/share/pkgconfig",
                 )
             ),
+            CFLAGS_x86_64_unknown_linux_gnu=(
+                f'-isystem "{(sysroot.resolve() / "usr/include/x86_64-linux-gnu").as_posix()}"'
+            ),
+        )
+        run(
+            "pkg-config",
+            "--modversion",
+            "libcap",
+            "alsa",
+            "openssl",
+            "zlib",
+            env=environment,
         )
     args = [
         "cargo",
