@@ -1,0 +1,53 @@
+name: Windows ARM cross-build experiment
+
+on:
+  push:
+    branches: [experiment/windows-arm-cross]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUSTUP_TOOLCHAIN: 1.95.0-aarch64-pc-windows-msvc
+  CARGO_BUILD_JOBS: '3'
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_RELEASE_DEBUG: '0'
+  CARGO_PROFILE_RELEASE_SPLIT_DEBUGINFO: 'off'
+  CARGO_PROFILE_RELEASE_LTO: 'false'
+  CARGO_PROFILE_CI_TEST_DEBUG: '0'
+  CARGO_PROFILE_CI_TEST_SPLIT_DEBUGINFO: 'off'
+  CARGO_PROFILE_CI_TEST_CODEGEN_UNITS: '256'
+  MACOSX_DEPLOYMENT_TARGET: '14.0'
+
+jobs:
+  bootstrap:
+    if: github.ref == 'refs/heads/experiment/windows-arm-cross'
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    steps:
+      - name: 固定 checkout 行尾与长路径支持
+        shell: pwsh
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+      - uses: actions/checkout@v6.0.2
+        with:
+          persist-credentials: false
+      - name: 安装原生 ARM 工具并核对硬件
+        shell: pwsh
+        run: ./scripts/fork/windows-arm-setup.ps1
+      - name: 验证两种目标的链接工具链
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          cargo new --bin "$env:RUNNER_TEMP/cross-smoke"
+          cargo zigbuild --manifest-path "$env:RUNNER_TEMP/cross-smoke/Cargo.toml" --release --target aarch64-apple-darwin --timings
+          cargo zigbuild --manifest-path "$env:RUNNER_TEMP/cross-smoke/Cargo.toml" --release --target x86_64-unknown-linux-gnu.2.39 --timings
+      - uses: actions/upload-artifact@v7.0.0
+        if: always()
+        with:
+          name: windows-arm-bootstrap-${{ github.sha }}
+          path: runner-inventory.json
+          if-no-files-found: error
