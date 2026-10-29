@@ -17,12 +17,14 @@ draft 不占名额；清理遗留 draft 和没有 Release 的孤立 fork tag，�
 从上游 `0.163.0-alpha.1` 起不再附带补丁 zsh，签名、验收和安装检查遵循当前上游布局。
 macOS 使用 ad-hoc 签名并保留上游 entitlements；不配置官方 Azure、R2、npm、WinGet 或网站发布设施。
 下载 CI/Release 产物做隔离安装与轻量运行验收。
-标准 macOS runner 使用 release 优化、关闭跨 crate Thin LTO；`lto=false` 仍可能包含单 crate 优化。
+发布构建使用 release 优化、关闭跨 crate Thin LTO；`lto=false` 仍可能包含单 crate 优化。
 测试与产物构建并行；测试保留 release 条件编译及关闭 debug assertions，禁用测试优化以控制编译成本。
 Core 集成测试沿用上游 `ci-test` profile，保留测试所需的 debug assertions；
 skill 集成测试串行运行，避免线程本地 tracing 捕获受并行用例干扰。
-通用脚本检查和 Rust 测试使用 Linux x64 runner；完整包通过平台 matrix 并行构建，
-Linux x64 和 ARM macOS runner 分别验证本机安装契约和真实 CLI；仅 macOS 签名。
+通用脚本检查、Rust 测试和完整包构建全部使用 Linux x64 runner，两个平台包通过 matrix 并行构建。
+Linux 包原生构建并执行安装、CLI 与 app-server 验收；macOS ARM 包使用 cargo-zigbuild、Zig 和 SDK
+交叉编译，检查架构与重复动态库依赖，再用 rcodesign 添加 ad-hoc 签名和上游 entitlements。
+macOS 包的真实运行验收需在 Mac 执行，工具链或 SDK 升级后验证完整主路径；静态校验不等于运行通过。
 分析耗时时读取各 job 的日志和 `fork-build-timings-*`、`fork-test-timings-*` artifact，
 用 Cargo 报告区分 crate 编译和并发等待，不把日志末尾的整段耗时直接归为链接。
 
@@ -42,11 +44,14 @@ Action 在 job summary 输出统计，同时保存 `fork-*-sccache-*` JSON artif
 在默认分支 `main` 预热和保存正式缓存。
 `fork.yml` 接受 `main` 的 push 和手动触发；提交直接在 `main` 维护，
 没有功能 PR 专用工作流。需要快速反馈时用 workflow_dispatch 指定测试过滤条件。
-手动实验默认不发布，`publish=true` 才请求发布 fork；仅默认分支的自动或手动运行允许保存编译及下载缓存，其它分支只恢复缓存。
+完整平台包构建和发布只允许默认分支，包括手动触发；其它分支默认仅执行脚本检查，
+即使指定 `publish=true` 也跳过完整包构建与发布。
+默认分支手动验证默认不发布，`publish=true` 才请求发布 fork；仅默认分支允许保存编译及下载缓存，其它分支只恢复缓存。
+非默认分支需要完整 Rust 回归时显式指定 `tests_only=true`；定向验证使用下面的过滤参数。
 只需验证 TUI 回归时，手动指定 `tui_test_filter`；该模式只运行匹配的 TUI 库测试，
 跳过产物构建、其它 Rust 测试及发布，不受 `publish` 输入影响。
 显式 skill 回归可通过 `core_test_filter` 定向运行，采用相同的跳过规则。
-手动实验和自动发布使用不同并发组，避免耗时实验占用自动发布队列。
+手动验证和自动发布使用不同并发组，避免验证任务占用自动发布队列。
 比较迁移前完整版本、首次预热和热缓存完整版本，分别记录构建、测试 job 的执行时间、
 缓存读写时间和排队时间；读取 `fork-*-sccache-*` 统计及 Cargo 耗时报告。
 远端空间占用需另外读取仓库 Actions cache 清单，不把单个 job 的编译统计当作总占用。

@@ -464,7 +464,7 @@ class PackageBuildTests(unittest.TestCase):
             with (
                 mock.patch.object(release, "ROOT", root),
                 mock.patch.object(release, "plan", return_value=metadata),
-                mock.patch.object(release, "smoke"),
+                mock.patch.object(release, "smoke") as native_smoke,
                 mock.patch.object(release, "archive_package", return_value=archive),
                 mock.patch.object(release, "run") as command,
                 mock.patch.dict(os.environ),
@@ -478,19 +478,45 @@ class PackageBuildTests(unittest.TestCase):
                 release.build(release.TARGET)
             binary = str(dist / "package/bin/codex-code-mode-host")
             command.assert_any_call(
-                "codesign",
-                "--force",
-                "--sign",
-                "-",
-                "--options",
+                "rcodesign",
+                "sign",
+                "--code-signature-flags",
                 "runtime",
-                "--entitlements",
+                "--entitlements-xml-path",
                 str(entitlements),
                 binary,
             )
-            command.assert_any_call("codesign", "--verify", "--strict", binary)
+            native_smoke.assert_not_called()
+            builder = command.call_args_list[0].args
+            self.assertIn(str(root / "scripts/fork/cargo-cross.sh"), builder)
+            self.assertIn("llvm-strip", builder)
             for call in command.call_args_list:
                 self.assertNotIn(str(dist / "package/bin/codex-exec-server"), call.args)
+
+    def test_macos_signing_failure_does_not_produce_a_distribution_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def command(*args):
+                if args[0] == "rcodesign":
+                    raise subprocess.CalledProcessError(1, args)
+
+            with (
+                mock.patch.object(release, "ROOT", root),
+                mock.patch.object(
+                    release,
+                    "plan",
+                    return_value={"source_commit": "a" * 40, "version": "1.0.0"},
+                ),
+                mock.patch.object(release, "run", side_effect=command),
+                mock.patch.object(release, "smoke"),
+                mock.patch.object(release, "archive_package") as archive,
+                mock.patch.dict(os.environ),
+            ):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    release.build(release.TARGET)
+                archive.assert_not_called()
+                self.assertFalse((root / "fork-dist/fork-release.json").exists())
 
     def test_smoke_accepts_current_package_without_standalone_exec_server(self):
         with tempfile.TemporaryDirectory() as directory:

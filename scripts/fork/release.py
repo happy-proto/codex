@@ -217,13 +217,16 @@ def build(target=TARGET):
     dist.mkdir(exist_ok=True)
     # 发布版本写入包清单；保留内部 Cargo 版本，避免每个 fork 序号使缓存失效。
     os.environ["STABLE_GIT_COMMIT"] = metadata["source_commit"]
+    macos = target.endswith("apple-darwin")
+    cargo = "cargo-cross.sh" if macos else "cargo-timed.sh"
     run(
         sys.executable,
         "scripts/build_codex_package.py",
         "--target",
         target,
         "--cargo",
-        str(ROOT / "scripts/fork/cargo-timed.sh"),
+        str(ROOT / "scripts/fork" / cargo),
+        *(["--strip-tool", "llvm-strip"] if macos else []),
         "--cargo-profile",
         "release",
         "--package-version",
@@ -232,24 +235,35 @@ def build(target=TARGET):
         str(package),
         "--force",
     )
-    if target.endswith("apple-darwin"):
+    if macos:
+        run(
+            str(ROOT / "scripts/fork/check-macho-libraries.sh"),
+            *(
+                str(package / relative)
+                for relative in (
+                    "bin/codex",
+                    "bin/codex-code-mode-host",
+                    "codex-path/rg",
+                )
+            ),
+        )
         for relative in [
             "bin/codex",
             "bin/codex-code-mode-host",
             "codex-path/rg",
         ]:
             binary = package / relative
-            args = ["codesign", "--force", "--sign", "-", "--options", "runtime"]
+            args = ["rcodesign", "sign", "--code-signature-flags", "runtime"]
             entitlements = (
                 ROOT
                 / ".github/scripts/macos-signing"
                 / f"{binary.name}.entitlements.plist"
             )
             if entitlements.exists():
-                args.extend(["--entitlements", str(entitlements)])
+                args.extend(["--entitlements-xml-path", str(entitlements)])
             run(*args, str(binary))
-            run("codesign", "--verify", "--strict", str(binary))
-    smoke(package)
+    else:
+        smoke(package)
     archive = archive_package(package, dist)
     metadata["sha256"] = sha256(archive)
     metadata["asset"] = f"codex-package-{target}.tar.xz"
@@ -507,7 +521,7 @@ def prune(apply=False):
 
 
 class Target(str, Enum):
-    """支持的原生包目标。"""
+    """支持的发布包目标。"""
 
     macos = "aarch64-apple-darwin"
     linux = "x86_64-unknown-linux-gnu"
@@ -522,7 +536,7 @@ def version_command() -> None:
 @app.command("plan")
 def plan_command(
     target: Annotated[
-        Target, typer.Option("--target", help="原生包目标")
+        Target, typer.Option("--target", help="发布包目标")
     ] = Target.macos,
 ) -> None:
     """以 JSON 输出当前仓库的构建计划。"""
@@ -532,10 +546,10 @@ def plan_command(
 @app.command("build")
 def build_command(
     target: Annotated[
-        Target, typer.Option("--target", help="原生包目标")
+        Target, typer.Option("--target", help="发布包目标；macOS 在 Linux 上交叉编译")
     ] = Target.macos,
 ) -> None:
-    """调用上游 package builder 构建并验收原生包。"""
+    """在 Linux 构建、校验并归档平台发布包。"""
     build(target.value)
 
 
@@ -554,11 +568,11 @@ def smoke_command(
             exists=True,
             file_okay=False,
             resolve_path=True,
-            help="已解包的原生包目录",
+            help="已解包的平台包目录；须在对应系统运行",
         ),
     ],
 ) -> None:
-    """验证原生包资源、CLI 和 app-server。"""
+    """在目标系统验证包资源、CLI 和 app-server。"""
     smoke(package)
 
 
