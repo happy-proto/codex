@@ -223,6 +223,7 @@ async fn failed_background_compaction_retries_after_backoff(failures: usize) {
             total_tokens: 70_000,
             ..Default::default()
         }),
+        /*includes_reasoning*/ false,
     )
     .await
     .expect("record usage");

@@ -8,6 +8,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import tomllib
 import unittest
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -17,6 +18,24 @@ import release
 
 
 class VersionTests(unittest.TestCase):
+    def test_repository_workspace_versions_match_lockfile(self):
+        root = Path(__file__).resolve().parents[2] / "codex-rs"
+        workspace = tomllib.loads((root / "Cargo.toml").read_text())["workspace"]
+        packages = tomllib.loads((root / "Cargo.lock").read_text())["package"]
+        locked = {
+            (package["name"], package["version"])
+            for package in packages
+            if "source" not in package
+        }
+        for pattern in workspace["members"]:
+            for member in root.glob(pattern):
+                package = tomllib.loads((member / "Cargo.toml").read_text())["package"]
+                version = package.get("version", "0.0.0")
+                if isinstance(version, dict):
+                    version = workspace["package"]["version"]
+                with self.subTest(package=package["name"]):
+                    self.assertIn((package["name"], version), locked)
+
     def test_plan_uses_the_recorded_alpha_without_an_upstream_mirror_branch(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
