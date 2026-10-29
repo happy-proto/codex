@@ -7,6 +7,27 @@ from cache_diagnostics import classify_error, codegen_options, summarize
 
 
 class CacheDiagnosticsTests(unittest.TestCase):
+    def test_read_only_storage_errors_are_distinguished_from_unknown_errors(self):
+        for message in (
+            "Cannot write to read-only storage",
+            "storage is read-only",
+        ):
+            with self.subTest(message=message):
+                self.assertEqual(classify_error(message, set())["kind"], "ReadOnly")
+
+    def test_effective_server_cache_mode_is_reported_without_raw_log(self):
+        for mode in ("ReadOnly", "ReadWrite"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                cwd = Path(directory)
+                log = cwd / "daemon.log"
+                log.write_text(
+                    "PRIVATE_STARTUP_SENTINEL\n"
+                    f"[2026-10-29T10:50:00.000Z INFO sccache::server] server has setup with {mode}\n"
+                )
+                report = summarize(log, cwd)
+                self.assertEqual(report["server_cache_mode"], mode)
+                self.assertNotIn("PRIVATE_STARTUP_SENTINEL", json.dumps(report))
+
     def test_compiler_options_exclude_private_link_arguments(self):
         self.assertEqual(
             codegen_options(

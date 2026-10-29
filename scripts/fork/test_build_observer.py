@@ -130,10 +130,12 @@ class BuildObserverTests(unittest.TestCase):
             with log.open("a") as stream:
                 stream.write(
                     "\n[WARN opendal::services] service=ghac: read failed NotFound (permanent) at Reader::read, context: {status: 404}\n"
+                    "[DEBUG sccache::server] Error executing cache write: Cannot write to read-only storage\n"
                 )
             result = counters.sample()
             self.assertEqual(result["backend_read"], {"RateLimited/429": 2})
             self.assertEqual(result["storage_read"], {"NotFound/404": 1})
+            self.assertEqual(result["cache_write"], {"ReadOnly/None": 1})
             self.assertNotIn(private, json.dumps(result))
             self.assertNotIn("private.invalid", json.dumps(result))
 

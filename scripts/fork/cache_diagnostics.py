@@ -67,10 +67,14 @@ def file_digest(path: Path) -> dict:
 
 
 def classify_error(text: str, known_keys: set[str], *, key_context: str = "") -> dict:
+    text = text.strip()
     first = text.split(maxsplit=1)[0] if text else ""
+    kind = first if first in KINDS else "unknown"
+    if text in {"Cannot write to read-only storage", "storage is read-only"}:
+        kind = "ReadOnly"
     status = re.search(r"\bstatus(?:_code)?\s*[:=]\s*([1-5][0-9]{2})\b", text)
     return {
-        "kind": first if first in KINDS else "unknown",
+        "kind": kind,
         "http_status": int(status[1]) if status else None,
         "flags": sorted(
             name for name, phrase in FLAGS.items() if phrase in text.lower()
@@ -130,6 +134,7 @@ def dependency_fingerprints(arguments: list[str], cwd: Path) -> dict:
 
 
 def summarize(log: Path, cwd: Path) -> dict:
+    server_cache_mode = None
     records = {}
     current = {}
     pending_arguments = {}
@@ -140,6 +145,11 @@ def summarize(log: Path, cwd: Path) -> dict:
     event_pattern = re.compile(r"\[([A-Za-z_][A-Za-z0-9_.-]*)\]: (.*)")
     with log.open(errors="replace") as stream:
         for line in stream:
+            if mode := re.search(
+                r"\bsccache::server\] server has setup with (ReadOnly|ReadWrite)\b",
+                line,
+            ):
+                server_cache_mode = mode[1]
             stamp = re.match(r"^\[([0-9T:.,Z+-]+)\s", line)
             observed_at = stamp[1] if stamp else None
             if "Error executing cache write: " in line:
@@ -217,6 +227,7 @@ def summarize(log: Path, cwd: Path) -> dict:
     ]
     return {
         "schema_version": 1,
+        "server_cache_mode": server_cache_mode,
         "units": list(records.values()),
         "write_errors": errors,
         "write_error_kinds": dict(Counter(error["kind"] for error in errors)),
@@ -267,6 +278,8 @@ def main(
             "CARGO_PROFILE_CI_TEST_SPLIT_DEBUGINFO",
             "CARGO_PROFILE_CI_TEST_CODEGEN_UNITS",
             "RUSTC_WRAPPER",
+            "SCCACHE_GHA_RW_MODE",
+            "SCCACHE_SKIP_CACHE_CHECK",
         )
     }
     report["rustc"] = subprocess.check_output(
