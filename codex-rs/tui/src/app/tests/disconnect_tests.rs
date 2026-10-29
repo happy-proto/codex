@@ -18,6 +18,145 @@ use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
 
 #[tokio::test]
+async fn draining_turn_submission_reconnects_without_exiting_or_replaying() -> Result<()> {
+    for steering in [false, true] {
+        for legacy_error in [false, true] {
+            let (mut app, _events, mut ops) = make_test_app_with_channels().await;
+            let thread_id = ThreadId::new();
+            app.active_thread_id = Some(thread_id);
+            app.primary_thread_id = Some(thread_id);
+            let thread_session = test_thread_session(thread_id, app.config.cwd.to_path_buf());
+            app.chat_widget
+                .handle_thread_session(thread_session.clone());
+            if steering {
+                app.thread_event_channels.insert(
+                    thread_id,
+                    ThreadEventChannel::new_with_session(
+                        THREAD_EVENT_CHANNEL_CAPACITY,
+                        thread_session,
+                        vec![test_turn("turn-1", TurnStatus::InProgress, Vec::new())],
+                    ),
+                );
+                app.chat_widget.handle_server_notification(
+                    turn_started_notification(thread_id, "turn-1"),
+                    /*replay_kind*/ None,
+                );
+            }
+            let listener = TcpListener::bind("127.0.0.1:0").await?;
+            let endpoint = crate::resolve_remote_addr(&format!("ws://{}", listener.local_addr()?))?;
+            app.app_server_target = AppServerTarget::LocalDaemon {
+                endpoint: endpoint.clone(),
+                allow_embedded_fallback: false,
+            };
+            let method = if steering { "turn/steer" } else { "turn/start" };
+            let server = tokio::spawn(async move {
+                let (stream, _) = listener.accept().await?;
+                serve_reconnect_requests(
+                    tokio_tungstenite::accept_async(stream).await?,
+                    |request| {
+                        assert_eq!(request.method, method);
+                        let mut error = json!({
+                            "code": -32600,
+                            "message": "Server is draining; retry after reconnecting"
+                        });
+                        if !legacy_error {
+                            error["data"] = json!({"reason": "serverShuttingDown"});
+                        }
+                        // Keep the socket open: the refusal alone must trigger recovery.
+                        std::future::ready(Some(json!({"error": error})))
+                    },
+                )
+                .await
+            });
+            let mut session = AppServerSession::new(
+                crate::backend_id::BackendId::new(),
+                crate::connect_remote_app_server(endpoint).await?,
+                ThreadParamsMode::Embedded,
+            );
+            let mut tui = crate::tui::test_support::make_test_tui()?;
+            app.chat_widget
+                .apply_external_edit("keep this message".into());
+            app.chat_widget.handle_key_event(KeyCode::Enter.into());
+            let op = next_user_turn_op(&mut ops);
+            app.chat_widget
+                .apply_external_edit("keep this draft".into());
+            let before = app.chat_widget.capture_thread_input_state().unwrap();
+            if steering {
+                assert!(!before.pending_steers.is_empty());
+            }
+            assert!(matches!(
+                app.handle_event(&mut tui, &mut session, AppEvent::CodexOp(op))
+                    .await?,
+                AppRunControl::Continue
+            ));
+            assert!(app.reconnect.offline);
+            let after = app.chat_widget.capture_thread_input_state().unwrap();
+            assert_eq!(after.pending_steers, before.pending_steers);
+            assert_eq!(
+                app.chat_widget.composer_text_with_pending(),
+                "keep this draft"
+            );
+            app.handle_tui_event(&mut tui, &mut session, TuiEvent::Key(KeyCode::Enter.into()))
+                .await?;
+            assert!(
+                !std::iter::from_fn(|| ops.try_recv().ok())
+                    .any(|op| matches!(op, Op::UserTurn { .. }))
+            );
+            session.shutdown().await?;
+            assert_eq!(server.await??, vec!["initialize", method]);
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn shutdown_recovery_does_not_mask_other_server_errors_or_reconnect_embedded() -> Result<()> {
+    let (mut app, _events, _ops) = make_test_app_with_channels().await;
+    let shutdown_error = || {
+        color_eyre::Report::new(TypedRequestError::Server {
+            method: "turn/steer".into(),
+            source: JSONRPCErrorError {
+                code: -32600,
+                message: "Server is draining; retry after reconnecting".into(),
+                data: Some(json!({"reason": "serverShuttingDown"})),
+            },
+        })
+    };
+    app.app_server_target = AppServerTarget::Embedded;
+    assert!(!app.recover_transport_error(&shutdown_error()));
+    app.app_server_target = AppServerTarget::Remote {
+        endpoint: crate::resolve_remote_addr("ws://127.0.0.1:9")?,
+    };
+    for (code, message, data) in [
+        (-32600, "invalid request", None),
+        (
+            -32600,
+            "Server is draining; retry after reconnecting",
+            Some(json!({"reason": "otherReason"})),
+        ),
+        (
+            -32603,
+            "internal error",
+            Some(json!({"reason": "serverShuttingDown"})),
+        ),
+    ] {
+        let error = color_eyre::Report::new(TypedRequestError::Server {
+            method: "turn/steer".into(),
+            source: JSONRPCErrorError {
+                code,
+                message: message.into(),
+                data,
+            },
+        });
+        assert!(!app.recover_transport_error(&error));
+        assert!(!app.reconnect.offline);
+    }
+    assert!(app.recover_transport_error(&shutdown_error()));
+    assert!(app.reconnect.offline);
+    Ok(())
+}
+
+#[tokio::test]
 async fn lost_mutation_reply_preserves_work_without_resubmitting() -> Result<()> {
     let (mut app, mut events, mut ops) = make_test_app_with_channels().await;
     let id = ThreadId::new();
