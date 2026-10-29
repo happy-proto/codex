@@ -145,33 +145,12 @@ Cargo 单元。读取全部带时间戳的 timing 报告，排除指向最后一
 其它构建。只输出预定字段，不输出原始命令行、环境变量、缓存地址或未筛选的异常。
 取消时把信号转发给构建进程组，保留原有 `always()` 诊断与 artifact 收集步骤。
 
-### 用小型依赖复现代替完整构建
+### 依赖元数据的确定性
 
-发现相同缓存键对应的重编译产物摘要变化后，先隔离该依赖，避免重复构建 core、TUI
-和最终 binary 才能判断一次假设。[小型复现脚本](../../scripts/fork/probe_ts_rs_cache.py)
-对应 `ts-rs 11.1.0` 及 [上游宏输出确定性修复 #488](https://github.com/Aleph-Alpha/ts-rs/pull/488)：
-
-fixture 显式启用发布构建使用的 `uuid-impl`、`serde-json-impl` 和 `no-serde-warnings`。
-
-- 手动运行 `fork.yml` 并设置 `macos_cache_probe=true`，仅在 `macos-latest` 运行小型
-  fixture，跳过完整构建、其它 Rust 测试和发布；Cargo 下载缓存只读。
-- 原版和隔离副本中的上游修复各编译三次，只清理 `ts-rs` 产物并保留依赖。
-  禁用编译缓存，检查每组依赖字节一致，防止把恢复同一缓存对象误判为可复现构建。
-- 从 workspace lockfile 提供传递依赖版本，记录锁文件摘要，并拒绝 fixture 解析出
-  该锁文件中没有的版本，避免只固定直接依赖而让小型复现跟随 registry 更新。
-- release codegen units、strip 等设置跟随 workspace profile，debug、LTO 和 split
-  debuginfo 对齐发布 CI 的覆盖值，记录实际配置；fixture 不模拟全仓 feature 合并。
-- 保存逐次 `.rmeta`、摘要、命令日志和汇总。原版需实际出现差异，修复版需保持一致，
-  否则本次验证失败或证据不足；不修改 workspace 或全局 registry 中的依赖源码。
-- 这仅验证选定版本及 fixture。工作区升级该依赖后重新核对小型复现的适用范围，
-  不把有限次数的样本当成所有 crate 与所有宏输入都可复现的证明。
-
-WSL 可作为额外的快速验证环境：对齐 CI 的 Rust、Python、锁文件、features、profile、
-并行度和 incremental 设置，使用独立 checkout/fixture 与 target，不改动已有工作区。
-该脚本用 `--target x86_64-unknown-linux-gnu` 验证 Linux；每个平台内部比较重复编译，
-不直接比较跨平台 `.rmeta` 摘要或总耗时。需要观察 sccache 行为时使用 CI 固定版本和
-独立本地缓存，不依赖 GitHub Actions 的运行时凭据。真实 GHA 后端读取、429 和淘汰
-仍在 Actions 验证；macOS 链接、签名与内存压力留给小型 Mac job 或最终集成构建。
+相同缓存键对应的重编译产物摘要变化时，先隔离该依赖；保持工具链、依赖字节、
+features 和 profile 一致，禁用编译缓存，避免将恢复的同一对象误判为可复现构建。
+宏输出顺序造成的元数据变化及维护边界见 [ts-rs 确定性记录](0015-ts-rs-metadata-stability.md)。
+不同平台分别检查重复编译，不直接比较跨平台的元数据摘要。
 
 固定的 sccache 0.18.0 未包含 [上游的 `.rmeta` 流式通知修复](https://github.com/mozilla/sccache/pull/2875)。
 缓存未命中时，延后的通知会削弱 Cargo 流水线，也会让 timing 图中的前端和 codegen
