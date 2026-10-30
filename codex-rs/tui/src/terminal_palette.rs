@@ -1,7 +1,18 @@
 use crate::color::perceptual_distance;
-pub use crate::terminal_capabilities::StdoutColorLevel;
-pub use crate::terminal_capabilities::stdout_color_level;
+pub use codex_terminal_detection::StdoutColorLevel;
 use ratatui::style::Color;
+
+pub fn stdout_color_level() -> StdoutColorLevel {
+    let level = codex_terminal_detection::stdout_color_level();
+    #[cfg(unix)]
+    return terminfo_color::supplement(level);
+    #[cfg(not(unix))]
+    level
+}
+
+#[cfg(unix)]
+#[path = "terminal_palette/terminfo_color.rs"]
+mod terminfo_color;
 
 #[allow(clippy::disallowed_methods)]
 pub fn rgb_color((r, g, b): (u8, u8, u8)) -> Color {
@@ -31,6 +42,14 @@ pub(crate) fn effective_stdout_color_level() -> StdoutColorLevel {
     }
 
     crate::terminal_capabilities::terminal_color_level()
+}
+
+pub(crate) fn terminal_color_level() -> StdoutColorLevel {
+    let level = codex_terminal_detection::terminal_color_level();
+    #[cfg(unix)]
+    return terminfo_color::supplement(level);
+    #[cfg(not(unix))]
+    level
 }
 
 fn best_color_for_color_level(target: (u8, u8, u8), color_level: StdoutColorLevel) -> Color {
@@ -472,3 +491,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "terminal_palette/terminfo_tests.rs"]
+mod terminfo_tests;
