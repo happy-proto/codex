@@ -12,13 +12,21 @@ pub enum StdoutColorLevel {
 }
 
 pub fn stdout_color_level() -> StdoutColorLevel {
-    match supports_color::on_cached(supports_color::Stream::Stdout) {
+    let level = match supports_color::on_cached(supports_color::Stream::Stdout) {
         Some(level) if level.has_16m => StdoutColorLevel::TrueColor,
         Some(level) if level.has_256 => StdoutColorLevel::Ansi256,
         Some(_) => StdoutColorLevel::Ansi16,
         None => StdoutColorLevel::Unknown,
-    }
+    };
+    #[cfg(unix)]
+    return terminfo_color::supplement(level);
+    #[cfg(not(unix))]
+    level
 }
+
+#[cfg(unix)]
+#[path = "terminal_palette/terminfo_color.rs"]
+mod terminfo_color;
 
 #[allow(clippy::disallowed_methods)]
 pub fn rgb_color((r, g, b): (u8, u8, u8)) -> Color {

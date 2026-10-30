@@ -5130,6 +5130,7 @@ dependencies = [
  "supports-color 3.0.2",
  "syntect",
  "tempfile",
+ "terminfo",
  "textwrap 0.16.2",
  "thiserror 2.0.18",
  "tokio",
