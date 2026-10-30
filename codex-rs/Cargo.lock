@@ -5488,6 +5488,7 @@ dependencies = [
  "strum_macros 0.28.0",
  "syntect",
  "tempfile",
+ "terminfo",
  "textwrap 0.16.2",
  "thiserror 2.0.18",
  "tokio",
