@@ -555,3 +555,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, unix))]
+#[path = "terminal_palette/terminfo_tests.rs"]
+mod terminfo_tests;
