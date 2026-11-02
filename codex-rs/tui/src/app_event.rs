@@ -261,11 +261,9 @@ pub(crate) enum TranscriptExportDestination {
     File(PathBuf),
 }
 
-/// Deliver a generated title to its originating automatic rename or editable prompt.
+/// Deliver a generated suggestion to its originating editable rename prompt.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ThreadTitleDestination {
-    /// Name the thread only if the user has not already named it.
-    Automatic,
     /// Prefill only the still-active rename prompt with the matching request ID.
     RenameSuggestion { request_id: Uuid },
 }

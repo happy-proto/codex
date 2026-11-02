@@ -2392,9 +2392,13 @@ fn thread_start_params_with_reviewer(
         history_mode: (!config.ephemeral).then_some(ThreadHistoryMode::Paginated),
         session_start_source,
         thread_source: Some(ThreadSource::User),
-        developer_instructions: with_terminal_visualization_instructions(
-            config, /*control_instructions*/ None,
-        ),
+        developer_instructions:
+            crate::thread_title_instructions::with_first_turn_title_instructions(
+                config,
+                with_terminal_visualization_instructions(
+                    config, /*control_instructions*/ None,
+                ),
+            ),
         ..ThreadStartParams::default()
     }
 }
@@ -4566,7 +4570,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn terminal_visualization_instructions_are_gated_for_all_tui_thread_flows() {
+    async fn terminal_visualization_and_thread_title_instructions_are_gated_for_all_tui_thread_flows()
+     {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let mut config = build_config(&temp_dir).await;
         config.developer_instructions = Some("Developer override.".to_string());
@@ -4593,7 +4598,16 @@ mod tests {
             /*remote_cwd_override*/ None,
         );
 
-        assert_eq!(control_start.developer_instructions, None);
+        assert_eq!(
+            control_start.developer_instructions.as_deref(),
+            Some(
+                format!(
+                    "Developer override.\n\n{}",
+                    crate::thread_title_instructions::FIRST_TURN_TITLE_INSTRUCTIONS,
+                )
+                .as_str()
+            )
+        );
         assert_eq!(control_resume.developer_instructions, None);
         assert_eq!(
             control_fork.developer_instructions.as_deref(),
@@ -4630,7 +4644,13 @@ mod tests {
 
         assert_eq!(
             treatment_start.developer_instructions.as_deref(),
-            Some(expected.as_str())
+            Some(
+                format!(
+                    "{expected}\n\n{}",
+                    crate::thread_title_instructions::FIRST_TURN_TITLE_INSTRUCTIONS,
+                )
+                .as_str()
+            )
         );
         assert_eq!(
             treatment_resume.developer_instructions.as_deref(),

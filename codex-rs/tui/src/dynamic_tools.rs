@@ -140,6 +140,8 @@ struct ArchiveArguments {
 struct TitleArguments {
     thread_id: Option<String>,
     title: String,
+    #[serde(default)]
+    only_if_unnamed: bool,
 }
 
 #[derive(Deserialize)]
@@ -228,8 +230,12 @@ pub(crate) fn tool_specs() -> Vec<DynamicToolSpec> {
         ),
         (
             "set_thread_title",
-            "Rename a Codex task. Omit threadId to rename the calling task.",
-            json!({"threadId": thread_id, "title": {"type": "string", "minLength": 1}}),
+            "Rename a Codex task. Omit threadId to rename the calling task. Set onlyIfUnnamed to true when assigning its initial title; an existing title will be preserved.",
+            json!({
+                "threadId": thread_id,
+                "title": {"type": "string", "minLength": 1},
+                "onlyIfUnnamed": {"type": "boolean"}
+            }),
             vec!["title"],
         ),
         (
@@ -745,6 +751,14 @@ async fn execute_inner(
                 return Err("title must not be empty".to_string());
             }
             let thread_id = arguments.thread_id.unwrap_or(params.thread_id);
+            if arguments.only_if_unnamed {
+                let thread = read_thread(&handle, &thread_id).await?;
+                if thread.name.is_some() {
+                    return Ok(
+                        json!({"threadId": thread_id, "title": thread.name, "updated": false}),
+                    );
+                }
+            }
             let title = arguments.title;
             let _: ThreadSetNameResponse =
                 request(&handle, |request_id| ClientRequest::ThreadSetName {
