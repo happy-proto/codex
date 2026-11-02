@@ -111,6 +111,7 @@ stream_max_retries = 0
                         /*output_schema*/ None,
                         /*cyber_access_program*/ None,
                         /*cloud_selection*/ None,
+                        /*additional_context*/ None,
                     )
                     .await?;
                 tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 30), async {
