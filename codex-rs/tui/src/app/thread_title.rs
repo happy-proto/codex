@@ -1,8 +1,10 @@
 //! Structured-output schema and normalization for generated TUI thread titles.
 //!
-//! Automatic titles use the first message until generation completes and as a fallback;
-//! a saved side chat may also replace the name it inherited at fork. Manual
+//! Automatic titles are persisted only after generation, including for inactive threads;
+//! the originating thread's saved name takes precedence over an automatic result. Manual
 //! renames cancel pending requests; canceled events cannot affect newer requests.
+//! Automatic generation waits for the first completed turn with a substantive agent result,
+//! using that turn's request and final answer rather than an unresolved initial reference.
 
 use super::App;
 use super::thread_events::ThreadBufferedEvent;
@@ -15,16 +17,18 @@ use crate::temporary_structured_request::run_temporary_structured_turn;
 use crate::temporary_structured_request::start_temporary_thread;
 use crate::temporary_structured_request::unsubscribe_temporary_thread;
 use codex_app_server_client::AppServerRequestHandle;
+use codex_app_server_protocol::ClientRequest;
+use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItemPayload;
+use codex_app_server_protocol::ThreadReadParams;
+use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::Turn;
+use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
 use codex_protocol::ThreadId;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::openai_models::ReasoningEffort;
-use pulldown_cmark::Event;
-use pulldown_cmark::Parser;
-use pulldown_cmark::TagEnd;
 use serde::Deserialize;
 use serde_json::Value;
 use serde_json::json;
@@ -43,6 +47,132 @@ struct GeneratedThreadTitle {
 }
 
 impl App {
+    /// Keep the common prompt prefix unchanged; append a separate application message
+    /// immediately before the first user input through the existing context API.
+    pub(super) async fn first_turn_title_context(
+        &self,
+        app_server: &AppServerSession,
+        thread_id: ThreadId,
+        ephemeral: bool,
+    ) -> Option<std::collections::HashMap<String, codex_app_server_protocol::AdditionalContextEntry>>
+    {
+        if ephemeral
+            || app_server.thread_params_mode().settings_owner() == ThreadSettingsOwner::Server
+            || app_server.has_older_history(thread_id)
+            || (self.chat_widget.thread_id() == Some(thread_id)
+                && self.chat_widget.thread_name().is_some())
+        {
+            return None;
+        }
+        let channel = self.thread_event_channels.get(&thread_id)?;
+        let store = channel.store.lock().await;
+        if !store.turns.is_empty()
+            || store.session.as_ref().is_some_and(|session| {
+                session.thread_name.is_some() || session.forked_from_id.is_some()
+            })
+            || store.buffer.iter().any(|event| {
+                matches!(event, ThreadBufferedEvent::Notification(notification)
+                    if matches!(notification.as_ref(),
+                        ServerNotification::TurnStarted(_)
+                        | ServerNotification::ItemStarted(_)
+                        | ServerNotification::ItemCompleted(_)
+                        | ServerNotification::TurnCompleted(_)))
+            })
+        {
+            return None;
+        }
+        Some(crate::thread_title_instructions::first_turn_title_context())
+    }
+
+    /// Summarize the first finished task, including results learned from external references.
+    pub(super) async fn maybe_generate_automatic_thread_title(
+        &mut self,
+        app_server: &AppServerSession,
+        thread_id: ThreadId,
+        turn: &Turn,
+    ) {
+        if app_server.thread_params_mode().settings_owner() == ThreadSettingsOwner::Server
+            || turn.status != TurnStatus::Completed
+            || (self.chat_widget.thread_id() == Some(thread_id)
+                && self.chat_widget.thread_name().is_some())
+        {
+            return;
+        }
+        let Some(channel) = self.thread_event_channels.get(&thread_id) else {
+            return;
+        };
+        let conversation = {
+            let store = channel.store.lock().await;
+            if store
+                .session
+                .as_ref()
+                .is_some_and(|session| session.thread_name.is_some())
+            {
+                return;
+            }
+            let first_turn_id = store
+                .turns
+                .first()
+                .map(|turn| turn.id.as_str())
+                .or_else(|| {
+                    store.buffer.iter().find_map(|event| match event {
+                        ThreadBufferedEvent::Notification(notification) => match notification
+                            .as_ref()
+                        {
+                            ServerNotification::TurnStarted(started) => {
+                                Some(started.turn.id.as_str())
+                            }
+                            ServerNotification::ItemCompleted(item) => Some(item.turn_id.as_str()),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                });
+            if first_turn_id.is_some_and(|id| id != turn.id) {
+                return;
+            }
+
+            let mut seen = std::collections::HashSet::new();
+            let items = turn
+                .item_payloads()
+                .chain(
+                    store
+                        .turns
+                        .iter()
+                        .filter(|stored| stored.id == turn.id)
+                        .flat_map(Turn::item_payloads),
+                )
+                .chain(store.buffer.iter().filter_map(|event| {
+                    let ThreadBufferedEvent::Notification(notification) = event else {
+                        return None;
+                    };
+                    let ServerNotification::ItemCompleted(item) = notification.as_ref() else {
+                        return None;
+                    };
+                    (item.turn_id == turn.id).then_some(&item.item.payload)
+                }))
+                .filter(|item| seen.insert(item.id().to_string()))
+                .collect::<Vec<_>>();
+            if !items.iter().any(|item| {
+                matches!(item, ThreadItemPayload::AgentMessage { text, phase, .. }
+                    if !matches!(phase, Some(MessagePhase::Commentary)) && !text.trim().is_empty())
+            }) {
+                return;
+            }
+            recent_conversation_messages(items)
+        };
+        if let Some(conversation) = conversation {
+            let mut request_view = app_server.request_view();
+            self.generate_thread_title(
+                &mut request_view,
+                thread_id,
+                ThreadTitleDestination::Automatic,
+                recent_conversation_thread_title_prompt(&conversation),
+                /*expected_name*/ None,
+            );
+        }
+    }
+
     pub(super) fn finish_thread_title_generation(
         &mut self,
         thread_id: ThreadId,
@@ -69,7 +199,7 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
         destination: ThreadTitleDestination,
-        source_text: &str,
+        prompt: String,
         expected_name: Option<String>,
     ) {
         let request_handle = app_server.request_handle();
@@ -86,21 +216,7 @@ impl App {
             return;
         };
         let cancellation = entry.insert(CancellationToken::new()).clone();
-        let (prompt, fallback_title) = match destination {
-            ThreadTitleDestination::Automatic => {
-                let fallback = fallback_thread_title(source_text);
-                if !self.side_threads.contains_key(&thread_id)
-                    && let Some(title) = &fallback
-                {
-                    self.chat_widget
-                        .display_thread_name(thread_id, title.clone());
-                }
-                (thread_title_prompt(source_text), fallback)
-            }
-            ThreadTitleDestination::RenameSuggestion { .. } => {
-                (recent_conversation_thread_title_prompt(source_text), None)
-            }
-        };
+        let fallback_title = None;
         let model = if (matches!(&request_handle, AppServerRequestHandle::Cloud(_))
             || self.chat_widget.config_ref().model_provider_id == "openai")
             && self.chat_widget.has_chatgpt_account()
@@ -157,10 +273,33 @@ impl App {
         };
 
         tokio::spawn(async move {
-            let result = start_temporary_thread(&request_handle, options)
-                .await
-                .map(|thread| thread.thread.id)
-                .map_err(|error| error.to_string());
+            let result = async {
+                // A tool may have saved a title before its notification reaches the UI.
+                // Check metadata in the background before starting a fallback model request.
+                if matches!(destination, ThreadTitleDestination::Automatic) {
+                    let response = request_handle
+                        .request_typed::<ThreadReadResponse>(ClientRequest::ThreadRead {
+                            request_id: RequestId::String(format!(
+                                "title-fallback-{}",
+                                uuid::Uuid::new_v4()
+                            )),
+                            params: ThreadReadParams {
+                                thread_id: thread_id.to_string(),
+                                include_turns: false,
+                            },
+                        })
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    if response.thread.name != expected_name {
+                        return Err("thread already has a title".to_string());
+                    }
+                }
+                start_temporary_thread(&request_handle, options)
+                    .await
+                    .map(|thread| thread.thread.id)
+                    .map_err(|error| error.to_string())
+            }
+            .await;
 
             event_sender.send(AppEvent::ThreadTitleStarted {
                 cancellation,
@@ -311,7 +450,7 @@ impl App {
             app_server,
             thread_id,
             ThreadTitleDestination::RenameSuggestion { request_id },
-            &conversation,
+            recent_conversation_thread_title_prompt(&conversation),
             /*expected_name*/ None,
         );
     }
@@ -343,64 +482,6 @@ fn thread_title_instructions() -> String {
   Do not use quotes, markdown, or trailing punctuation. \
   Do not answer the request."
     )
-}
-
-/// Desktop shows a single line from the first message until a generated title is available.
-fn fallback_thread_title(message: &str) -> Option<String> {
-    const MAX_CHARS: usize = 60;
-    const INPUT_CHAR_LIMIT: usize = 2_000;
-    let excerpt: String = message.trim().chars().take(INPUT_CHAR_LIMIT).collect();
-    let mut text = String::new();
-    for event in Parser::new(&excerpt) {
-        match event {
-            Event::Text(value) | Event::Code(value) => text.push_str(&value),
-            Event::SoftBreak
-            | Event::HardBreak
-            | Event::Rule
-            | Event::End(
-                TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::Item | TagEnd::CodeBlock,
-            ) => text.push(' '),
-            _ => {}
-        }
-    }
-    let mut title = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut chars = title.char_indices().skip(MAX_CHARS - 1);
-    if let Some((end, _)) = chars.next()
-        && chars.next().is_some()
-    {
-        title.truncate(title[..end].trim_end().len());
-        title.push('…');
-    }
-    (!title.is_empty()).then_some(title)
-}
-
-/// Build a bounded title request without truncating a Unicode character.
-pub(super) fn thread_title_prompt(user_message: &str) -> String {
-    let instructions = thread_title_instructions();
-    let prefix = format!("{instructions}\n\nUser prompt:\n");
-    let remaining_bytes = THREAD_TITLE_PROMPT_MAX_BYTES.saturating_sub(prefix.len());
-    let user_message = user_message
-        .trim()
-        .char_indices()
-        .take_while(|(index, character)| index + character.len_utf8() <= remaining_bytes)
-        .map(|(_, character)| character)
-        .collect::<String>();
-
-    format!("{prefix}{user_message}")
-}
-
-pub(super) fn user_message_text(content: &[UserInput]) -> Option<String> {
-    let text = content
-        .iter()
-        .filter_map(|item| match item {
-            UserInput::Text { text, .. } => {
-                Some(crate::user_prompt::extract_prompt_request_with_offset(text).0)
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    (!text.trim().is_empty()).then_some(text)
 }
 
 /// Format recent substantive messages chronologically without trusting their markup.
@@ -539,3 +620,30 @@ pub(super) fn parse_thread_title(response: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "thread_title_tests.rs"]
 mod tests;
+
+pub(super) fn user_message_text(content: &[UserInput]) -> Option<String> {
+    let text = content
+        .iter()
+        .filter_map(|item| match item {
+            UserInput::Text { text, .. } => {
+                Some(crate::user_prompt::extract_prompt_request_with_offset(text).0)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!text.trim().is_empty()).then_some(text)
+}
+pub(super) fn thread_title_prompt(user_message: &str) -> String {
+    let instructions = thread_title_instructions();
+    let prefix = format!("{instructions}\n\nUser prompt:\n");
+    let remaining_bytes = THREAD_TITLE_PROMPT_MAX_BYTES.saturating_sub(prefix.len());
+    let user_message = user_message
+        .trim()
+        .char_indices()
+        .take_while(|(index, character)| index + character.len_utf8() <= remaining_bytes)
+        .map(|(_, character)| character)
+        .collect::<String>();
+
+    format!("{prefix}{user_message}")
+}

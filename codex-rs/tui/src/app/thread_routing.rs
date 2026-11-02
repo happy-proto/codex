@@ -6,7 +6,6 @@
 
 use super::session_lifecycle::ThreadAttachPresentation;
 use super::*;
-use crate::app_event::ThreadTitleDestination;
 use crate::chatwidget::ThreadInputStateRestoreMode;
 use codex_app_server_protocol::ThreadStartedNotification;
 use codex_app_server_protocol::TurnInterruptParams;
@@ -2330,6 +2329,7 @@ impl App {
             // thread, so unrelated shutdowns cannot consume this marker.
             self.pending_shutdown_exit_thread_id = None;
         }
+<<<<<<< HEAD
         // Attached side chats generate a title from their first direct submission.
         let attached_side_chat = self
             .active_thread_id
@@ -2348,20 +2348,11 @@ impl App {
         } else {
             None
         };
+=======
+>>>>>>> 3e0cbc5 (feat(tui): name new threads after basic investigation)
         let had_active_modal = self.chat_widget.has_active_modal();
         self.handle_thread_event_now_recovering_file_changes(event)
             .await;
-        if let Some(user_message) = automatic_title_user_message
-            && let Some(thread_id) = self.active_thread_id
-        {
-            self.generate_thread_title(
-                app_server,
-                thread_id,
-                ThreadTitleDestination::Automatic,
-                &user_message,
-                /*expected_name*/ None,
-            );
-        }
         if !had_active_modal
             && self.chat_widget.has_active_modal()
             && self.startup_protected_input_boundary
