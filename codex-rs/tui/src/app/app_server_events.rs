@@ -548,6 +548,14 @@ impl App {
                 {
                     return;
                 }
+                if let ServerNotification::TurnCompleted(completed) = &notification {
+                    self.maybe_generate_automatic_thread_title(
+                        app_server_client,
+                        thread_id,
+                        &completed.turn,
+                    )
+                    .await;
+                }
                 let result = if self.primary_thread_id.is_none() && !background_voice {
                     self.enqueue_primary_thread_notification(notification).await
                 } else {
