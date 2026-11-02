@@ -271,7 +271,7 @@ pub(crate) fn parse_linked_tool_mention(
 }
 
 pub(crate) fn is_mention_name_char(byte: u8) -> bool {
-    matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-')
+    matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-' | b':')
 }
 
 fn starts_plaintext_mention(text: &str, index: usize) -> bool {
@@ -300,7 +300,7 @@ fn ends_plaintext_mention(text_bytes: &[u8], index: usize) -> bool {
 }
 
 fn is_mention_name_char_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')
+    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | ':')
 }
 
 pub(crate) fn is_common_env_var(name: &str) -> bool {
@@ -336,6 +336,27 @@ fn is_tool_path(path: &str) -> bool {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn plugin_skill_mentions_preserve_qualified_names_and_paths_in_history() {
+        let name = "sample:deploy";
+        let path = "/tmp/sample/deploy/SKILL.md";
+        let text = format!("Use ${name} for deployment");
+        let encoded = encode_history_mentions(
+            &text,
+            &[LinkedMention {
+                sigil: '$',
+                mention: name.to_string(),
+                path: path.to_string(),
+            }],
+        );
+        assert_eq!(encoded, format!("Use [${name}]({path}) for deployment"));
+        let decoded = decode_history_mentions_with_at_mentions(&encoded, true);
+        assert_eq!(decoded.text, text);
+        assert_eq!(decoded.mentions.len(), 1);
+        assert_eq!(decoded.mentions[0].mention, name);
+        assert_eq!(decoded.mentions[0].path, path);
+    }
 
     #[test]
     fn parse_linked_mentions_preserves_byte_offsets_and_trims_paths() {
