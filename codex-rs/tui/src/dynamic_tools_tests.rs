@@ -492,6 +492,9 @@ async fn agent_sets_thread_title_before_first_turn_completes() -> color_eyre::Re
                     text: "Read the linked incident report and fix the problem.".to_string(),
                     text_elements: Vec::new(),
                 }],
+                additional_context: Some(
+                    crate::thread_title_instructions::first_turn_title_context(),
+                ),
                 ..TurnStartParams::default()
             },
         }
@@ -556,6 +559,26 @@ async fn agent_sets_thread_title_before_first_turn_completes() -> color_eyre::Re
         )
     );
     assert!(requests[1].body_json().to_string().contains("name-task"));
+    let body = requests[0].body_json();
+    let input = body["input"].as_array().expect("model input messages");
+    let title_index = input
+        .iter()
+        .position(|item| {
+            item["role"] == "developer" && item.to_string().contains("codex_tui_thread_title")
+        })
+        .expect("standalone naming instruction");
+    let user_index = input
+        .iter()
+        .position(|item| {
+            item["role"] == "user" && item.to_string().contains("Read the linked incident report")
+        })
+        .expect("original user input");
+    assert_eq!(title_index + 1, user_index);
+    assert!(input[..title_index].iter().all(|item| {
+        !item
+            .to_string()
+            .contains("set_thread_title to name the current task")
+    }));
     server.shutdown().await?;
     Ok(())
 }

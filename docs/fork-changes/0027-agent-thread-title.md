@@ -5,7 +5,7 @@
 用户的首条输入可能只有文件或消息链接，收到输入就生成标题容易停留在泛化描述。
 等待首轮结束又会让十几分钟的长任务一直没有可辨识的名称。
 
-新建的本地或远程 app-server 会话注入首轮提示词，要求 Agent 理解任务后立即调用
+本地或远程 app-server 会话首次提交用户 turn 时附带提示词，要求 Agent 理解任务后立即调用
 `codex_tui` 的 `set_thread_title`，随后继续工作。需要读取文件、消息或 URL 时，
 先读到足以识别真实任务的内容，再命名，不等待整个任务或回合结束。
 标题使用用户语言，保持简短、具体，并保留工单编号。
@@ -14,20 +14,24 @@
 工具读取当前会话名称，已有名称时返回原名称而不写入；默认的显式改名仍允许覆盖。
 名称持久化及界面更新复用现有 `thread/name/set` 与名称通知。
 
-移除用户消息和首轮完成时的自动标题请求，不再为初次命名创建独立的模型会话。
-提示词只在新建会话时加入，恢复、fork、临时会话和云会话不额外注入。
-`/rename` 的手动标题建议保留上游行为。
+提示词通过现有 `turn/start.additionalContext` 的应用上下文传入，成为紧靠用户输入前的
+独立 developer message，不拼接进用户文本或既有开发者指令，不修改公共指令前缀。
+后续 turn 不重复注入；已包含历史的恢复会话、fork、临时会话和云会话不注入。
+这条消息作为正常历史保留，不在回合结束后删除或重新加入公共指令。
 
-这是一项模型提示约定，不强制工具调用。如果模型没有遵循提示，或改名工具不可用，
-本轮仍可正常执行，但不会再通过首轮结束后的独立总结补出标题。
+提前命名是一项模型提示约定，不强制工具调用。如果首轮成功完成且已有实质答复时仍未命名，
+沿用既有隐藏会话，根据用户请求与最终答复补生成标题。启动兜底请求前在后台读取服务端名称，
+即使改名通知尚未到达界面，也不为已经保存的标题再请求模型；结果保存前仍检查名称。
+失败、中断、没有实质答复及后续回合不触发兜底。`/rename` 的手动标题建议保留上游行为。
 
 ## 实现入口与验证
 
-- [thread_title_instructions.rs](../../codex-rs/tui/src/thread_title_instructions.rs)：首轮提示词及注入范围。
-- [app_server_session.rs](../../codex-rs/tui/src/app_server_session.rs)：新建会话时合并提示词，保留已有开发者指令。
+- [thread_title_instructions.rs](../../codex-rs/tui/src/thread_title_instructions.rs)：首轮提示词及应用上下文。
+- [user_turn_submission.rs](../../codex-rs/tui/src/app/user_turn_submission.rs)：首次用户 turn 提交时附带上下文。
+- [app_server_session.rs](../../codex-rs/tui/src/app_server_session.rs)：通过既有协议转发上下文，公共指令保持不变。
 - [dynamic_tools.rs](../../codex-rs/tui/src/dynamic_tools.rs)：初次命名的已有名称检查。
-- [dynamic_tools_tests.rs](../../codex-rs/tui/src/dynamic_tools_tests.rs)：真实内嵌 app-server 配合模拟模型，验证首轮仍在等待工具结果时名称已持久化，且命名不额外请求模型；覆盖重复命名和手动名称优先。
-- [thread_title_tests.rs](../../codex-rs/tui/src/app/thread_title_tests.rs)：首轮完成不再启动隐藏标题请求，保留手动命名与取消回归。
+- [dynamic_tools_tests.rs](../../codex-rs/tui/src/dynamic_tools_tests.rs)：真实内嵌 app-server 配合模拟模型，验证独立消息紧靠用户输入、首轮等待工具结果时名称已持久化；覆盖重复命名和手动名称优先。
+- [thread_title_tests.rs](../../codex-rs/tui/src/app/thread_title_tests.rs)：首轮注入范围、未命名兜底、已有服务端名称跳过兜底，以及原有手动命名与取消回归。
 
 定向测试通过 [fork CI](../../.github/workflows/fork.yml) 的 `thread_title` 过滤器执行。
 同步上游时关注新建会话的指令合并、任务工具注册和名称通知；不修改 app-server 协议。
