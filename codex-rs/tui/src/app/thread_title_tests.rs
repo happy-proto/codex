@@ -70,6 +70,102 @@ async fn cloud_conversations_skip_tui_generated_titles() {
 }
 
 #[tokio::test]
+async fn first_turn_title_context_is_added_only_before_the_first_turn() -> color_eyre::Result<()> {
+    let mut app = make_test_app().await;
+    let mut server = crate::start_embedded_app_server_for_picker(&app.config).await?;
+    let started = server.start_thread(&app.config).await?;
+    let thread_id = started.session.thread_id;
+    app.enqueue_primary_thread_session(started.session, started.turns)
+        .await?;
+    assert!(
+        app.first_turn_title_context(&server, thread_id, false)
+            .await
+            .is_some()
+    );
+    assert!(
+        app.first_turn_title_context(&server, thread_id, true)
+            .await
+            .is_none()
+    );
+    let turn = Turn {
+        id: "first-turn".to_string(),
+        root_turn_id: None,
+        items: Vec::new(),
+        items_view: Default::default(),
+        status: TurnStatus::InProgress,
+        error: None,
+        started_at: None,
+        completed_at: None,
+        duration_ms: None,
+    };
+    app.enqueue_thread_notification(
+        thread_id,
+        ServerNotification::TurnStarted(codex_app_server_protocol::TurnStartedNotification {
+            thread_id: thread_id.to_string(),
+            turn,
+        }),
+    )
+    .await?;
+    assert!(
+        app.first_turn_title_context(&server, thread_id, false)
+            .await
+            .is_none()
+    );
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn automatic_thread_title_skips_saved_names_before_starting_a_hidden_request()
+-> color_eyre::Result<()> {
+    let mut app = make_test_app().await;
+    let (event_tx, mut event_rx) = unbounded_channel();
+    app.app_event_tx = AppEventSender::new(event_tx);
+    let mut server = crate::start_embedded_app_server_for_picker(&app.config).await?;
+    let started = server.start_thread(&app.config).await?;
+    let thread_id = started.session.thread_id;
+    app.enqueue_primary_thread_session(started.session, started.turns)
+        .await?;
+    server
+        .thread_set_name(thread_id, "Agent already named this task".to_string())
+        .await?;
+    app.generate_thread_title(
+        &server,
+        thread_id,
+        ThreadTitleDestination::Automatic,
+        recent_conversation_thread_title_prompt("Fix the login timeout"),
+    );
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while let Some(event) = event_rx.recv().await {
+            let skipped = if let AppEvent::ThreadTitleStarted { result, .. } = &event {
+                assert!(
+                    result.is_err(),
+                    "an existing title must prevent hidden thread creation"
+                );
+                true
+            } else {
+                false
+            };
+            app.handle_event(&mut tui, &mut server, event).await?;
+            if skipped {
+                return Ok::<_, color_eyre::eyre::Report>(());
+            }
+        }
+        panic!("title event stream ended");
+    })
+    .await??;
+    assert!(app.pending_thread_titles.is_empty());
+    assert!(app.temporary_structured_requests.is_empty());
+    assert_eq!(
+        server.thread_read(thread_id, false).await?.name.as_deref(),
+        Some("Agent already named this task")
+    );
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn automatic_thread_title_respects_origin_metadata_after_switching() -> color_eyre::Result<()>
 {
     for (switch_threads, manual_name) in [

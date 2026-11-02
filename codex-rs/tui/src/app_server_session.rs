@@ -1606,6 +1606,9 @@ impl AppServerSession {
         collaboration_mode: Option<codex_protocol::config_types::CollaborationMode>,
         output_schema: Option<serde_json::Value>,
         cyber_access_program: Option<codex_app_server_protocol::CyberAccessProgram>,
+        additional_context: Option<
+            HashMap<String, codex_app_server_protocol::AdditionalContextEntry>,
+        >,
     ) -> Result<TurnStartResponse> {
         let request_id = self.next_request_id();
         let mut params = TurnStartParams {
@@ -1618,6 +1621,7 @@ impl AppServerSession {
             ..TurnStartParams::default()
         };
         if self.thread_params_mode.settings_owner() == ThreadSettingsOwner::Client {
+            params.additional_context = additional_context;
             let (sandbox_policy, permissions) =
                 turn_permissions_overrides(permissions_override, cwd.as_path())?;
             params.cwd = Some(cwd);
@@ -3435,6 +3439,7 @@ mod tests {
                 }),
                 Some(output_schema.clone()),
                 Some(CyberAccessProgram::DaybreakBlue.into()),
+                Some(crate::thread_title_instructions::first_turn_title_context()),
             ),
             async {
                 let command = commands.recv().await.expect("cloud turn start");
