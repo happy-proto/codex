@@ -33,8 +33,9 @@
 //!
 //! # Mention Menus
 //!
-//! By default, `@` lists plugins, filesystem entries, and skills. Skills are hidden when their
-//! owning plugin is listed. `$` lists individual skills and apps, but not plugins.
+//! By default, `@` lists plugins, filesystem entries, and all skills, including plugin-owned skills.
+//! Selecting a skill inserts its canonical `$name` and binds its path, just like the `$` picker.
+//! `$` lists individual skills and apps, but not plugins.
 //! Disabling `mentions_v2` restores file-only `@` search and adds plugins back to `$`.
 //! Confirmed `$` picker selections inform future ordering within each match tier.
 //!
@@ -4532,7 +4533,7 @@ fn skill_description(skill: &SkillMetadata) -> Option<String> {
 }
 
 fn is_mention_name_char(byte: u8) -> bool {
-    matches!(byte, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'-')
+    crate::mention_codec::is_mention_name_char(byte)
 }
 
 fn ends_plaintext_at_mention(bytes: &[u8], index: usize) -> bool {
@@ -4567,7 +4568,7 @@ fn starts_plaintext_at_mention(text: &str, index: usize) -> bool {
 }
 
 fn is_mention_name_char_char(ch: char) -> bool {
-    ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-')
+    ch.is_ascii() && is_mention_name_char(ch as u8)
 }
 
 fn find_next_mention_token_range(text: &str, token: &str, from: usize) -> Option<Range<usize>> {
@@ -7842,6 +7843,130 @@ mod tests {
                     has_skills: true,
                     mcp_server_names: vec!["sample".to_string()],
                     app_connector_ids: vec![AppConnectorId("calendar".to_string())],
+                }]));
+            },
+        );
+    }
+
+    #[test]
+    fn plugin_skill_completion_accepts_at_and_dollar_with_path_binding() {
+        for prefix in ['@', '$'] {
+            for key in [KeyCode::Enter, KeyCode::Tab] {
+                for skills_first in [true, false] {
+                    let (mut composer, _rx) = new_test_composer();
+                    composer.set_mentions_v2_enabled(/*enabled*/ true);
+                    composer.set_text_content(format!("{prefix}deploy"), Vec::new(), Vec::new());
+                    let skills = vec![SkillMetadata {
+                        plugin_id: Some("sample@test".to_string()),
+                        ..test_skill_metadata("sample:deploy")
+                    }];
+                    let plugins = vec![PluginCapabilitySummary {
+                        has_skills: true,
+                        ..test_plugin_summary("sample", "Sample plugin")
+                    }];
+                    if skills_first {
+                        composer.set_skill_mentions(Some(skills));
+                        composer.set_plugin_mentions(Some(plugins));
+                    } else {
+                        composer.set_plugin_mentions(Some(plugins));
+                        composer.set_skill_mentions(Some(skills));
+                    }
+
+                    match &composer.popups.active {
+                        ActivePopup::MentionV2(popup) if prefix == '@' => assert_eq!(
+                            popup.selected(),
+                            Some(MentionV2Selection::Tool {
+                                insert_text: "$sample:deploy".to_string(),
+                                path: Some(test_skill_binding("sample:deploy").path),
+                            })
+                        ),
+                        ActivePopup::Skill(popup) if prefix == '$' => assert_eq!(
+                            popup.selected_mention().unwrap().insert_text,
+                            "$sample:deploy"
+                        ),
+                        _ => panic!("expected skill completion for {prefix}deploy"),
+                    }
+
+                    composer.handle_key_event(KeyEvent::new(key, KeyModifiers::NONE));
+                    assert_eq!(composer.current_text(), "$sample:deploy ");
+                    assert_eq!(
+                        composer.mention_bindings(),
+                        vec![test_skill_binding("sample:deploy")]
+                    );
+
+                    let (result, _) = composer
+                        .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+                    assert!(matches!(result, InputResult::Submitted { .. }));
+                    assert_eq!(
+                        composer.take_recent_submission_mention_bindings(),
+                        vec![test_skill_binding("sample:deploy")]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn plugin_skill_completion_keeps_plugin_selection_available() {
+        let (mut composer, _rx) = new_test_composer();
+        composer.set_mentions_v2_enabled(/*enabled*/ true);
+        composer.set_skill_mentions(Some(vec![SkillMetadata {
+            plugin_id: Some("sample@test".to_string()),
+            ..test_skill_metadata("sample:deploy")
+        }]));
+        composer.set_plugin_mentions(Some(vec![PluginCapabilitySummary {
+            has_skills: true,
+            ..test_plugin_summary("sample", "Sample plugin")
+        }]));
+        composer.set_text_content("@sample".to_string(), Vec::new(), Vec::new());
+
+        composer.handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(composer.current_text(), "@sample ");
+        assert_eq!(
+            composer.mention_bindings(),
+            vec![test_plugin_binding("sample")]
+        );
+    }
+
+    #[test]
+    fn default_unified_mention_popup_snapshot() {
+        snapshot_composer_state(
+            "default_unified_mention_popup",
+            /*enhanced_keys_supported*/ false,
+            |composer| {
+                let features = codex_features::Features::with_defaults();
+                composer
+                    .set_mentions_v2_enabled(features.enabled(codex_features::Feature::MentionsV2));
+                composer.set_skill_mentions(Some(vec![
+                    SkillMetadata {
+                        name: "sample-tools:search".to_string(),
+                        plugin_id: Some("sample@test".to_string()),
+                        ..test_skill_metadata("sample-search")
+                    },
+                    SkillMetadata {
+                        name: "sample:summarize".to_string(),
+                        plugin_id: Some("sample@test".to_string()),
+                        ..test_skill_metadata("sample-summarize")
+                    },
+                    SkillMetadata {
+                        name: "sample:notes".to_string(),
+                        ..test_skill_metadata("sample-notes")
+                    },
+                    SkillMetadata {
+                        name: "sample:other".to_string(),
+                        plugin_id: Some("sample@other-marketplace".to_string()),
+                        ..test_skill_metadata("sample-other")
+                    },
+                ]));
+                composer.set_text_content("@sa".to_string(), Vec::new(), Vec::new());
+                composer.set_plugin_mentions(Some(vec![PluginCapabilitySummary {
+                    config_name: "sample@test".to_string(),
+                    display_name: "Sample Plugin".to_string(),
+                    plugin_namespace: Some("sample".to_string()),
+                    description: Some("Plugin with skills and an MCP server".to_string()),
+                    has_skills: true,
+                    mcp_server_names: vec!["sample".to_string()],
+                    app_connector_ids: Vec::new(),
                 }]));
             },
         );
