@@ -3,6 +3,8 @@
 //! Automatic titles are persisted only after generation, including for inactive threads;
 //! the originating thread's saved name takes precedence over an automatic result. Manual
 //! renames cancel pending requests; canceled events cannot affect newer requests.
+//! Automatic generation waits for the first completed turn with a substantive agent result,
+//! using that turn's request and final answer rather than an unresolved initial reference.
 
 use super::App;
 use super::thread_events::ThreadBufferedEvent;
@@ -18,6 +20,7 @@ use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadSource;
 use codex_app_server_protocol::Turn;
+use codex_app_server_protocol::TurnStatus;
 use codex_app_server_protocol::UserInput;
 use codex_protocol::ThreadId;
 use codex_protocol::models::MessagePhase;
@@ -40,6 +43,92 @@ struct GeneratedThreadTitle {
 }
 
 impl App {
+    /// Summarize the first finished task, including results learned from external references.
+    pub(super) async fn maybe_generate_automatic_thread_title(
+        &mut self,
+        app_server: &AppServerSession,
+        thread_id: ThreadId,
+        turn: &Turn,
+    ) {
+        if turn.status != TurnStatus::Completed
+            || (self.chat_widget.thread_id() == Some(thread_id)
+                && self.chat_widget.thread_name().is_some())
+        {
+            return;
+        }
+        let Some(channel) = self.thread_event_channels.get(&thread_id) else {
+            return;
+        };
+        let conversation = {
+            let store = channel.store.lock().await;
+            if store
+                .session
+                .as_ref()
+                .is_some_and(|session| session.thread_name.is_some())
+            {
+                return;
+            }
+            let first_turn_id = store
+                .turns
+                .first()
+                .map(|turn| turn.id.as_str())
+                .or_else(|| {
+                    store.buffer.iter().find_map(|event| match event {
+                        ThreadBufferedEvent::Notification(notification) => match notification
+                            .as_ref()
+                        {
+                            ServerNotification::TurnStarted(started) => {
+                                Some(started.turn.id.as_str())
+                            }
+                            ServerNotification::ItemCompleted(item) => Some(item.turn_id.as_str()),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                });
+            if first_turn_id.is_some_and(|id| id != turn.id) {
+                return;
+            }
+
+            let mut seen = std::collections::HashSet::new();
+            let items = turn
+                .item_payloads()
+                .chain(
+                    store
+                        .turns
+                        .iter()
+                        .filter(|stored| stored.id == turn.id)
+                        .flat_map(Turn::item_payloads),
+                )
+                .chain(store.buffer.iter().filter_map(|event| {
+                    let ThreadBufferedEvent::Notification(notification) = event else {
+                        return None;
+                    };
+                    let ServerNotification::ItemCompleted(item) = notification.as_ref() else {
+                        return None;
+                    };
+                    (item.turn_id == turn.id).then_some(&item.item.payload)
+                }))
+                .filter(|item| seen.insert(item.id().to_string()))
+                .collect::<Vec<_>>();
+            if !items.iter().any(|item| {
+                matches!(item, ThreadItemPayload::AgentMessage { text, phase, .. }
+                    if !matches!(phase, Some(MessagePhase::Commentary)) && !text.trim().is_empty())
+            }) {
+                return;
+            }
+            recent_conversation_messages(items)
+        };
+        if let Some(conversation) = conversation {
+            self.generate_thread_title(
+                app_server,
+                thread_id,
+                ThreadTitleDestination::Automatic,
+                recent_conversation_thread_title_prompt(&conversation),
+            );
+        }
+    }
+
     pub(super) fn finish_thread_title_generation(
         &mut self,
         thread_id: ThreadId,
@@ -282,21 +371,6 @@ fn thread_title_instructions() -> String {
   Do not use quotes, markdown, or trailing punctuation. \
   Do not answer the request."
     )
-}
-
-/// Build a bounded title request without truncating a Unicode character.
-pub(super) fn thread_title_prompt(user_message: &str) -> String {
-    let instructions = thread_title_instructions();
-    let prefix = format!("{instructions}\n\nUser prompt:\n");
-    let remaining_bytes = THREAD_TITLE_PROMPT_MAX_BYTES.saturating_sub(prefix.len());
-    let user_message = user_message
-        .trim()
-        .char_indices()
-        .take_while(|(index, character)| index + character.len_utf8() <= remaining_bytes)
-        .map(|(_, character)| character)
-        .collect::<String>();
-
-    format!("{prefix}{user_message}")
 }
 
 /// Format recent substantive messages chronologically without trusting their markup.
