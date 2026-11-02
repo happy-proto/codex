@@ -29,6 +29,7 @@ use super::UnsupportedLegacyPermissionProfile;
 const JSONRPC_SERVER_OVERLOADED: i64 = -32001;
 
 pub(crate) struct TurnStartSettings<'a> {
+    pub(crate) additional_context: Option<std::collections::HashMap<String, codex_app_server_protocol::AdditionalContextEntry>>,
     pub(crate) approval_policy: Option<AskForApproval>,
     pub(crate) approvals_reviewer: Option<ApprovalsReviewer>,
     pub(crate) permissions: TurnPermissionsOverride,
@@ -209,6 +210,7 @@ impl AppServerSession {
             collaboration_mode.clone(),
             final_output_json_schema.clone(),
             program.map(Into::into),
+            settings.additional_context,
         )
         .await
         .map(|response| UserMessageAdmission::StartResponse(response.turn.id))
