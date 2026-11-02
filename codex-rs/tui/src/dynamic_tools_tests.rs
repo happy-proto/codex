@@ -441,6 +441,198 @@ fn file_backed_image_generation_is_retained_as_a_reference() -> color_eyre::Resu
 }
 
 #[tokio::test]
+async fn agent_sets_thread_title_before_first_turn_completes() -> color_eyre::Result<()> {
+    let mock_server = responses::start_mock_server().await;
+    let title = "Fix expired report token";
+    let arguments = json!({"title": title, "onlyIfUnnamed": true});
+    let mock = responses::mount_sse_sequence(
+        &mock_server,
+        vec![
+            responses::sse(vec![
+                responses::ev_response_created("title-tool"),
+                responses::ev_function_call_with_namespace(
+                    "name-task",
+                    NAMESPACE,
+                    "set_thread_title",
+                    &arguments.to_string(),
+                ),
+                responses::ev_completed("title-tool"),
+            ]),
+            responses::sse(vec![
+                responses::ev_response_created("task-result"),
+                responses::ev_assistant_message(
+                    "result",
+                    "The report's expired token has been fixed.",
+                ),
+                responses::ev_completed("task-result"),
+            ]),
+        ],
+    )
+    .await;
+    let home = tempfile::tempdir()?;
+    std::fs::write(
+        home.path().join("config.toml"),
+        format!(
+            "model = \"gpt-5.5\"\nmodel_provider = \"title-tool-test\"\n\n[model_providers.title-tool-test]\nname = \"Title tool test\"\nbase_url = \"{}/v1\"\nwire_api = \"responses\"\nrequest_max_retries = 0\nstream_max_retries = 0\n",
+            mock_server.uri(),
+        ),
+    )?;
+    let config = ConfigBuilder::default()
+        .codex_home(home.path().to_path_buf())
+        .build()
+        .await?;
+    let mut server = crate::start_embedded_app_server_for_picker(&config).await?;
+    let started = server.start_thread(&config).await?;
+    let thread_id = started.session.thread_id.to_string();
+    let _: TurnStartResponse = request(&server.request_handle(), |request_id| {
+        ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: thread_id.clone(),
+                input: vec![UserInput::Text {
+                    text: "Read the linked incident report and fix the problem.".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                additional_context: Some(
+                    crate::thread_title_instructions::first_turn_title_context(),
+                ),
+                ..TurnStartParams::default()
+            },
+        }
+    })
+    .await
+    .map_err(color_eyre::eyre::Report::msg)?;
+    let mut named = false;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while let Some(event) = server.next_event().await {
+            match event.event {
+                codex_app_server_client::AppServerEvent::ServerRequest(request) => {
+                    if let codex_app_server_protocol::ServerRequest::DynamicToolCall {
+                        request_id,
+                        params,
+                    } = *request
+                    {
+                        assert_eq!(params.tool, "set_thread_title");
+                        assert_eq!(params.thread_id, thread_id);
+                        assert_eq!(params.arguments, arguments);
+                        let result =
+                            call_tool(&server, &thread_id, &params.tool, params.arguments).await;
+                        assert!(result.success, "{result:?}");
+                        // The model is still waiting for its tool result, so the turn cannot
+                        // have ended. Persisted naming must already be observable here.
+                        let current = read_thread(&server.request_handle(), &thread_id)
+                            .await
+                            .map_err(color_eyre::eyre::Report::msg)?;
+                        assert_eq!(current.name.as_deref(), Some(title));
+                        named = true;
+                        server
+                            .resolve_server_request(request_id, serde_json::to_value(result)?)
+                            .await?;
+                    }
+                }
+                codex_app_server_client::AppServerEvent::ServerNotification(notification) => {
+                    if let codex_app_server_protocol::ServerNotification::TurnCompleted(completed) =
+                        *notification
+                    {
+                        assert!(named, "the first turn ended before setting its title");
+                        assert_eq!(completed.thread_id, thread_id);
+                        return Ok::<_, color_eyre::eyre::Report>(());
+                    }
+                }
+                _ => panic!("lost app-server events during initial naming"),
+            }
+        }
+        panic!("app-server disconnected before completing the first turn");
+    })
+    .await??;
+    let requests = mock.requests();
+    assert_eq!(
+        requests.len(),
+        2,
+        "naming must not start a separate model request"
+    );
+    assert!(
+        requests[0].body_json().to_string().contains(
+            crate::thread_title_instructions::FIRST_TURN_TITLE_INSTRUCTIONS
+                .lines()
+                .next()
+                .unwrap()
+        )
+    );
+    assert!(requests[1].body_json().to_string().contains("name-task"));
+    let body = requests[0].body_json();
+    let input = body["input"].as_array().expect("model input messages");
+    let title_index = input
+        .iter()
+        .position(|item| {
+            item["role"] == "developer" && item.to_string().contains("codex_tui_thread_title")
+        })
+        .expect("standalone naming instruction");
+    let user_index = input
+        .iter()
+        .position(|item| {
+            item["role"] == "user" && item.to_string().contains("Read the linked incident report")
+        })
+        .expect("original user input");
+    assert_eq!(title_index + 1, user_index);
+    assert!(input[..title_index].iter().all(|item| {
+        !item
+            .to_string()
+            .contains("set_thread_title to name the current task")
+    }));
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn initial_thread_title_preserves_existing_and_manual_names() -> color_eyre::Result<()> {
+    let (_home, server, source, _target) = test_server(json!({})).await?;
+    for title in ["Read the deployment report", "Overwrite the initial title"] {
+        let response = response_json(
+            call_tool(
+                &server,
+                &source,
+                "set_thread_title",
+                json!({"title": title, "onlyIfUnnamed": true}),
+            )
+            .await,
+        );
+        assert_eq!(response["title"], "Read the deployment report");
+    }
+    let response = response_json(
+        call_tool(
+            &server,
+            &source,
+            "set_thread_title",
+            json!({"title": "User-selected title"}),
+        )
+        .await,
+    );
+    assert_eq!(response["title"], "User-selected title");
+    let response = response_json(
+        call_tool(
+            &server,
+            &source,
+            "set_thread_title",
+            json!({"title": "Replace the manual title", "onlyIfUnnamed": true}),
+        )
+        .await,
+    );
+    assert_eq!(response["title"], "User-selected title");
+    assert_eq!(response["updated"], false);
+    assert_eq!(
+        read_thread(&server.request_handle(), &source)
+            .await
+            .map_err(color_eyre::eyre::Report::msg)?
+            .name
+            .as_deref(),
+        Some("User-selected title")
+    );
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn task_management_tools_use_existing_app_server_operations() -> color_eyre::Result<()> {
     let (codex_home, server, source, target) = test_server(json!({})).await?;
 
