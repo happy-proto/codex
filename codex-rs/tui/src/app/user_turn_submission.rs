@@ -46,6 +46,9 @@ pub(super) async fn try_submit_user_turn(
     };
     let original_active = app.active_turn_id_for_thread(thread_id).await;
     let mut active = original_active.clone();
+    let additional_context = app
+        .first_turn_title_context(app_server, thread_id, app.chat_widget.config_ref().ephemeral)
+        .await;
     let preflight = |model: &str| {
         let enabled = app.chat_widget.daybreak_enabled
             && !app.chat_widget.side_conversation_active()
@@ -57,7 +60,11 @@ pub(super) async fn try_submit_user_turn(
             enabled,
         )
     };
-    let start_settings = || turn_start_settings(app, thread_id, op);
+    let start_settings = || {
+        let mut settings = turn_start_settings(app, thread_id, op);
+        settings.additional_context = additional_context;
+        settings
+    };
     let result = app_server
         .submit_user_message(
             thread_id,
@@ -203,6 +210,7 @@ fn turn_start_settings<'a>(
         explicit_profile.and_then(RuntimePermissionProfileOverride::turn_permission_profile),
     );
     TurnStartSettings {
+        additional_context: None,
         approval_policy: turn_approval_policy,
         approvals_reviewer: turn_approvals_reviewer,
         permissions: permissions_override,
