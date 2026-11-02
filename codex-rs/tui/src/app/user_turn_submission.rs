@@ -150,6 +150,9 @@ pub(super) async fn try_submit_user_turn(
         }),
         explicit_profile.and_then(RuntimePermissionProfileOverride::turn_permission_profile),
     );
+    let additional_context = app
+        .first_turn_title_context(app_server, thread_id, config.ephemeral)
+        .await;
     let response = app_server
         .turn_start(
             thread_id,
@@ -168,6 +171,7 @@ pub(super) async fn try_submit_user_turn(
             collaboration_mode.clone(),
             final_output_json_schema.clone(),
             cyber_access_program.map(Into::into),
+            additional_context,
         )
         .await?;
     if app.active_thread_id == Some(thread_id) && app.chat_widget.thread_id() == Some(thread_id) {
