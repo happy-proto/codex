@@ -31,6 +31,7 @@
 | 0023 | [WebSocket 消息过大错误](0023-websocket-message-size.md) |
 | 0024 | [daemon 关停拒绝后的 TUI 重连](0024-daemon-shutdown-recovery.md) |
 | 0025 | [terminfo 颜色能力回退](0025-terminfo-color-detection.md) |
+| 0026 | [通过 @ 选择插件提供的 skill](0026-at-plugin-skills.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 同步上游使用独立的 [上游同步 skill](../../.agents/skills/codex-upstream-sync/SKILL.md)。
