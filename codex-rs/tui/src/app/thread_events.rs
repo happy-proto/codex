@@ -67,6 +67,7 @@ pub(super) enum ThreadEventAttachment {
 
 #[derive(Debug)]
 pub(super) struct ThreadEventStore {
+    workspace_status: crate::bottom_pane::workspace_status::WorkspaceStatus,
     pub(super) session: Option<ThreadSessionState>,
     pub(super) turns: Vec<Turn>,
     pub(super) buffer: VecDeque<ThreadBufferedEvent>,
@@ -118,6 +119,7 @@ impl ThreadEventStore {
 
     pub(super) fn new(capacity: usize) -> Self {
         Self {
+            workspace_status: Default::default(),
             session: None,
             turns: Vec::new(),
             buffer: VecDeque::new(),
@@ -160,6 +162,9 @@ impl ThreadEventStore {
     }
 
     pub(super) fn set_turns(&mut self, turns: Vec<Turn>) {
+        if let Some(turn) = turns.last() {
+            self.update_workspace_turn(turn);
+        }
         self.evicted_active_turn = None;
         if self.active_reasoning_item.as_ref().is_some_and(|started| {
             turns.iter().any(|turn| {
@@ -205,6 +210,24 @@ impl ThreadEventStore {
     }
 
     fn push_notification_inner(&mut self, notification: Cow<'_, ServerNotification>) {
+        match notification.as_ref() {
+            ServerNotification::TurnStarted(n) => {
+                self.update_workspace_turn(&n.turn);
+            }
+            ServerNotification::TurnCompleted(n) => {
+                if self
+                    .active_turn_id
+                    .as_deref()
+                    .is_none_or(|id| id == n.turn.id)
+                {
+                    self.update_workspace_turn(&n.turn);
+                }
+            }
+            ServerNotification::ThreadClosed(_) => self
+                .workspace_status
+                .set_phase(crate::bottom_pane::workspace_status::WorkspacePhase::Closed),
+            _ => {}
+        }
         let user_item = match notification.as_ref() {
             ServerNotification::ItemStarted(n) => Some((&n.turn_id, &n.item.payload)),
             ServerNotification::ItemCompleted(n) => Some((&n.turn_id, &n.item.payload)),
@@ -554,6 +577,48 @@ impl ThreadEventStore {
         } else {
             None
         }
+    }
+
+    fn update_workspace_turn(&mut self, turn: &Turn) {
+        use crate::bottom_pane::workspace_status::WorkspacePhase;
+        let elapsed = turn
+            .duration_ms
+            .map(|ms| Duration::from_millis(ms.max(0) as u64))
+            .or_else(|| {
+                turn.started_at.map(|at| {
+                    let end = turn
+                        .completed_at
+                        .unwrap_or_else(|| chrono::Utc::now().timestamp());
+                    Duration::from_secs(end.saturating_sub(at).max(0) as u64)
+                })
+            })
+            .unwrap_or_default();
+        self.workspace_status.start(&turn.id, elapsed);
+        self.workspace_status.set_phase(match turn.status {
+            TurnStatus::InProgress => WorkspacePhase::Working,
+            TurnStatus::Completed => WorkspacePhase::Completed,
+            TurnStatus::Failed => WorkspacePhase::Failed,
+            TurnStatus::Interrupted => WorkspacePhase::Interrupted,
+        });
+    }
+
+    pub(super) fn workspace_status(
+        &mut self,
+    ) -> crate::bottom_pane::workspace_status::WorkspaceStatus {
+        use crate::bottom_pane::workspace_status::WorkspacePhase;
+        match self.side_parent_pending_status() {
+            Some(SideParentStatus::NeedsInput) => {
+                self.workspace_status.set_phase(WorkspacePhase::NeedsInput)
+            }
+            Some(SideParentStatus::NeedsApproval) => self
+                .workspace_status
+                .set_phase(WorkspacePhase::NeedsApproval),
+            None if self.active_turn_id.is_some() => {
+                self.workspace_status.set_phase(WorkspacePhase::Working)
+            }
+            _ => {}
+        }
+        self.workspace_status.clone()
     }
 
     pub(super) fn active_turn_id(&self) -> Option<&str> {

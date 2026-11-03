@@ -3,6 +3,9 @@
 use super::App;
 use super::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
 use super::side_companion::SideCompanion;
+use crate::bottom_pane::CommandPopupPlacement;
+use crate::bottom_pane::ComposerGap;
+use crate::bottom_pane::ComposerRenderOptions;
 use crate::bottom_pane::inset_footer_hint_area;
 use crate::custom_terminal::Frame;
 use crate::legacy_core::config::edit::ConfigEdit;
@@ -66,6 +69,7 @@ pub(super) struct SidePaneLayout {
     pub(super) focused: Rect,
     pub(super) passive_thread: ThreadId,
     pub(super) passive: Rect,
+    pub(super) footer: Rect,
     divider: u16,
 }
 
@@ -96,6 +100,27 @@ pub(super) fn layout(app: &App, tui: &crate::tui::Tui, area: Rect) -> Option<Sid
     if !app.side_companions.contains_key(&passive_thread) {
         return None;
     }
+    let width = area.width.saturating_sub(2);
+    let hint = app.prompt_navigation_footer(width).or_else(|| {
+        app.transcript_view.footer_with_navigation(
+            width,
+            crate::motion::MotionMode::from_animations_enabled(app.local_settings.tui.animations),
+            "esc latest",
+        )
+    });
+    let hint_height = hint
+        .as_ref()
+        .map_or(1, |footer| footer.text.height().max(1) as u16);
+    let footer_height = area.height.min(1u16.saturating_add(hint_height));
+    let footer = Rect {
+        y: area.bottom() - footer_height,
+        height: footer_height,
+        ..area
+    };
+    let area = Rect {
+        height: area.height - footer_height,
+        ..area
+    };
     let percent = app
         .divider_drag
         .filter(|drag| {
@@ -120,6 +145,7 @@ pub(super) fn layout(app: &App, tui: &crate::tui::Tui, area: Rect) -> Option<Sid
         focused,
         passive,
         passive_thread,
+        footer,
         divider: parent.right(),
     })
 }
@@ -258,40 +284,10 @@ impl SidePaneLayout {
 
         let composer = Rect {
             y: area.y + above,
-            height: composer_height,
+            height: bottom_height,
             ..area
         };
-        frame
-            .buffer
-            .set_style(composer, crate::style::quiet_workspace_style());
-        let inset = u16::from(composer_height > 1);
-        let text_area = Rect::new(
-            composer.x.saturating_add(/*rhs*/ 2),
-            composer.y + inset,
-            composer.width.saturating_sub(/*rhs*/ 2),
-            composer_height - inset,
-        );
-        if !text_area.is_empty() {
-            frame.buffer[(composer.x, text_area.y)].set_symbol("›");
-            StatefulWidgetRef::render_ref(
-                &companion.display.draft.as_ref(),
-                text_area,
-                frame.buffer,
-                &mut Default::default(),
-            );
-        }
-        if let Some(status) = &companion.display.status {
-            let footer = inset_footer_hint_area(Rect {
-                y: composer.bottom(),
-                height: status_height,
-                ..area
-            });
-            truncate_line_with_ellipsis_if_overflow(
-                status.clone().dim().into(),
-                usize::from(footer.width),
-            )
-            .render(footer, frame.buffer);
-        }
+        bottom.render(composer, frame.buffer);
 
         // Draw after both panes registered their images. Clearing a guide to the left
         // of retained pixels can erase the rest of that terminal row.
