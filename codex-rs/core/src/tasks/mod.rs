@@ -326,7 +326,7 @@ impl Session {
         let token_usage_at_turn_start = self.total_token_usage().await.unwrap_or_default();
 
         let generation_speed_reporter = if task_kind == TaskKind::Regular
-            && let Some(state_db) = self.state_db()
+            && let Some(state_db) = self.generation_speed_db().await
         {
             Some(
                 turn_context
@@ -335,6 +335,7 @@ impl Session {
                         state_db,
                         self.thread_id,
                         turn_context.sub_id.clone(),
+                        turn_context.config.ephemeral,
                     )
                     .await,
             )
@@ -977,7 +978,7 @@ impl Session {
         if !matches!(
             &turn_context.session_source,
             codex_protocol::protocol::SessionSource::SubAgent(_)
-        ) && let Some(state_db) = self.state_db()
+        ) && let Some(state_db) = self.generation_speed_db().await
         {
             let totals =
                 matches!(&event, EventMsg::TurnComplete(completed) if completed.error.is_none())
@@ -1001,6 +1002,7 @@ impl Session {
                             "generation speed persistence started"
                         );
                         state_db
+                            .generation_speed_writer(turn_context.config.ephemeral)
                             .save_generation_speed(
                                 self.thread_id,
                                 &turn_context.sub_id,
@@ -1027,6 +1029,7 @@ impl Session {
                             "generation speed persistence started"
                         );
                         state_db
+                            .generation_speed_writer(turn_context.config.ephemeral)
                             .clear_generation_speed(self.thread_id, &turn_context.sub_id)
                             .await
                     }
