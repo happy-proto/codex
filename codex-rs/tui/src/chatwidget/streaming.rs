@@ -233,6 +233,13 @@ impl ChatWidget {
         pane.update_workspace_activity_from(&self.bottom_pane);
     }
 
+    pub(crate) fn set_workspace_completion(
+        &mut self,
+        completion: Option<&history_cell::FinalMessageSeparator>,
+    ) -> bool {
+        self.bottom_pane.set_workspace_completion(completion)
+    }
+
     pub(crate) fn has_side_stream(&self) -> bool {
         self.stream_controller.is_some() || self.plan_stream_controller.is_some()
     }
