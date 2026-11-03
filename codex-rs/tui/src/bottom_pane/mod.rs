@@ -2839,6 +2839,61 @@ mod tests {
     }
 
     #[test]
+    fn workspace_parked_composer_hides_stale_interactive_previews() {
+        let (tx, _rx) = unbounded_channel();
+        let mut pane = test_pane_with_disable_paste_burst(AppEventSender::new(tx), true);
+        pane.insert_str("retained draft\nsecond draft line");
+        pane.set_pending_input_preview(
+            vec!["stale queued preview".into()],
+            vec!["stale steer preview".into()],
+            vec!["stale rejected preview".into()],
+        );
+        pane.set_pending_thread_approvals(vec!["stale approval preview".into()]);
+        let options = ComposerRenderOptions {
+            shared_footer: Some(Rect::default()),
+            separate_status_line: true,
+            ..Default::default()
+        };
+        let area = Rect::new(0, 0, 80, 36);
+        let focused = render_snapshot(&pane.as_renderable_with_options(options), area);
+        for marker in [
+            "stale queued",
+            "stale steer",
+            "stale rejected",
+            "stale approval",
+        ] {
+            assert!(focused.contains(marker), "{focused}");
+        }
+        let mut status = workspace_status::WorkspaceStatus::default();
+        status.start("turn", Duration::ZERO);
+        for phase in [
+            workspace_status::WorkspacePhase::Working,
+            workspace_status::WorkspacePhase::Completed,
+        ] {
+            status.set_phase(phase);
+            pane.set_workspace_status(status.clone());
+            let parked = render_snapshot(
+                &pane.parked_renderable(ComposerRenderOptions {
+                    passive: true,
+                    ..options
+                }),
+                area,
+            );
+            assert!(!parked.contains("stale"), "{parked}");
+            assert!(
+                parked.contains("retained draft") && parked.contains("second draft line"),
+                "{parked}"
+            );
+            for draft in ["retained draft", "second draft line"] {
+                assert_eq!(
+                    focused.lines().position(|line| line.contains(draft)),
+                    parked.lines().position(|line| line.contains(draft))
+                );
+            }
+        }
+    }
+
+    #[test]
     fn workspace_focus_and_completion_preserve_multiline_composer_geometry() {
         let (tx, _rx) = unbounded_channel();
         let mut pane = test_pane_with_disable_paste_burst(AppEventSender::new(tx), true);
