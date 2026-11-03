@@ -5172,7 +5172,6 @@
             "progress": true,
             "shimmer": true,
             "starfield": true,
-            "starfield_all_models": false,
             "title": true,
             "welcome": true
           },
@@ -6029,11 +6028,6 @@
         "starfield": {
           "default": true,
           "description": "Animate the composer starfield.",
-          "type": "boolean"
-        },
-        "starfield_all_models": {
-          "default": false,
-          "description": "Allow composer stars for every model, rather than only Astra.",
           "type": "boolean"
         },
         "title": {
