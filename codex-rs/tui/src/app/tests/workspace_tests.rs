@@ -102,8 +102,9 @@ async fn workspace_clock_survives_replay_and_pending_input_resolution() {
     store.push_notification(started.clone());
     let before = store.workspace_status();
     assert!(before.elapsed() >= Duration::from_secs(75));
+    let elapsed_before_replay = before.elapsed();
     store.push_notification(started);
-    assert!(store.workspace_status().elapsed() >= before.elapsed());
+    assert!(store.workspace_status().elapsed() >= elapsed_before_replay);
     store.push_request(request_user_input_request(id, "turn", "question"));
     assert_eq!(store.workspace_status().phase, WorkspacePhase::NeedsInput);
     store.push_notification(ServerNotification::ServerRequestResolved(
