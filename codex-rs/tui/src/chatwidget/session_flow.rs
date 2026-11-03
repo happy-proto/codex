@@ -55,7 +55,7 @@ impl ChatWidget {
 
     pub(crate) fn sparkle_thread_for_picker_action(&self, model: &str) -> Option<ThreadId> {
         self.thread_id()
-            .filter(|_| BottomPane::is_sparkle_model(model, &self.local_settings.tui))
+            .filter(|_| BottomPane::is_sparkle_model(model))
     }
 
     pub(crate) fn on_sparkle_model_selected_from_picker(&mut self, model: &str) {

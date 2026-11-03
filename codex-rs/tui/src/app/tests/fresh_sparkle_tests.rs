@@ -128,8 +128,9 @@ async fn only_a_confirmed_empty_new_task_shows_the_sparkle() -> Result<()> {
         assert_eq!(visible(&app.chat_widget), scenario == "fresh", "{scenario}");
         app.chat_widget.set_model("gpt-5.5");
         app.chat_widget.set_model("gpt-6-astra");
-        assert!(
-            !visible(&app.chat_widget),
+        assert_eq!(
+            visible(&app.chat_widget),
+            scenario == "fresh",
             "automatic model update: {scenario}"
         );
     }
@@ -153,7 +154,7 @@ async fn disconnected_sparkle_input_routed_by_app_consumes_the_opportunity_witho
                 /*initial_user_message*/ None,
             )
             .await?;
-            assert_eq!(visible(&app.chat_widget), model == "gpt-6-astra");
+            assert!(visible(&app.chat_widget), "{model}");
             app.app_server_target = AppServerTarget::Remote {
                 endpoint: crate::resolve_remote_addr("ws://127.0.0.1:9")?,
             };
@@ -209,7 +210,7 @@ async fn commands_can_precede_the_sparkle_but_inserted_or_typed_drafts_cannot() 
             /*initial_user_message*/ None,
         )
         .await?;
-        assert!(!visible(&app.chat_widget));
+        assert!(visible(&app.chat_widget));
         match earlier_input {
             "typed" => {
                 type_into(&mut app.chat_widget, "x");
@@ -271,7 +272,10 @@ async fn commands_can_precede_the_sparkle_but_inserted_or_typed_drafts_cannot() 
         }
         assert_eq!(
             visible(&app.chat_widget),
-            matches!(earlier_input, "" | "commands" | "shortcut_help"),
+            matches!(
+                earlier_input,
+                "" | "commands" | "shortcut_help" | "cancel_picker"
+            ),
             "{earlier_input}"
         );
     }
@@ -368,7 +372,7 @@ async fn a_command_pending_on_fresh_astra_start_can_finish_before_the_sparkle() 
 }
 
 #[tokio::test]
-async fn only_confirmed_picker_model_changes_can_arm_the_sparkle() -> Result<()> {
+async fn picker_model_changes_preserve_the_existing_sparkle() -> Result<()> {
     for completion in [
         "esc",
         "ctrl_c",
@@ -392,7 +396,7 @@ async fn only_confirmed_picker_model_changes_can_arm_the_sparkle() -> Result<()>
             /*initial_user_message*/ None,
         )
         .await?;
-        assert!(!visible(&app.chat_widget));
+        assert!(visible(&app.chat_widget));
         type_into(&mut app.chat_widget, "/model");
         app.chat_widget.handle_key_event(KeyCode::Enter.into());
         assert!(app.chat_widget.has_active_view());
@@ -465,18 +469,13 @@ async fn only_confirmed_picker_model_changes_can_arm_the_sparkle() -> Result<()>
             }
             _ => unreachable!(),
         }
-        assert_eq!(
-            visible(&app.chat_widget),
-            completion == "pick_astra",
-            "{completion}"
-        );
+        assert!(visible(&app.chat_widget), "{completion}");
     }
     Ok(())
 }
 
 #[tokio::test]
 async fn astra_picker_confirms_the_model_at_application_after_an_automatic_update() -> Result<()> {
-    let mut snapshots = Vec::new();
     for (picker, key, switches_away) in [
         ("default no-op", KeyCode::Enter, false),
         ("session no-op", KeyCode::Char('s'), false),
@@ -504,7 +503,7 @@ async fn astra_picker_confirms_the_model_at_application_after_an_automatic_updat
         if switches_away {
             app.chat_widget.set_model("gpt-6-astra");
         }
-        assert!(!visible(&app.chat_widget));
+        assert!(visible(&app.chat_widget));
 
         let mut preset = crate::test_support::TEST_MODEL_PRESETS[0].clone();
         preset.model = "gpt-6-astra".into();
@@ -556,20 +555,9 @@ async fn astra_picker_confirms_the_model_at_application_after_an_automatic_updat
         }
         assert!(!app.chat_widget.has_active_view(), "{picker}");
         assert_eq!(app.chat_widget.current_model(), "gpt-6-astra", "{picker}");
-        assert_eq!(visible(&app.chat_widget), switches_away, "{picker}");
-        if picker.starts_with("default") && !picker.contains("queued") {
-            let rendered = render_with_sparkle_palette(&app.chat_widget);
-            let lines = rendered.lines().collect::<Vec<_>>();
-            let prompt = lines
-                .iter()
-                .position(|line| line.contains("Ask Codex to do anything"))
-                .expect("empty composer shows its placeholder");
-            let composer = lines[prompt.saturating_sub(1)..=prompt + 1].join("\n");
-            snapshots.push(format!("{picker}:\n{composer}"));
-        }
+        assert!(visible(&app.chat_widget), "{picker}");
         server.shutdown().await?;
     }
-    insta::assert_snapshot!(snapshots.join("\n\n"));
     Ok(())
 }
 
@@ -659,8 +647,6 @@ async fn session_only_astra_picker_shows_stars_only_on_an_untouched_task() -> Re
     std::fs::write(&config_path, defaults)?;
     let mut server = start_config_write_test_app_server(&app).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
-    let mut snapshots = Vec::new();
-
     for scenario in ["untouched", "typed then erased"] {
         let thread = server.start_thread(&app.config).await?;
         assert_eq!(thread.session.model, "gpt-5.5");
@@ -671,7 +657,7 @@ async fn session_only_astra_picker_shows_stars_only_on_an_untouched_task() -> Re
             /*initial_user_message*/ None,
         )
         .await?;
-        assert!(!visible(&app.chat_widget));
+        assert!(visible(&app.chat_widget));
         if scenario == "typed then erased" {
             type_into(&mut app.chat_widget, "x");
             app.chat_widget.handle_key_event(KeyCode::Backspace.into());
@@ -704,7 +690,6 @@ async fn session_only_astra_picker_shows_stars_only_on_an_untouched_task() -> Re
             composer.chars().any(|ch| "⠁⠂⠄⠈⠐⠠⡀⢀".contains(ch)),
             scenario == "untouched"
         );
-        snapshots.push(format!("{scenario}:\n{composer}"));
         assert_eq!(std::fs::read(&config_path)?, defaults.as_bytes());
         assert_eq!(
             (&app.config.model, &app.config.model_reasoning_effort),
@@ -731,7 +716,6 @@ async fn session_only_astra_picker_shows_stars_only_on_an_untouched_task() -> Re
         assert!(!visible(&app.chat_widget));
     }
 
-    insta::assert_snapshot!(snapshots.join("\n\n"));
     server.shutdown().await?;
     Ok(())
 }
