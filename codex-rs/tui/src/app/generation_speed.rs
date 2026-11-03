@@ -78,14 +78,39 @@ impl App {
     }
 
     pub(super) async fn refresh_generation_speeds(&mut self, thread_id: ThreadId) {
-        self.chat_widget.generation_speeds.clear();
+        self.chat_widget.generation_speeds = self.load_generation_speeds(thread_id).await;
+    }
+
+    pub(super) async fn refresh_parked_generation_speeds(&mut self, thread_id: ThreadId) {
+        if !self.side_companions.contains_key(&thread_id) {
+            return;
+        }
+        let speeds = self.load_generation_speeds(thread_id).await;
+        if let Some(widget) = self
+            .side_companions
+            .get_mut(&thread_id)
+            .and_then(|companion| companion.projection.as_deref_mut())
+            .or_else(|| {
+                self.background_voice
+                    .as_deref_mut()
+                    .filter(|owner| owner.thread_id() == Some(thread_id))
+            })
+        {
+            widget.generation_speeds = speeds;
+        }
+    }
+
+    async fn load_generation_speeds(
+        &mut self,
+        thread_id: ThreadId,
+    ) -> HashMap<(ThreadId, String), codex_state::GenerationSpeedRecord> {
         if self.app_server_target.uses_remote_workspace() {
             tracing::info!(%thread_id, reason = "remote_workspace", "generation speed read skipped");
-            return;
+            return HashMap::new();
         }
         let Some(state_db) = self.state_db.as_ref() else {
             tracing::info!(%thread_id, reason = "storage_unavailable", "generation speed read skipped");
-            return;
+            return HashMap::new();
         };
         // Optional metadata must not hold up transcript completion on a busy database.
         match tokio::time::timeout(
@@ -96,7 +121,7 @@ impl App {
         {
             Ok(Ok(speeds)) => {
                 tracing::info!(%thread_id, records = speeds.len(), "generation speed records loaded");
-                self.chat_widget.generation_speeds = speeds
+                return speeds
                     .into_iter()
                     .map(|(turn_id, speed)| ((thread_id, turn_id), speed))
                     .collect();
@@ -104,6 +129,7 @@ impl App {
             Ok(Err(err)) => tracing::info!(%thread_id, %err, "generation speed read skipped"),
             Err(_) => tracing::info!(%thread_id, "generation speed read timed out"),
         }
+        HashMap::new()
     }
 }
 
