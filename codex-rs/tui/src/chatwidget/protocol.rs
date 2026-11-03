@@ -465,6 +465,7 @@ impl ChatWidget {
         let mut question_drafts = None;
         let live_turn =
             replay_kind.is_none() && self.last_turn_id() == Some(notification.turn.id.as_str());
+        let finished_turn = notification.turn.status != TurnStatus::InProgress;
         let mut recourse = self.safety_recourse.take_if(|_| live_turn);
         let was_replaying_turn_completion = self.thread_usage.replaying_turn_completion;
         self.thread_usage.replaying_turn_completion = replay_kind.is_some();
@@ -571,6 +572,11 @@ impl ChatWidget {
         }
         if replay_kind.is_none() {
             self.finish_realtime_turn(&notification.turn.id);
+            if finished_turn && !self.is_user_turn_pending_or_running() {
+                let model = self.current_model().to_owned();
+                self.bottom_pane
+                    .mark_fresh_task_for_sparkle(&model, &self.local_settings.tui);
+            }
         }
         self.thread_usage.replaying_turn_completion = was_replaying_turn_completion;
     }
