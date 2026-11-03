@@ -89,6 +89,7 @@ impl App {
                     | AppEvent::InsertHistoryCell(_)
                     | AppEvent::CommitRealtimeTranscriptHistory
                     | AppEvent::ParkSideCompanion { .. }
+                    | AppEvent::SideProjectionEvent { .. }
                     | AppEvent::SideReplayFinished(_)
                     | AppEvent::ResetTranscriptForThreadSwitch
                     | AppEvent::ResetTranscriptForThreadSwitchPreservingScreen
@@ -942,8 +943,9 @@ impl App {
                 self.begin_thread_switch_history_replay_buffer();
             }
             AppEvent::ParkSideCompanion { pair, thread_id, stream, display } => {
-                if let Some(mut bottom) = self.pending_side_composers.remove(&thread_id)
+                if let Some(pending) = self.pending_side_composers.remove(&thread_id)
                     && self.side_threads.contains_key(&pair) {
+                    let mut bottom = pending.bottom;
                     if let Some(channel) = self.thread_event_channels.get(&thread_id) {
                         bottom.set_workspace_status(channel.store.lock().await.workspace_status());
                     }
@@ -962,7 +964,12 @@ impl App {
                         self.transcript_view.replace_group(cells, range.clone(), &replacement);
                         cells.splice(range, [replacement]);
                     }
+                    let commit_ticks = pending.projection.as_ref().is_some_and(|widget| widget.has_side_stream())
+                        || self.background_voice.as_ref().is_some_and(|owner| owner.thread_id() == Some(thread_id) && owner.has_side_stream());
                     self.side_companions.insert(thread_id, SideCompanion {
+                        route: pending.route,
+                        projection: pending.projection,
+                        commit_ticks,
                         bottom,
                         display,
                         cells: std::mem::take(&mut self.transcript_cells),
@@ -1024,6 +1031,10 @@ impl App {
             }
             AppEvent::InsertHistoryCell(cell) => {
                 self.insert_history_cell(tui, cell);
+            }
+            AppEvent::SideProjectionEvent { route, event } => {
+                self.handle_side_projection_event(route, *event);
+                tui.frame_requester().schedule_frame();
             }
             AppEvent::TurnTipReady { thread_id, turn_id } => {
                 self.turn_tips.ready(thread_id, &turn_id, self.transcript_cells.last());
