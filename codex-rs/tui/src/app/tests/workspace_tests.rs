@@ -37,7 +37,10 @@ async fn pair() -> Result<(Box<App>, tui::Tui, ThreadId, ThreadId)> {
         .handle_thread_session(test_thread_session(main, app.config.cwd.to_path_buf()));
     app.active_thread_id = Some(main);
     app.chat_widget.insert_str("main draft\nsecond main line");
-    app.transcript_cells = vec![plain_line_cell("Main answer")];
+    app.transcript_cells = vec![Arc::new(crate::history_cell::AgentMarkdownCell::new(
+        "Main answer".into(),
+        app.config.cwd.as_path(),
+    ))];
     Ok((app, tui, main, side))
 }
 
@@ -48,13 +51,6 @@ async fn workspace_background_status_updates_without_taking_input_focus() -> Res
         .await?;
     let working = side_frame(&mut app, &mut tui, Size::new(120, 24))?;
     assert!(working.contains("Working"), "{working}");
-    app.enqueue_thread_request(
-        side,
-        exec_approval_request(side, "side-turn", "approval", None),
-    )
-    .await?;
-    let approval = side_frame(&mut app, &mut tui, Size::new(120, 24))?;
-    assert!(approval.contains("Needs approval"), "{approval}");
     app.enqueue_thread_notification(
         side,
         turn_completed_notification(side, "side-turn", TurnStatus::Completed),
@@ -73,6 +69,18 @@ async fn workspace_background_status_updates_without_taking_input_focus() -> Res
         assert!(row(&working, text).is_some(), "missing {text}: {working}");
         assert_eq!(row(&working, text), row(&complete, text), "{text}");
     }
+    // Existing cross-thread approvals may open a foreground dialog. Measure the ordinary
+    // composer above before introducing that interactive view.
+    app.enqueue_thread_notification(side, turn_started_notification(side, "approval-turn"))
+        .await?;
+    app.enqueue_thread_request(
+        side,
+        exec_approval_request(side, "approval-turn", "approval", None),
+    )
+    .await?;
+    let approval = side_frame(&mut app, &mut tui, Size::new(120, 24))?;
+    assert!(approval.contains("Needs approval"), "{approval}");
+    assert_eq!(app.current_displayed_thread_id(), Some(main));
     Ok(())
 }
 
