@@ -4946,10 +4946,14 @@ impl ChatComposer {
             selection.register(status.intersection(buf.area), changed);
             selection.register(footer_rect.intersection(buf.area), changed);
         }
-        let style = user_message_style();
+        let style = if options.passive {
+            crate::style::quiet_workspace_style()
+        } else {
+            user_message_style()
+        };
         let mut block = Block::default().style(style);
         // Mark the padding without guessing a fill that could hide the terminal's cursor.
-        if style.bg.is_none() && !textarea_rect.is_empty() {
+        if !options.passive && style.bg.is_none() && !textarea_rect.is_empty() {
             let gray = crate::terminal_palette::best_color((128, 128, 128));
             if gray != Color::Reset {
                 block = block
