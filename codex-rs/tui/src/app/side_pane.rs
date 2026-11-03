@@ -441,6 +441,14 @@ impl SidePaneLayout {
         frames: &FrameRequester,
     ) {
         let area = self.passive;
+        let completion = companion.cells.last().and_then(|cell| {
+            cell.as_any()
+                .downcast_ref::<crate::history_cell::FinalMessageSeparator>()
+        });
+        let hide_completion = companion.bottom.set_workspace_completion(completion);
+        companion
+            .view
+            .set_workspace_completion(&companion.cells, hide_completion);
         let gap = ComposerGap::default();
         let bottom = companion.bottom.parked_renderable(ComposerRenderOptions {
             shared_footer: Some(Rect::default()),
