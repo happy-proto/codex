@@ -1220,6 +1220,9 @@ impl ChatWidget {
     }
 
     pub(crate) fn refresh_terminal_program_status(&self) {
+        if !self.owns_terminal_surfaces() {
+            return;
+        }
         let status = self.desired_program_status();
         if let Err(err) = crate::terminal_program_status::set_terminal_program_status(
             status,

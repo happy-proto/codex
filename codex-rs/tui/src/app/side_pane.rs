@@ -83,7 +83,12 @@ pub(super) fn layout(app: &App, tui: &crate::tui::Tui, area: Rect) -> Option<Sid
 
 impl SidePaneLayout {
     /// Paint the divider, retained transcript and draft without claiming the terminal cursor.
-    pub(super) fn paint_companion(&self, companion: &mut SideCompanion, frame: &mut Frame<'_>) {
+    pub(super) fn paint_companion(
+        &self,
+        companion: &mut SideCompanion,
+        voice: Option<&crate::chatwidget::ChatWidget>,
+        frame: &mut Frame<'_>,
+    ) {
         let area = self.passive;
         for y in area.y..area.bottom() {
             frame.buffer[(self.divider, y)]
@@ -111,12 +116,58 @@ impl SidePaneLayout {
             height: above,
             ..area
         };
+        let widget = companion
+            .projection
+            .as_deref()
+            .or_else(|| voice.filter(|owner| owner.thread_id() == Some(self.passive_thread)));
+        let stream = widget.and_then(|widget| widget.side_stream_snapshot());
+        let has_stream = stream.is_some();
+        let reflowed_cells =
+            stream.map(|stream| {
+                use crate::app_event::CapturedSideStream;
+                use crate::history_cell;
+                use crate::history_cell::HistoryCell;
+                use std::sync::Arc;
+                let (start, cell): (_, Arc<dyn HistoryCell>) = match stream {
+                    CapturedSideStream::Answer(cell) => (
+                        super::resize_reflow::trailing_run_start::<history_cell::AgentMessageCell>(
+                            &companion.cells,
+                        ),
+                        cell,
+                    ),
+                    CapturedSideStream::Plan(cell) => (
+                        super::resize_reflow::trailing_run_start::<
+                            history_cell::ProposedPlanStreamCell,
+                        >(&companion.cells),
+                        cell,
+                    ),
+                };
+                let mut cells = companion.cells[..start].to_vec();
+                cells.push(cell);
+                cells
+            });
+        let active = if let Some(widget) = widget {
+            widget.side_active_cell().filter(|cell| {
+                !has_stream
+                    || (!cell
+                        .as_any()
+                        .is::<crate::history_cell::StreamingAgentTailCell>()
+                        && !cell
+                            .as_any()
+                            .is::<crate::history_cell::StreamingPlanTailCell>())
+            })
+        } else {
+            companion.display.active.as_deref()
+        };
+        let auxiliary = widget
+            .map(|widget| widget.side_auxiliary_lines(area.width))
+            .unwrap_or_else(|| companion.display.auxiliary.clone());
         companion.view.render_parked(
             transcript,
             frame.buffer,
-            &companion.cells,
-            companion.display.active.as_deref(),
-            &companion.display.auxiliary,
+            reflowed_cells.as_deref().unwrap_or(&companion.cells),
+            active,
+            &auxiliary,
         );
         frame
             .image_placements
