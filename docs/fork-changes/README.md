@@ -31,6 +31,7 @@
 | 0023 | [通过 @ 选择插件提供的 skill](0023-at-plugin-skills.md) |
 | 0024 | [首轮由 Agent 主动命名会话](0024-agent-thread-title.md) |
 | 0025 | [分栏任务状态与共享底栏](0025-workspace-status-and-footer.md) |
+| 0026 | [为所有模型开启输入框星光](0026-all-model-composer-stars.md) |
 | 0027 | [按项忽略 Cloud config](0027-ignore-cloud-config.md) |
 | 0031 | [内置会话管理 skill](0031-session-skill.md) |
 
