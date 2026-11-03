@@ -25,6 +25,8 @@ pub(crate) struct WorkspaceStatus {
     pub(crate) phase: WorkspacePhase,
     started_at: Option<Instant>,
     elapsed: Duration,
+    generation_observed_at_ms: i64,
+    pub(super) generation_observed_at: Option<Instant>,
 }
 
 impl WorkspaceStatus {
@@ -33,6 +35,7 @@ impl WorkspaceStatus {
             return;
         }
         self.turn_id = Some(turn_id.to_owned());
+        self.restart_generation_observation();
         self.elapsed = elapsed;
         self.started_at = None;
         self.phase = WorkspacePhase::Idle;
@@ -55,6 +58,26 @@ impl WorkspaceStatus {
 
     pub(crate) fn elapsed(&self) -> Duration {
         self.elapsed + self.started_at.map_or(Duration::ZERO, |at| at.elapsed())
+    }
+
+    pub(crate) fn restart_generation_observation(&mut self) {
+        self.generation_observed_at = Some(Instant::now());
+        self.generation_observed_at_ms = chrono::Utc::now().timestamp_millis();
+    }
+
+    pub(crate) fn generation_speed_target(
+        &self,
+        thread_id: codex_protocol::ThreadId,
+    ) -> Option<crate::chatwidget::LiveGenerationSpeedTarget> {
+        if self.phase != WorkspacePhase::Working {
+            return None;
+        }
+        Some(crate::chatwidget::LiveGenerationSpeedTarget {
+            thread_id,
+            turn_id: self.turn_id.clone()?,
+            started_at: self.generation_observed_at?,
+            observed_at_ms: self.generation_observed_at_ms,
+        })
     }
 
     pub(crate) fn line(&self, header: Option<&str>, interrupt: Option<String>) -> Line<'static> {
