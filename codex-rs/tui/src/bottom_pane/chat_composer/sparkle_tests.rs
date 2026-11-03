@@ -50,6 +50,33 @@ fn enabled() -> Tui {
     }
 }
 
+#[test]
+fn workspace_starfield_can_be_enabled_for_every_model_and_still_respects_motion_switches() {
+    palette(|| {
+        for model in ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna", "custom-model"] {
+            let mut settings = enabled();
+            settings.effects.starfield_all_models = true;
+            let mut animated = pane();
+            animated.mark_fresh_task_for_sparkle(model, &settings);
+            assert!(
+                !dots(&draw(&animated.composer, 80, Instant::now()).0).is_empty(),
+                "{model}"
+            );
+            animated.stop_ineligible_sparkle("another-model", &settings);
+            assert!(!dots(&draw(&animated.composer, 80, Instant::now()).0).is_empty());
+            settings.effects.starfield = false;
+            animated.stop_ineligible_sparkle(model, &settings);
+            assert!(dots(&draw(&animated.composer, 80, Instant::now()).0).is_empty());
+
+            let mut animated = pane();
+            settings.effects.starfield = true;
+            settings.animations = false;
+            animated.mark_fresh_task_for_sparkle(model, &settings);
+            assert!(dots(&draw(&animated.composer, 80, Instant::now()).0).is_empty());
+        }
+    });
+}
+
 fn draw(composer: &ChatComposer, width: u16, now: Instant) -> (Buffer, Rect) {
     let area = Rect::new(
         /*x*/ 0,
