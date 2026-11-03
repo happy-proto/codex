@@ -337,6 +337,7 @@ pub(crate) struct BottomPane {
     /// Streaming may drop the row without losing its elapsed time or modal pause.
     status_timer: crate::status_indicator_widget::StatusTimer,
     workspace_status: workspace_status::WorkspaceStatus,
+    workspace_indicator: StatusIndicatorWidget,
     /// Unified exec session summary source.
     ///
     /// When a status row exists, this summary is mirrored inline in that row;
@@ -409,6 +410,12 @@ impl BottomPane {
         composer.set_keymap_bindings(&keymap);
         composer.set_skill_mentions(skills);
         Self {
+            workspace_indicator: StatusIndicatorWidget::new(
+                app_event_tx.clone(),
+                frame_requester.clone(),
+                animations_enabled,
+                effects,
+            ),
             composer,
             view_stack: Vec::new(),
             key_chord_reset_requested: false,
@@ -471,8 +478,20 @@ impl BottomPane {
     }
 
     pub(crate) fn set_workspace_status(&mut self, status: workspace_status::WorkspaceStatus) {
+        if status.generation_observed_at != self.workspace_status.generation_observed_at
+            || status.phase != workspace_status::WorkspacePhase::Working
+        {
+            self.set_recent_generation_speed(None);
+        }
         self.workspace_status = status;
         self.request_redraw();
+    }
+
+    pub(crate) fn workspace_generation_speed_target(
+        &self,
+        thread_id: codex_protocol::ThreadId,
+    ) -> Option<crate::chatwidget::LiveGenerationSpeedTarget> {
+        self.workspace_status.generation_speed_target(thread_id)
     }
 
     pub(crate) fn parked_renderable<'a>(
@@ -502,6 +521,7 @@ impl BottomPane {
     pub(crate) fn set_motion_preferences(&mut self, tui: &codex_config::types::Tui) {
         self.animations_enabled = tui.animations;
         self.effects = tui.effects;
+        self.workspace_indicator.set_motion_preferences(tui);
         if let Some(status) = self.status.as_mut() {
             status.set_motion_preferences(tui);
         }
@@ -644,6 +664,8 @@ impl BottomPane {
         self.pending_input_preview
             .set_edit_binding(keymap.primary_hint(KeymapContext::Chat, "edit_queued_message"));
         let interrupt_binding = keymap.primary_hint(KeymapContext::Chat, "interrupt_turn");
+        self.workspace_indicator
+            .set_interrupt_binding(interrupt_binding);
         self.pending_input_preview
             .set_interrupt_binding(interrupt_binding);
         if let Some(status) = self.status.as_mut() {
@@ -1898,6 +1920,8 @@ impl BottomPane {
             return;
         }
         self.recent_generation_speed = label;
+        self.workspace_indicator
+            .set_recent_generation_speed(self.recent_generation_speed.clone());
         if self.is_task_running && self.recent_generation_speed.is_some() {
             self.ensure_status_indicator();
         }
@@ -2564,25 +2588,25 @@ impl BottomPane {
             if options.shared_footer.is_some() {
                 let running =
                     self.workspace_status.phase == workspace_status::WorkspacePhase::Working;
-                let header = (running && !options.passive)
-                    .then(|| {
-                        self.status
-                            .as_ref()
-                            .map(|status| status.header_at(Instant::now()))
-                    })
-                    .flatten();
-                let interrupt = (!options.passive)
-                    .then(|| {
-                        self.keymap
-                            .primary_hint(KeymapContext::Chat, "interrupt_turn")
-                            .map(|key| key.display_label())
-                    })
-                    .flatten();
-                let line = self.workspace_status.line(header.as_deref(), interrupt);
-                flex.push(0, RenderableItem::Owned(Box::new(line)));
                 if running {
-                    self.frame_requester
-                        .schedule_frame_in(Duration::from_secs(1));
+                    let indicator = if options.passive {
+                        &self.workspace_indicator
+                    } else {
+                        self.status.as_ref().unwrap_or(&self.workspace_indicator)
+                    };
+                    flex.push(
+                        0,
+                        RenderableItem::Owned(Box::new(indicator.compact_with_elapsed(
+                            &self.status_timer,
+                            self.workspace_status.elapsed(),
+                            !options.passive,
+                        ))),
+                    );
+                } else {
+                    flex.push(
+                        0,
+                        RenderableItem::Owned(Box::new(self.workspace_status.line(None, None))),
+                    );
                 }
             } else if let Some(status) = self.status_widget() {
                 flex.push(
@@ -2971,8 +2995,8 @@ mod tests {
                 );
                 assert!(after.contains(text), "{after}");
             }
-            assert!(before.contains("to inter"));
-            assert!(!after.contains("to inter"));
+            assert!(before.contains("esc"));
+            assert!(!after.contains("esc"));
             drop(parked);
             status.set_phase(workspace_status::WorkspacePhase::Completed);
             pane.set_workspace_status(status.clone());
@@ -2983,6 +3007,66 @@ mod tests {
             );
             status.set_phase(workspace_status::WorkspacePhase::Working);
             pane.set_workspace_status(status.clone());
+        }
+    }
+
+    #[test]
+    fn workspace_running_rows_keep_native_feedback_and_fixed_height() {
+        let (tx, _rx) = unbounded_channel();
+        let mut pane = test_pane_with_disable_paste_burst(AppEventSender::new(tx), true);
+        pane.set_task_running(true);
+        let mut status = workspace_status::WorkspaceStatus::default();
+        status.start("turn", Duration::from_secs(75));
+        pane.set_workspace_status(status.clone());
+        pane.set_recent_generation_speed(Some(23.8));
+        pane.update_status(
+            "Thinking".into(),
+            Some("Details that must not add rows in the split layout".into()),
+            StatusDetailsCapitalization::Preserve,
+            3,
+        );
+        pane.set_hook_status_message(Some("Hook context that must not wrap".repeat(6)));
+        let options = ComposerRenderOptions {
+            shared_footer: Some(Rect::default()),
+            separate_status_line: true,
+            ..Default::default()
+        };
+        for (width, passive) in [36, 40, 50, 120]
+            .into_iter()
+            .flat_map(|width| [false, true].map(|passive| (width, passive)))
+        {
+            let options = ComposerRenderOptions { passive, ..options };
+            let renderable = pane.parked_renderable(options);
+            let height = renderable.desired_height(width);
+            let text = render_snapshot(&renderable, Rect::new(0, 0, width, height));
+            assert!(text.contains("23.8 token/s"), "{text}");
+            assert!(text.contains("(1m "), "{text}");
+            assert_eq!(text.contains("esc"), !passive && width >= 40, "{text}");
+            if width == 120 && !passive {
+                assert!(text.contains("esc to interrupt"), "{text}");
+            }
+            assert!(
+                text.contains(if passive { "Working (" } else { "Thinking (" }),
+                "{text}"
+            );
+            assert!(
+                !text.contains("Details that") && !text.contains("Hook context"),
+                "{text}"
+            );
+            drop(renderable);
+            let mut complete = status.clone();
+            complete.set_phase(workspace_status::WorkspacePhase::Completed);
+            pane.set_workspace_status(complete);
+            let complete = pane.parked_renderable(options);
+            assert_eq!(complete.desired_height(width), height);
+            let text = render_snapshot(&complete, Rect::new(0, 0, width, height));
+            assert!(
+                text.contains("Completed") && !text.contains("token/s"),
+                "{text}"
+            );
+            drop(complete);
+            pane.set_workspace_status(status.clone());
+            pane.set_recent_generation_speed(Some(23.8));
         }
     }
 
