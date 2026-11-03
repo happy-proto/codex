@@ -7,8 +7,6 @@ use super::sidebar;
 use super::sidebar::PaneFocus;
 use super::sidebar::SidebarContent;
 use super::sidebar::SidebarLayout;
-use crate::bottom_pane::FooterLayout;
-use crate::bottom_pane::StatusLineFocus;
 use crate::bottom_pane::render_unfocused_status;
 use crate::bottom_pane::CommandPopupPlacement;
 use crate::bottom_pane::ComposerGap;
@@ -452,23 +450,25 @@ impl SidePaneLayout {
     ) {
         companion.flush_answer();
         let area = self.passive;
-        // Keep the live composer's bottom hint row blank on the inactive side.
-        let hint_rows = 1;
-        let composer_height = area.height.saturating_sub(hint_rows).min(3);
-        let available = area.height - composer_height;
-        let footer = FooterLayout::new(
-            Some(composer_height_limit(area.height)),
-            hint_rows,
-            /*priority_hint_rows*/ hint_rows,
-        );
-        let status = companion.display.status_line.as_ref();
-        let wanted_status = status.map_or(0, |status| {
-            status.height(footer.status_bounds(area.width, available))
+        let gap = ComposerGap::default();
+        let bottom = companion.bottom.parked_renderable(ComposerRenderOptions {
+            shared_footer: Some(Rect::default()),
+            passive: true,
+            separate_status_line: true,
+            composer_gap: Some(&gap),
+            max_height: Some(
+                ((u32::from(area.height) * 2 / 3) as u16)
+                    .max(8)
+                    .min(area.height),
+            ),
+            extend_composer_background_left: area.x > 0,
+            command_popup_placement: CommandPopupPlacement::Hidden,
+            ..Default::default()
         });
-        let footer = footer.allocate(available, wanted_status);
-        let above = available - footer.height();
-        let mut transcript = Rect {
-            height: above.saturating_sub(1),
+        let bottom_height = bottom.desired_height(area.width).min(area.height);
+        let above = area.height - bottom_height;
+        let transcript = Rect {
+            height: above,
             ..area
         };
         if let Some(work) = &companion.display.work {
@@ -495,35 +495,10 @@ impl SidePaneLayout {
 
         let composer = Rect {
             y: area.y + above,
-            height: composer_height,
+            height: bottom_height,
             ..area
         };
-        frame
-            .buffer
-            .set_style(composer, crate::style::quiet_workspace_style());
-        let inset = u16::from(composer_height > 1);
-        let text_area = Rect::new(
-            composer.x.saturating_add(/*rhs*/ 2),
-            composer.y + inset,
-            composer.width.saturating_sub(/*rhs*/ 2),
-            composer_height - inset,
-        );
-        if !text_area.is_empty() {
-            frame.buffer[(composer.x, text_area.y)].set_symbol("›");
-            StatefulWidgetRef::render_ref(
-                &companion.display.draft.as_ref(),
-                text_area,
-                frame.buffer,
-                &mut Default::default(),
-            );
-        }
-        if let Some(status) = status {
-            status.render(
-                footer.status_area(area),
-                frame.buffer,
-                StatusLineFocus::Unfocused,
-            );
-        }
+        bottom.render(composer, frame.buffer);
     }
 }
 
