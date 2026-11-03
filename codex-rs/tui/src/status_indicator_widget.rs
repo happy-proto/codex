@@ -226,7 +226,29 @@ impl StatusIndicatorWidget {
     }
 
     pub(crate) fn with_timer<'a>(&'a self, timer: &'a StatusTimer) -> impl Renderable + 'a {
-        StatusIndicator { row: self, timer }
+        StatusIndicator {
+            row: self,
+            timer,
+            elapsed_override: None,
+            show_interrupt_hint: true,
+            single_line: false,
+        }
+    }
+
+    /// Keep the native activity presentation in a fixed-height docked status row.
+    pub(crate) fn compact_with_elapsed<'a>(
+        &'a self,
+        timer: &'a StatusTimer,
+        elapsed: Duration,
+        show_interrupt_hint: bool,
+    ) -> impl Renderable + 'a {
+        StatusIndicator {
+            row: self,
+            timer,
+            elapsed_override: Some(elapsed),
+            show_interrupt_hint,
+            single_line: true,
+        }
     }
 
     /// Wrap the details text into a fixed width and return the lines, truncating if necessary.
@@ -265,18 +287,70 @@ impl StatusIndicatorWidget {
 struct StatusIndicator<'a> {
     row: &'a StatusIndicatorWidget,
     timer: &'a StatusTimer,
+    elapsed_override: Option<Duration>,
+    show_interrupt_hint: bool,
+    single_line: bool,
 }
 
 impl StatusIndicator<'_> {
+    fn timing_spans(&self, elapsed: &str, interrupt_suffix: Option<&str>) -> Vec<Span<'static>> {
+        let mut spans = Vec::new();
+        if self.show_interrupt_hint
+            && self.row.show_interrupt_hint
+            && let Some(binding) = self.row.interrupt_binding
+            && let Some(suffix) = interrupt_suffix
+        {
+            spans.push(format!("({elapsed} • ").dim());
+            spans.extend(binding.spans());
+            spans.push(format!("{suffix})").dim());
+        } else {
+            spans.push(format!("({elapsed})").dim());
+        }
+        if let Some(speed) = &self.row.recent_generation_speed {
+            spans.push(format!(" · {speed}").dim());
+        }
+        spans
+    }
+
+    fn compact_line(&self, prefix: Vec<Span<'static>>, elapsed: &str, width: u16) -> Line<'static> {
+        let width = usize::from(width);
+        let mut line = Line::default();
+        for hint in [Some(" to interrupt"), Some(""), None] {
+            let suffix = self.timing_spans(elapsed, hint);
+            line = Line::from(prefix.clone());
+            line.spans.extend(suffix.clone());
+            if line_width(&line) <= width {
+                break;
+            }
+            if hint.is_none() {
+                // Keep the clock and metric readable even with a verbose task header.
+                let suffix = Line::from(suffix);
+                let available = width.saturating_sub(line_width(&suffix) + 1);
+                line =
+                    truncate_line_with_ellipsis_if_overflow(Line::from(prefix.clone()), available);
+                if available > 0 {
+                    line.spans.push(" ".into());
+                }
+                line.spans.extend(suffix.spans);
+            }
+        }
+        if let Some(message) = &self.row.inline_message {
+            line.spans.extend([" · ".dim(), message.clone().dim()]);
+        }
+        truncate_line_with_ellipsis_if_overflow(line, width)
+    }
+
     // Share width decisions between height measurement and rendering, including
     // wide Unicode characters, remapped interrupt hints, and elapsed-time text.
     fn lines(&self, width: u16) -> Vec<Line<'static>> {
         let row = self.row;
         let now = Instant::now();
-        let elapsed_duration = self.timer.display_started_at.map_or_else(
-            || self.timer.elapsed_at(now),
-            |started_at| now.saturating_duration_since(started_at),
-        );
+        let elapsed_duration = self.elapsed_override.unwrap_or_else(|| {
+            self.timer.display_started_at.map_or_else(
+                || self.timer.elapsed_at(now),
+                |started_at| now.saturating_duration_since(started_at),
+            )
+        });
         let pretty_elapsed = fmt_elapsed_compact(elapsed_duration.as_secs());
         let progress =
             MotionMode::from_animations_enabled(row.animations_enabled && row.effects.progress);
@@ -300,18 +374,10 @@ impl StatusIndicator<'_> {
         if !spans.is_empty() {
             spans.push(" ".into());
         }
-        if row.show_interrupt_hint
-            && let Some(interrupt_binding) = row.interrupt_binding
-        {
-            spans.push(format!("({pretty_elapsed} • ").dim());
-            spans.extend(interrupt_binding.spans());
-            spans.push(" to interrupt)".dim());
-        } else {
-            spans.push(format!("({pretty_elapsed})").dim());
+        if self.single_line {
+            return vec![self.compact_line(spans, &pretty_elapsed, width)];
         }
-        if let Some(speed) = &row.recent_generation_speed {
-            spans.push(format!(" · {speed}").dim());
-        }
+        spans.extend(self.timing_spans(&pretty_elapsed, Some(" to interrupt")));
         if let Some(message) = &row.inline_message {
             // Keep optional context after elapsed/interrupt text so that core
             // interrupt affordances stay in a fixed visual location.
@@ -354,6 +420,7 @@ impl Renderable for StatusIndicator<'_> {
             return;
         }
         if self.row.animations_enabled
+            || self.elapsed_override.is_some()
             || self.timer.display_started_at.is_some()
             || self.row.retry_wait().is_some()
         {
@@ -426,6 +493,9 @@ mod tests {
         let indicator = StatusIndicator {
             row: &row,
             timer: &timer,
+            elapsed_override: None,
+            show_interrupt_hint: true,
+            single_line: false,
         };
         let header = indicator.lines(120)[0].to_string();
         assert!(header.starts_with("Retrying in 7m 29s (2/100)"));
@@ -455,6 +525,9 @@ mod tests {
         let rendered = StatusIndicator {
             row: &row,
             timer: &timer,
+            elapsed_override: None,
+            show_interrupt_hint: true,
+            single_line: false,
         }
         .lines(120)[0]
             .to_string();
@@ -511,7 +584,15 @@ mod tests {
         row.set_recent_generation_speed(Some("42.3 token/s".into()));
         row.update_inline_message(Some("1 background terminal".into()));
         let header = |row: &StatusIndicatorWidget, width| {
-            StatusIndicator { row, timer: &timer }.lines(width)[0].to_string()
+            StatusIndicator {
+                row,
+                timer: &timer,
+                elapsed_override: None,
+                show_interrupt_hint: true,
+                single_line: false,
+            }
+            .lines(width)[0]
+                .to_string()
         };
         let text = header(&row, 120);
         assert!(text.contains("esc to interrupt"));
