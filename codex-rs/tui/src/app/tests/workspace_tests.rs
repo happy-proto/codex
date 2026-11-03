@@ -3,6 +3,13 @@
 use super::*;
 use crate::bottom_pane::workspace_status::WorkspacePhase;
 
+#[test]
+fn workspace_events_remain_send_with_parked_composers() {
+    fn assert_send<T: Send>() {}
+    assert_send::<AppEvent>();
+    assert_send::<crate::app_event_sender::AppEventSender>();
+}
+
 async fn pair() -> Result<(Box<App>, tui::Tui, ThreadId, ThreadId)> {
     let mut app = make_test_app().await;
     enable_side_retention(&mut app)?;
@@ -15,10 +22,11 @@ async fn pair() -> Result<(Box<App>, tui::Tui, ThreadId, ThreadId)> {
     app.chat_widget
         .handle_thread_session(test_thread_session(side, app.config.cwd.to_path_buf()));
     app.chat_widget.insert_str("side draft\nsecond side line");
-    let (_, display) = app.chat_widget.take_side_display(40);
+    let (_, display, bottom) = app.chat_widget.take_side_display(40);
     app.side_companions.insert(
         side,
         side::SideCompanion {
+            bottom,
             display,
             cells: vec![plain_line_cell("Side answer")],
             view: Default::default(),
