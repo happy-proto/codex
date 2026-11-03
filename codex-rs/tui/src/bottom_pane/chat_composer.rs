@@ -4795,6 +4795,7 @@ impl ChatComposer {
         mut options: ComposerRenderOptions<'_>,
     ) {
         options.separate_status_line = true;
+        let options = self.resolve_render_options(options);
         let (status, hints) = self.shared_footer_areas(area);
         self.render_status_surface(status, buf, options);
         self.render_footer_rows(hints, Rect::default(), buf, options);
