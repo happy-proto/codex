@@ -337,6 +337,7 @@ pub(crate) struct BottomPane {
     /// Streaming may drop the row without losing its elapsed time or modal pause.
     status_timer: crate::status_indicator_widget::StatusTimer,
     workspace_status: workspace_status::WorkspaceStatus,
+    workspace_completion_speed: Option<f64>,
     workspace_indicator: StatusIndicatorWidget,
     /// Unified exec session summary source.
     ///
@@ -438,6 +439,7 @@ impl BottomPane {
             inline_banner: None,
             status_timer: crate::status_indicator_widget::StatusTimer::default(),
             workspace_status: Default::default(),
+            workspace_completion_speed: None,
             unified_exec_footer: UnifiedExecFooter::new(),
             pending_input_preview: PendingInputPreview::new(),
             pending_thread_approvals: PendingThreadApprovals::new(),
@@ -486,6 +488,11 @@ impl BottomPane {
     }
 
     pub(crate) fn set_workspace_status(&mut self, status: workspace_status::WorkspaceStatus) {
+        if status.turn_id != self.workspace_status.turn_id
+            || status.phase != workspace_status::WorkspacePhase::Completed
+        {
+            self.workspace_completion_speed = None;
+        }
         if status.generation_observed_at != self.workspace_status.generation_observed_at
             || status.phase != workspace_status::WorkspacePhase::Working
         {
@@ -510,6 +517,23 @@ impl BottomPane {
         }
         self.workspace_indicator
             .set_recent_generation_speed(self.recent_generation_speed.clone());
+    }
+
+    /// The final separator already validates the stored throughput against this completion.
+    pub(crate) fn set_workspace_completion(
+        &mut self,
+        completion: Option<&crate::history_cell::FinalMessageSeparator>,
+    ) -> bool {
+        let terminal = matches!(
+            self.workspace_status.phase,
+            workspace_status::WorkspacePhase::Completed
+                | workspace_status::WorkspacePhase::Failed
+                | workspace_status::WorkspacePhase::Interrupted
+        );
+        self.workspace_completion_speed = completion
+            .filter(|_| self.workspace_status.phase == workspace_status::WorkspacePhase::Completed)
+            .and_then(crate::history_cell::FinalMessageSeparator::generation_speed);
+        terminal && completion.is_some()
     }
 
     pub(crate) fn parked_renderable<'a>(
@@ -2623,7 +2647,15 @@ impl BottomPane {
                 } else {
                     flex.push(
                         0,
-                        RenderableItem::Owned(Box::new(self.workspace_status.line(None, None))),
+                        RenderableItem::Owned(Box::new({
+                            let mut line = self.workspace_status.line(None, None);
+                            if let Some(speed) = self.workspace_completion_speed {
+                                line.spans.push(ratatui::text::Span::raw(format!(
+                                    " · {speed:.1} token/s"
+                                )));
+                            }
+                            line
+                        })),
                     );
                 }
             } else if let Some(status) = self.status_widget() {
@@ -2913,6 +2945,39 @@ mod tests {
         let mut buf = Buffer::empty(area);
         pane.render(area, &mut buf);
         snapshot_buffer(&buf)
+    }
+
+    #[test]
+    fn workspace_completion_uses_final_speed_and_clears_it_for_the_next_turn() {
+        let (tx, _rx) = unbounded_channel();
+        let mut pane = test_pane_with_disable_paste_burst(AppEventSender::new(tx), true);
+        let mut status = workspace_status::WorkspaceStatus::default();
+        status.start("done", Duration::from_secs(40));
+        status.set_phase(workspace_status::WorkspacePhase::Completed);
+        pane.set_workspace_status(status);
+        pane.set_recent_generation_speed(Some(999.0));
+        let completion = crate::history_cell::FinalMessageSeparator::new(Some(40), None)
+            .with_generation_speed(Some(22.0));
+        assert!(pane.set_workspace_completion(Some(&completion)));
+        let options = ComposerRenderOptions {
+            shared_footer: Some(Rect::default()),
+            separate_status_line: true,
+            ..Default::default()
+        };
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 40, 12));
+        pane.as_renderable_with_options(options)
+            .render(buffer.area, &mut buffer);
+        let text = snapshot_buffer(&buffer);
+        assert!(
+            text.contains("Completed") && text.contains("22.0 token/s"),
+            "{text}"
+        );
+        assert!(!text.contains("999.0"), "{text}");
+        let mut next = workspace_status::WorkspaceStatus::default();
+        next.start("next", Duration::ZERO);
+        pane.set_workspace_status(next);
+        assert!(!pane.set_workspace_completion(Some(&completion)));
+        assert_eq!(pane.workspace_completion_speed, None);
     }
 
     #[test]
