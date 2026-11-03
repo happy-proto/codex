@@ -72,6 +72,21 @@ impl App {
             std::mem::swap(&mut self.chat_widget, &mut owner);
             self.retain_realtime_replay_state_before_replace();
             std::mem::swap(&mut self.chat_widget, &mut owner);
+            if let Some(route) = owner.side_projection_route() {
+                if let Some(pending) = self
+                    .pending_side_composers
+                    .get_mut(&route.thread_id)
+                    .filter(|pending| pending.route == route)
+                {
+                    pending.projection = Some(owner);
+                } else if let Some(companion) = self
+                    .side_companions
+                    .get_mut(&route.thread_id)
+                    .filter(|companion| companion.route == route)
+                {
+                    companion.projection = Some(owner);
+                }
+            }
         }
     }
 
