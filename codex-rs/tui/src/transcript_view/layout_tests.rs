@@ -6,6 +6,33 @@ use ratatui::text::Line;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+#[test]
+fn workspace_latest_completion_is_hidden_without_removing_history() {
+    let cells: Vec<Arc<dyn HistoryCell>> = vec![
+        Arc::new(crate::history_cell::FinalMessageSeparator::new(
+            Some(10),
+            None,
+        )),
+        Arc::new(
+            crate::history_cell::FinalMessageSeparator::new(Some(40), None)
+                .with_generation_speed(Some(22.0)),
+        ),
+    ];
+    let mut view = TranscriptView::default();
+    view.prepare_width(80);
+    view.set_workspace_completion(&cells, true);
+    assert!(view.current_layout(&cells, 0).unwrap().row_count() > 0);
+    assert_eq!(view.current_layout(&cells, 1).unwrap().row_count(), 0);
+    assert!(
+        cells[1]
+            .raw_lines()
+            .iter()
+            .any(|line| line.to_string().contains("22.0 token/s"))
+    );
+    view.set_workspace_completion(&cells, false);
+    assert!(view.current_layout(&cells, 1).unwrap().row_count() > 0);
+}
+
 #[derive(Debug, Default)]
 struct Cell {
     renders: AtomicUsize,
