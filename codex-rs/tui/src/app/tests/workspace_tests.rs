@@ -45,6 +45,73 @@ async fn pair() -> Result<(Box<App>, tui::Tui, ThreadId, ThreadId)> {
 }
 
 #[tokio::test]
+async fn workspace_passive_generation_speed_survives_idle_focus_and_rejects_finished_reads()
+-> Result<()> {
+    let (mut app, mut tui, main, side) = pair().await?;
+    let start = |id: &str| {
+        let mut event = turn_started_notification(side, id);
+        if let ServerNotification::TurnStarted(n) = &mut event {
+            n.turn.started_at = Some(chrono::Utc::now().timestamp() - 75);
+        }
+        event
+    };
+    app.enqueue_thread_notification(side, start("first"))
+        .await?;
+    assert!(app.chat_widget.live_generation_speed_target().is_none());
+    assert!(app.has_live_generation_speed_target());
+    let target = app.side_companions[&side]
+        .bottom
+        .workspace_generation_speed_target(side)
+        .unwrap();
+    app.finish_live_generation_speed(target.clone(), Some(23.8));
+    let text = side_frame(&mut app, &mut tui, Size::new(150, 24))?;
+    assert!(
+        text.contains("Working (") && text.contains("23.8 token/s"),
+        "{text}"
+    );
+    assert_eq!(app.current_displayed_thread_id(), Some(main));
+    app.enqueue_thread_notification(side, start("first"))
+        .await?;
+    let recovered = app.side_companions[&side]
+        .bottom
+        .workspace_generation_speed_target(side)
+        .unwrap();
+    assert_ne!(target, recovered);
+    app.finish_live_generation_speed(target, Some(999.0));
+    assert!(!side_frame(&mut app, &mut tui, Size::new(150, 24))?.contains("token/s"));
+    app.finish_live_generation_speed(recovered.clone(), Some(23.8));
+    assert!(side_frame(&mut app, &mut tui, Size::new(150, 24))?.contains("23.8 token/s"));
+    let target = recovered;
+    app.enqueue_thread_notification(
+        side,
+        turn_completed_notification(side, "first", TurnStatus::Completed),
+    )
+    .await?;
+    app.finish_live_generation_speed(target.clone(), Some(999.0));
+    let text = side_frame(&mut app, &mut tui, Size::new(150, 24))?;
+    assert!(
+        text.contains("Completed") && !text.contains("token/s"),
+        "{text}"
+    );
+    assert!(!app.has_live_generation_speed_target());
+    app.enqueue_thread_notification(side, start("second"))
+        .await?;
+    app.finish_live_generation_speed(target, Some(999.0));
+    let text = side_frame(&mut app, &mut tui, Size::new(150, 24))?;
+    assert!(!text.contains("token/s"), "{text}");
+    let current = app.side_companions[&side]
+        .bottom
+        .workspace_generation_speed_target(side)
+        .unwrap();
+    app.finish_live_generation_speed(current.clone(), Some(42.0));
+    assert!(side_frame(&mut app, &mut tui, Size::new(150, 24))?.contains("42.0 token/s"));
+    app.reconnect.offline = true;
+    app.finish_live_generation_speed(current, Some(99.0));
+    assert!(!side_frame(&mut app, &mut tui, Size::new(150, 24))?.contains("token/s"));
+    Ok(())
+}
+
+#[tokio::test]
 async fn workspace_background_status_updates_without_taking_input_focus() -> Result<()> {
     let (mut app, mut tui, main, side) = pair().await?;
     app.enqueue_thread_notification(side, turn_started_notification(side, "side-turn"))

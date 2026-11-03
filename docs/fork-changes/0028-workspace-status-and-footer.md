@@ -8,6 +8,11 @@
 未聚焦侧也随后台通知显示运行、等待输入、等待审批、完成、失败、中断或关闭；
 计时归线程所有，切换焦点不重置，等待交互时暂停，结束后冻结。
 状态行始终占用一行，任务完成不会收起该行。
+运行状态复用原有状态组件，保留呼吸动画、计时、聚焦侧的中断提示与生成速度；
+未聚焦侧也独立轮询本地实时速度，不随另一侧进入空闲而停更。
+只绘制状态组件的首行，详细上下文和 hook 换行不会改变输入区域的高度。
+窄侧栏优先缩短中断提示，为计时和速度保留空间；同一 turn 恢复时刷新速度采样身份，
+丢弃恢复前的回调和缓存，但不重置累计计时。
 
 两侧使用同一 BottomPane / ChatComposer 测量及绘制草稿，切走后不再把输入框压成三行。
 常规草稿和任务状态的高度不随焦点改变；输入弹窗、附件预览等仍按各自实际内容布局。
@@ -26,6 +31,8 @@
 - `tui/src/app/owned_transcript.rs`：聚焦侧布局及共享底栏绘制。
 - `tui/src/app/thread_events.rs`、`thread_routing.rs`：线程状态、计时和后台更新。
 - `tui/src/bottom_pane/workspace_status.rs`：紧凑任务状态展示。
+- `tui/src/status_indicator_widget.rs`：单行渲染复用原状态动画及提示。
+- `tui/src/app/generation_speed.rs`：两侧实时速度轮询及回调归属校验。
 - `tui/src/bottom_pane/chat_composer/`：测量、光标及底栏共用布局。
 
 保留上游单个可交互 ChatWidget 的结构；未聚焦侧只保留原 BottomPane 供绘制，
