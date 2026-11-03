@@ -93,6 +93,7 @@ struct VisibleRow {
 
 /// Shared scrolling and interaction state for compact and detailed transcript presentations.
 pub(crate) struct TranscriptView {
+    workspace_completion: Option<EntryKey>,
     pub(crate) image_protocol: Option<crate::pets::ImageProtocol>,
     pub(crate) document_links: bool,
     pub(crate) mouse_scroll_speed: f64,
@@ -136,6 +137,7 @@ pub(crate) struct TranscriptView {
 impl Default for TranscriptView {
     fn default() -> Self {
         Self {
+            workspace_completion: None,
             image_protocol: None,
             document_links: false,
             mouse_scroll_speed: 1.0,
