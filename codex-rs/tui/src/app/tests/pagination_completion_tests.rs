@@ -149,7 +149,8 @@ async fn older_page_updates_the_parked_parent_without_moving_focus() -> Result<(
     let child = ThreadId::new();
     app.side_threads
         .insert(child, SideThreadState::new(thread_id));
-    let (stream, display) = app.chat_widget.take_side_display(/*width*/ 100);
+    let (stream, display, bottom) = app.chat_widget.take_side_display(/*width*/ 100);
+    app.pending_side_composers.insert(thread_id, bottom);
     boxed_future!(app.handle_event(
         &mut tui,
         &mut app_server,
