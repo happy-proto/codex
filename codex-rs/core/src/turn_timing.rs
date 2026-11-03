@@ -178,12 +178,14 @@ impl TurnTimingState {
         state_db: crate::StateDbHandle,
         thread_id: codex_protocol::ThreadId,
         turn_id: String,
+        ephemeral: bool,
     ) -> crate::generation_speed::GenerationSpeedReporter {
         crate::generation_speed::GenerationSpeedReporter::start(
             &self.generation_speed,
             state_db,
             thread_id,
             turn_id,
+            ephemeral,
         )
         .await
     }
