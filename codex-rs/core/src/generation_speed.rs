@@ -269,13 +269,16 @@ impl GenerationSpeedReporter {
         state_db: crate::StateDbHandle,
         thread_id: codex_protocol::ThreadId,
         turn_id: String,
+        ephemeral: bool,
     ) -> Self {
         let run_id = uuid::Uuid::new_v4().to_string();
         // Reset before publishing TurnStarted, so replay cannot reuse a pre-crash value.
         let initialized = matches!(
             tokio::time::timeout(
                 Duration::from_millis(100),
-                state_db.start_live_generation_speed(thread_id, &turn_id, &run_id),
+                state_db
+                    .generation_speed_writer(ephemeral)
+                    .start_live_generation_speed(thread_id, &turn_id, &run_id),
             )
             .await,
             Ok(Ok(()))
@@ -292,7 +295,9 @@ impl GenerationSpeedReporter {
                     initialized = matches!(
                         tokio::time::timeout(
                             Duration::from_millis(100),
-                            state_db.start_live_generation_speed(thread_id, &turn_id, &run_id),
+                            state_db
+                                .generation_speed_writer(ephemeral)
+                                .start_live_generation_speed(thread_id, &turn_id, &run_id),
                         )
                         .await,
                         Ok(Ok(()))
@@ -311,7 +316,9 @@ impl GenerationSpeedReporter {
                 // Never hold the measurement lock across I/O or delay model sampling.
                 match tokio::time::timeout(
                     Duration::from_millis(100),
-                    state_db.update_live_generation_speed(thread_id, &turn_id, &run_id, speed),
+                    state_db
+                        .generation_speed_writer(ephemeral)
+                        .update_live_generation_speed(thread_id, &turn_id, &run_id, speed),
                 )
                 .await
                 {
