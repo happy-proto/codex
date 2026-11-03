@@ -519,7 +519,7 @@ impl App {
                     &app_server_target,
                     config.features.enabled(Feature::DaemonUpdates),
                     app_server.server_codex_home(),
-                    CODEX_CLI_VERSION,
+                    cli_version(),
                     app_server.server_version(),
                     /*last_shown*/ None,
                 )
@@ -573,12 +573,13 @@ impl App {
             .start_dynamic_tool_mcp(
                 config.clone(),
                 local_settings.workspace_enabled(&config),
+                config.features.enabled(Feature::TuiTaskMcp),
                 app_event_tx.clone(),
                 dynamic_tool_status_updates.clone(),
             )
             .await
         {
-            tracing::warn!(%error, "TUI task delegation is unavailable without its MCP server");
+            tracing::warn!(%error, "TUI MCP tools are unavailable");
         }
         let mut provider_writes = HashMap::new();
         let model_catalog = Arc::new(
@@ -1046,7 +1047,7 @@ See the Codex keymap documentation for supported actions and examples."
         });
         let runtime_keymap = startup_try!(runtime_keymap);
         #[cfg(not(debug_assertions))]
-        let upgrade_version = crate::updates::get_upgrade_version(&config);
+        crate::updates::start_update_check(&config, app_event_tx.clone());
 
         let agents_overview =
             agents_overview::AgentsOverviewState::new(local_settings.tui.agents_overview_grouping);
@@ -1162,6 +1163,7 @@ See the Codex keymap documentation for supported actions and examples."
             pane_resize: None,
             passive_link_drag: None,
             sidebar_press: None,
+            pending_side_composers: HashMap::new(),
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,
             primary_thread_id: None,
@@ -1191,6 +1193,7 @@ See the Codex keymap documentation for supported actions and examples."
             account_email_request_id: None,
             rate_limit_hard_stop_generation: 0,
             rate_limit_refresh_state: Default::default(),
+            thread_name_refresh: Default::default(),
             pending_mcp_login_start: None,
             active_mcp_login_ids: HashMap::new(),
             pending_plugin_enabled_writes: HashMap::new(),
@@ -1217,13 +1220,9 @@ See the Codex keymap documentation for supported actions and examples."
         if !tui.is_terminal_focused() {
             app.recap.note_focus_lost(Instant::now());
         }
-        let _ =
-            app.initialize_server_version_notice(CODEX_CLI_VERSION, app_server.server_version());
+        let _ = app.initialize_server_version_notice(cli_version(), app_server.server_version());
         if initial_server_version_notice.is_none() {
-            app.update_server_version_overview_notice(
-                CODEX_CLI_VERSION,
-                /*server_version*/ None,
-            );
+            app.update_server_version_overview_notice(cli_version(), /*server_version*/ None);
         }
         app.backend_registry.connect(&app_server);
         if let Some(thread_id) = app.current_displayed_thread_id() {
@@ -1390,29 +1389,10 @@ See the Codex keymap documentation for supported actions and examples."
         let mut cloud_environment_picker: Option<
             futures::future::LocalBoxFuture<'static, crate::bottom_pane::SelectionViewParams>,
         > = None;
+        let mut generation_speed_poll = tokio::time::interval(Duration::from_secs(1));
+        generation_speed_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut waiting_for_initial_session_configured = wait_for_initial_session_configured;
         let mut waiting_for_initial_session_header = true;
-
-        #[cfg(not(debug_assertions))]
-        let pre_loop_exit_reason = if let Some(latest_version) = upgrade_version {
-            let control = Box::pin(app.handle_event(
-                tui,
-                &mut app_server,
-                AppEvent::InsertHistoryCell(Box::new(UpdateAvailableHistoryCell::new(
-                    latest_version,
-                    crate::update_action::get_update_action(),
-                ))),
-            ))
-            .await;
-            match startup_try!(control) {
-                AppRunControl::Continue => None,
-                AppRunControl::Exit(exit_reason) => Some(exit_reason),
-            }
-        } else {
-            None
-        };
-        #[cfg(debug_assertions)]
-        let pre_loop_exit_reason: Option<ExitReason> = None;
 
         let mut backends =
             super::backend_sessions::BackendSessions::from_initial(app_server, other_backends);
@@ -1430,593 +1410,603 @@ See the Codex keymap documentation for supported actions and examples."
         backends.settings = backend_settings;
 
         let mut parked_side_completions = HashMap::<_, Vec<AppEvent>>::new();
-        let exit_reason_result = if let Some(exit_reason) = pre_loop_exit_reason {
-            Ok(exit_reason)
-        } else {
-            loop {
-                let displayed_session = backends.displayed;
-                let displayed_owner = backends.displayed_owner();
-                if let Some(events) = parked_side_completions.remove(&displayed_owner) {
-                    for event in events {
-                        app.app_event_tx.send(event);
-                    }
+        let exit_reason_result = loop {
+            if tui.program_resume.is_some() && !app.reconnect.offline {
+                tui.update_program_resume(app.program_resume_target());
+            }
+            let displayed_session = backends.displayed;
+            let displayed_owner = backends.displayed_owner();
+            if let Some(events) = parked_side_completions.remove(&displayed_owner) {
+                for event in events {
+                    app.app_event_tx.send(event);
                 }
-                backends.replay_ready_side_startup(&app);
-                let multi_backend = app.config.features.enabled(Feature::TuiMultiBackend);
-                let draft = multi_backend.then(|| app.backend_draft()).flatten();
-                let next_backend = draft
-                    .is_some()
-                    .then(|| backends.next_listening_backend(displayed_owner))
-                    .flatten();
-                let current_label =
-                    next_backend.and_then(|_| backends.displayed_name(&app.app_server_target));
-                let cloud_draft = draft.filter(|_| {
-                    app.app_server_target == AppServerTarget::Cloud
-                        && backends.is_listening(displayed_owner)
-                });
-                let environment_name = cloud_draft.map(|id| {
-                    app.agents_overview
-                        .draft_cloud_environments
-                        .get(&id)
-                        .filter(|(owner, _)| *owner == displayed_owner)
-                        .map(|(_, env)| {
-                            crate::terminal_title::sanitize_terminal_title(
-                                &env.name,
-                                crate::terminal_title::TitleEncoding::Unicode,
-                            )
-                        })
-                        .unwrap_or_else(|| "Default".into())
-                });
-                app.chat_widget
-                    .set_new_backend_control(current_label, environment_name);
-                if !backends.is_listening(displayed_owner)
-                    && !app.pending_startup_thread_start
-                    && !app.reconnect.offline
+            }
+            backends.replay_ready_side_startup(&app);
+            let multi_backend = app.config.features.enabled(Feature::TuiMultiBackend);
+            let draft = multi_backend.then(|| app.backend_draft()).flatten();
+            let next_backend = draft
+                .is_some()
+                .then(|| backends.next_listening_backend(displayed_owner))
+                .flatten();
+            let current_label =
+                next_backend.and_then(|_| backends.displayed_name(&app.app_server_target));
+            let cloud_draft = draft.filter(|_| {
+                app.app_server_target == AppServerTarget::Cloud
+                    && backends.is_listening(displayed_owner)
+            });
+            let environment_name = cloud_draft.map(|id| {
+                app.agents_overview
+                    .draft_cloud_environments
+                    .get(&id)
+                    .filter(|(owner, _)| *owner == displayed_owner)
+                    .map(|(_, env)| {
+                        crate::terminal_title::sanitize_terminal_title(
+                            &env.name,
+                            crate::terminal_title::TitleEncoding::Unicode,
+                        )
+                    })
+                    .unwrap_or_else(|| "Default".into())
+            });
+            app.chat_widget
+                .set_new_backend_control(current_label, environment_name);
+            if !backends.is_listening(displayed_owner)
+                && !app.pending_startup_thread_start
+                && !app.reconnect.offline
+            {
+                app.begin_reconnect();
+            }
+            // Reconnect can dismiss an overlay from the server-event path.
+            if app.overlay.is_none() {
+                if !tui.is_owned_screen() && tui.is_alt_screen_active() {
+                    app.close_transcript_overlay(tui);
+                } else if let Err(err) =
+                    tui.set_mouse_capture(app.chat_widget.mouse_capture(tui.is_owned_screen()))
                 {
-                    app.begin_reconnect();
+                    break Err(err.into());
                 }
-                // Reconnect can dismiss an overlay from the server-event path.
-                if app.overlay.is_none() {
-                    if !tui.is_owned_screen() && tui.is_alt_screen_active() {
-                        app.close_transcript_overlay(tui);
-                    } else if let Err(err) =
-                        tui.set_mouse_capture(app.chat_widget.mouse_capture(tui.is_owned_screen()))
+            }
+            if app.reconnect.cloud_resume.as_ref().is_some_and(|resume| {
+                resume.backend_id != displayed_owner
+                    || Some(resume.thread_id) != app.current_displayed_thread_id()
+                    || app.reconnect.offline
+            }) {
+                app.reconnect.cloud_resume = None;
+            }
+            // Process archive completions before the picker can list or mutate those threads.
+            if app.pending_open_resume_picker && app.agents_overview.pending_archives.is_empty() {
+                app.pending_open_resume_picker = false;
+                match Box::pin(app.open_resume_picker_for_backends(tui, &mut backends)).await {
+                    Ok(AppRunControl::Continue) => {}
+                    Ok(AppRunControl::Exit(reason)) => break Ok(reason),
+                    Err(err) if app.recover_transport_error(&err) => {}
+                    Err(err) => break Err(err),
+                }
+                continue;
+            }
+            if let Some(pending) = app.pending_working_directory_change.take() {
+                Box::pin(app.finish_working_directory_change(
+                    tui,
+                    backends.session_at_mut(displayed_session),
+                    pending,
+                ))
+                .await;
+                continue;
+            }
+            if let Some((mode, name)) = app.pending_start_managed_worktree.take() {
+                Box::pin(app.start_managed_worktree(
+                    backends.session_at_mut(displayed_session),
+                    mode,
+                    name,
+                ))
+                .await;
+                continue;
+            }
+            // Complete the fork and widget attachment on separate fresh loop iterations.
+            if let Some(attach) = app.pending_managed_worktree_attach.take() {
+                Box::pin(app.attach_working_directory(
+                    tui,
+                    backends.session_at_mut(displayed_session),
+                    *attach,
+                ))
+                .await;
+                continue;
+            }
+            if let Some(transition) = app.pending_managed_worktree_transition.take() {
+                if let Err(error) = Box::pin(app.switch_to_managed_worktree(
+                    tui,
+                    backends.session_at_mut(displayed_session),
+                    *transition,
+                ))
+                .await
+                {
+                    app.chat_widget.add_error_message(error.to_string());
+                }
+                continue;
+            }
+            if let Some(created) = app.pending_managed_worktree_created.take() {
+                Box::pin(app.finish_managed_worktree(*created)).await;
+                continue;
+            }
+            if app.reconnect.offline && !app.reconnect.failed && reconnect.is_none() {
+                let presentation = app.reconnect.presentation;
+                let wait_for_drain =
+                    app.pending_startup_thread_start && backends.is_listening(displayed_owner);
+                let attempt = reconnect::reconnect(
+                    displayed_owner,
+                    app.app_server_target.clone(),
+                    app.config.clone(),
+                    app.local_settings.clone(),
+                    app.reconnect_thread_id(),
+                    backends
+                        .session_at(displayed_session)
+                        .remote_cwd_override()
+                        .map(Path::to_path_buf),
+                    backends
+                        .session_at(displayed_session)
+                        .thread_tool_transport(),
+                    presentation,
+                );
+                let future = Box::pin(async move {
+                    if let reconnect::ReconnectPresentation::Startup(deadline) = presentation
+                        && wait_for_drain
                     {
-                        break Err(err.into());
-                    }
-                }
-                if app.reconnect.cloud_resume.as_ref().is_some_and(|resume| {
-                    resume.backend_id != displayed_owner
-                        || Some(resume.thread_id) != app.current_displayed_thread_id()
-                        || app.reconnect.offline
-                }) {
-                    app.reconnect.cloud_resume = None;
-                }
-                // Process archive completions before the picker can list or mutate those threads.
-                if app.pending_open_resume_picker && app.agents_overview.pending_archives.is_empty()
-                {
-                    app.pending_open_resume_picker = false;
-                    match Box::pin(app.open_resume_picker_for_backends(tui, &mut backends)).await {
-                        Ok(AppRunControl::Continue) => {}
-                        Ok(AppRunControl::Exit(reason)) => break Ok(reason),
-                        Err(err) if app.recover_transport_error(&err) => {}
-                        Err(err) => break Err(err),
-                    }
-                    continue;
-                }
-                if let Some(pending) = app.pending_working_directory_change.take() {
-                    Box::pin(app.finish_working_directory_change(
-                        tui,
-                        backends.session_at_mut(displayed_session),
-                        pending,
-                    ))
-                    .await;
-                    continue;
-                }
-                if let Some((mode, name)) = app.pending_start_managed_worktree.take() {
-                    Box::pin(app.start_managed_worktree(
-                        backends.session_at_mut(displayed_session),
-                        mode,
-                        name,
-                    ))
-                    .await;
-                    continue;
-                }
-                // Complete the fork and widget attachment on separate fresh loop iterations.
-                if let Some(attach) = app.pending_managed_worktree_attach.take() {
-                    Box::pin(app.attach_working_directory(
-                        tui,
-                        backends.session_at_mut(displayed_session),
-                        *attach,
-                    ))
-                    .await;
-                    continue;
-                }
-                if let Some(transition) = app.pending_managed_worktree_transition.take() {
-                    if let Err(error) = Box::pin(app.switch_to_managed_worktree(
-                        tui,
-                        backends.session_at_mut(displayed_session),
-                        *transition,
-                    ))
-                    .await
-                    {
-                        app.chat_widget.add_error_message(error.to_string());
-                    }
-                    continue;
-                }
-                if let Some(created) = app.pending_managed_worktree_created.take() {
-                    Box::pin(app.finish_managed_worktree(*created)).await;
-                    continue;
-                }
-                if app.reconnect.offline && !app.reconnect.failed && reconnect.is_none() {
-                    let presentation = app.reconnect.presentation;
-                    let wait_for_drain =
-                        app.pending_startup_thread_start && backends.is_listening(displayed_owner);
-                    let attempt = reconnect::reconnect(
-                        displayed_owner,
-                        app.app_server_target.clone(),
-                        app.config.clone(),
-                        app.local_settings.clone(),
-                        app.reconnect_thread_id(),
-                        backends
-                            .session_at(displayed_session)
-                            .remote_cwd_override()
-                            .map(Path::to_path_buf),
-                        backends
-                            .session_at(displayed_session)
-                            .thread_tool_transport(),
-                        presentation,
-                    );
-                    let future = Box::pin(async move {
-                        if let reconnect::ReconnectPresentation::Startup(deadline) = presentation
-                            && wait_for_drain
-                        {
-                            tokio::time::sleep_until(deadline).await;
-                            color_eyre::eyre::bail!(
-                                "Automatic reconnect timed out waiting for the server to finish shutting down."
-                            );
-                        }
-                        attempt.await
-                    });
-                    reconnect = Some((displayed_owner, future));
-                }
-                // Replay queues history and operations. A buffered closure must not switch
-                // widgets before those app events have been applied.
-                let has_pending_app_events = !app_event_rx.is_empty();
-                // An installed stream can emit events before the install result is consumed.
-                // Apply the recovered history before accepting those events.
-                let paused_backend = ((app.reconnect.offline && !app.pending_startup_thread_start)
-                    || app
-                        .reconnect
-                        .cloud_resume
-                        .as_ref()
-                        .is_some_and(super::resume_preparation::CloudResume::installing)
-                    || (app.awaiting_side_replay(tui) && has_pending_app_events)
-                    || (!matches!(app.app_server_target, AppServerTarget::Embedded)
-                        && has_pending_app_events))
-                    .then_some(displayed_owner);
-                let initial_session_header_pending = waiting_for_initial_session_header
-                    && app.primary_session_configured.is_some()
-                    && has_pending_app_events;
-                let block_terminal_input_for_pending_startup_events =
-                    (!matches!(app.app_server_target, AppServerTarget::Embedded)
-                        && has_pending_app_events)
-                        || initial_session_header_pending
-                        || (pending_startup_draft.is_some()
-                            || app.startup_protected_input_boundary)
-                            && has_pending_app_events
-                        || (!waiting_for_initial_session_configured
-                            && app.has_queued_startup_protected_request());
-                // The screen cache is physical geometry, not the inline viewport. This also
-                // notices the final size after returning from a standalone nested screen.
-                let size = tui.terminal.last_known_screen_size;
-                if !crate::terminal_size_telemetry::enabled(&app.config)
-                    || app.terminal_size_tags.is_empty()
-                {
-                    pending_resize = None;
-                    settled_size_tags = crate::terminal_size_telemetry::tags(size);
-                } else if size != last_screen_size {
-                    pending_resize =
-                        Some((size, Instant::now() + Duration::from_secs(/*secs*/ 15)));
-                }
-                last_screen_size = size;
-                let rate_limit_poll_deadline = app
-                    .chat_widget
-                    .rate_limit_refresh_interval()
-                    .and_then(|interval| app.rate_limit_refresh_state.poll_deadline(interval));
-                let cloud_owner = (backends.is_listening(displayed_owner)
-                    && backends.session_at(displayed_session).thread_params_mode()
-                        == crate::ThreadParamsMode::Cloud
-                    && app.cloud_inventory_visible(displayed_owner))
-                .then_some(displayed_owner);
-                if cloud_inventory_owner != cloud_owner {
-                    cloud_inventory_owner = cloud_owner;
-                    cloud_inventory_poll.reset();
-                }
-                let control = select! {
-                    // Leave the previous frame visible and let other app work run between batches.
-                    Some(transition) = std::future::ready(app.pending_input_drain), if app.pending_input_drain.is_some() => {
-                        app.finish_thread_input_drain(tui, transition);
-                        AppRunControl::Continue
-                    }
-                    result = async {
-                        match app.daemon_restart.as_mut() {
-                            Some(task) => task.await,
-                            None => std::future::pending().await,
-                        }
-                    }, if app.daemon_restart.is_some() => {
-                        app.daemon_restart = None;
-                        if let Err(err) = result.unwrap_or_else(|err| Err(err.into())) {
-                            app.chat_widget.add_error_message(format!("Could not restart the background server: {err:#}"));
-                        }
-                        AppRunControl::Continue
-                    }
-                    Some(view) = futures::future::OptionFuture::from(cloud_environment_picker.as_mut()) => {
-                        cloud_environment_picker = None;
-                        app.chat_widget.replace_selection_view_if_present(
-                            super::cloud_environments::LOADING_VIEW_ID, view,
+                        tokio::time::sleep_until(deadline).await;
+                        color_eyre::eyre::bail!(
+                            "Automatic reconnect timed out waiting for the server to finish shutting down."
                         );
-                        AppRunControl::Continue
                     }
-                    Some(event) = app.saved_openings.next_event(&mut app_event_rx) => {
-                        if let AppEvent::ArchiveFinished { backend_id, thread_id, result: Ok(()) } = &event
-                            && *backend_id != displayed_owner
-                            && let Some(slot) = backends.slot(*backend_id)
+                    attempt.await
+                });
+                reconnect = Some((displayed_owner, future));
+            }
+            // Replay queues history and operations. A buffered closure must not switch
+            // widgets before those app events have been applied.
+            let has_pending_app_events = !app_event_rx.is_empty();
+            // An installed stream can emit events before the install result is consumed.
+            // Apply the recovered history before accepting those events.
+            let paused_backend = ((app.reconnect.offline && !app.pending_startup_thread_start)
+                || app
+                    .reconnect
+                    .cloud_resume
+                    .as_ref()
+                    .is_some_and(super::resume_preparation::CloudResume::installing)
+                || (app.awaiting_side_replay(tui) && has_pending_app_events)
+                || (!matches!(app.app_server_target, AppServerTarget::Embedded)
+                    && has_pending_app_events))
+                .then_some(displayed_owner);
+            let initial_session_header_pending = waiting_for_initial_session_header
+                && app.primary_session_configured.is_some()
+                && has_pending_app_events;
+            let block_terminal_input_for_pending_startup_events =
+                (!matches!(app.app_server_target, AppServerTarget::Embedded)
+                    && has_pending_app_events)
+                    || initial_session_header_pending
+                    || (pending_startup_draft.is_some() || app.startup_protected_input_boundary)
+                        && has_pending_app_events
+                    || (!waiting_for_initial_session_configured
+                        && app.has_queued_startup_protected_request());
+            // The screen cache is physical geometry, not the inline viewport. This also
+            // notices the final size after returning from a standalone nested screen.
+            let size = tui.terminal.last_known_screen_size;
+            if !crate::terminal_size_telemetry::enabled(&app.config)
+                || app.terminal_size_tags.is_empty()
+            {
+                pending_resize = None;
+                settled_size_tags = crate::terminal_size_telemetry::tags(size);
+            } else if size != last_screen_size {
+                pending_resize = Some((size, Instant::now() + Duration::from_secs(/*secs*/ 15)));
+            }
+            last_screen_size = size;
+            let rate_limit_poll_deadline = app
+                .chat_widget
+                .rate_limit_refresh_interval()
+                .and_then(|interval| app.rate_limit_refresh_state.poll_deadline(interval));
+            let cloud_owner = (backends.is_listening(displayed_owner)
+                && backends.session_at(displayed_session).thread_params_mode()
+                    == crate::ThreadParamsMode::Cloud
+                && app.cloud_inventory_visible(displayed_owner))
+            .then_some(displayed_owner);
+            if cloud_inventory_owner != cloud_owner {
+                cloud_inventory_owner = cloud_owner;
+                cloud_inventory_poll.reset();
+            }
+            let thread_name_poll_deadline = app.thread_name_poll_deadline();
+            let control = select! {
+                // Leave the previous frame visible and let other app work run between batches.
+                Some(transition) = std::future::ready(app.pending_input_drain), if app.pending_input_drain.is_some() => {
+                    app.finish_thread_input_drain(tui, transition);
+                    AppRunControl::Continue
+                }
+            _ = generation_speed_poll.tick(), if app.has_live_generation_speed_target() => {
+                app.refresh_live_generation_speed();
+                AppRunControl::Continue
+            }
+                result = async {
+                    match app.daemon_restart.as_mut() {
+                        Some(task) => task.await,
+                        None => std::future::pending().await,
+                    }
+                }, if app.daemon_restart.is_some() => {
+                    app.daemon_restart = None;
+                    if let Err(err) = result.unwrap_or_else(|err| Err(err.into())) {
+                        app.chat_widget.add_error_message(format!("Could not restart the background server: {err:#}"));
+                    }
+                    AppRunControl::Continue
+                }
+                Some(view) = futures::future::OptionFuture::from(cloud_environment_picker.as_mut()) => {
+                    cloud_environment_picker = None;
+                    app.chat_widget.replace_selection_view_if_present(
+                        super::cloud_environments::LOADING_VIEW_ID, view,
+                    );
+                    AppRunControl::Continue
+                }
+                Some(event) = app.saved_openings.next_event(&mut app_event_rx) => {
+                    if let AppEvent::ArchiveFinished { backend_id, thread_id, result: Ok(()) } = &event
+                        && *backend_id != displayed_owner
+                        && let Some(slot) = backends.slot(*backend_id)
+                    {
+                        backends.parked_inputs_mut(slot).remove(thread_id);
+                    }
+                    if matches!(&event, AppEvent::RemoteControl(_) | AppEvent::RemoteControlForBackend { .. } | AppEvent::RemoteControlFinished { .. }) {
+                        super::remote_control::handle(&mut app, &backends, event);
+                        if app.chat_widget.has_active_modal()
+                            && let Err(err) = app.render_startup_frame(tui, &app_event_rx)
                         {
-                            backends.parked_inputs_mut(slot).remove(thread_id);
+                            break Err(err);
                         }
-                        if matches!(&event, AppEvent::RemoteControl(_) | AppEvent::RemoteControlForBackend { .. } | AppEvent::RemoteControlFinished { .. }) {
-                            super::remote_control::handle(&mut app, &backends, event);
-                            if app.chat_widget.has_active_modal()
-                                && let Err(err) = app.render_startup_frame(tui, &app_event_rx)
+                        continue;
+                    }
+                    let switch_backend = match &event {
+                        AppEvent::ChooseCloudEnvironment => {
+                            if let Some(source) = cloud_draft
+                                && app.chat_widget.no_modal_or_popup_active()
+                                && let AppServerRequestHandle::Cloud(handle) = backends.session_at(displayed_session).request_handle()
                             {
-                                break Err(err);
+                                app.chat_widget.show_selection_view(super::cloud_environments::loading_view());
+                                cloud_environment_picker = Some(Box::pin(async move {
+                                    let environments = handle.list_saved_environments().await.map_err(|error| error.to_string());
+                                    super::cloud_environments::cloud_environment_picker(environments, source)
+                                }));
                             }
                             continue;
                         }
-                        let switch_backend = match &event {
-                            AppEvent::ChooseCloudEnvironment => {
-                                if let Some(source) = cloud_draft
-                                    && app.chat_widget.no_modal_or_popup_active()
-                                    && let AppServerRequestHandle::Cloud(handle) = backends.session_at(displayed_session).request_handle()
-                                {
-                                    app.chat_widget.show_selection_view(super::cloud_environments::loading_view());
-                                    cloud_environment_picker = Some(Box::pin(async move {
-                                        let environments = handle.list_saved_environments().await.map_err(|error| error.to_string());
-                                        super::cloud_environments::cloud_environment_picker(environments, source)
-                                    }));
-                                }
-                                continue;
-                            }
-                            AppEvent::StartCloudConversation { source, saved_environment }
-                                if cloud_draft == Some(*source) =>
-                            {
-                                Some((displayed_owner, NewBackendSession::ChangeCloudEnvironment(saved_environment.clone())))
-                            }
-                            AppEvent::StartCloudConversation { .. } => continue,
-                            AppEvent::ChooseNewSessionCheckout { name } | AppEvent::NewSession { name }
-                                if multi_backend => app.other_new_session_backend(&backends).await
-                                    .map(|owner| (owner, NewBackendSession::Fresh { name: name.clone() })),
-                            AppEvent::CycleNewConversationBackend => {
-                                let Some(owner) = next_backend else { continue };
-                                Some((owner, NewBackendSession::CarryDraft))
-                            }
-                            _ => None,
-                        };
-                        if let Some((owner, session)) = switch_backend {
-                            if let Err(message) = Box::pin(app.start_new_session_on_other_backend(tui, &mut backends, owner, session)).await {
-                                app.chat_widget.add_error_message(message);
-                            }
+                        AppEvent::StartCloudConversation { source, saved_environment }
+                            if cloud_draft == Some(*source) =>
+                        {
+                            Some((displayed_owner, NewBackendSession::ChangeCloudEnvironment(saved_environment.clone())))
+                        }
+                        AppEvent::StartCloudConversation { .. } => continue,
+                        AppEvent::ChooseNewSessionCheckout { name } | AppEvent::NewSession { name }
+                            if multi_backend => app.other_new_session_backend(&backends).await
+                                .map(|owner| (owner, NewBackendSession::Fresh { name: name.clone() })),
+                        AppEvent::CycleNewConversationBackend => {
+                            let Some(owner) = next_backend else { continue };
+                            Some((owner, NewBackendSession::CarryDraft))
+                        }
+                        _ => None,
+                    };
+                    if let Some((owner, session)) = switch_backend {
+                        if let Err(message) = Box::pin(app.start_new_session_on_other_backend(tui, &mut backends, owner, session)).await {
+                            app.chat_widget.add_error_message(message);
+                        }
+                        continue;
+                    }
+                    if let AppEvent::ResumeBackendSession(target) = event {
+                        let thread_id = target.thread_id;
+                        let result = app.resume_backend_session(tui, &mut backends, target).await;
+                        if app.finish_docked_task_opening(tui, thread_id)
+                            && app.chat_widget.has_active_modal()
+                            && let Err(err) = app.render_startup_frame(tui, &app_event_rx)
+                        {
+                            break Err(err);
+                        }
+                        match result {
+                            Ok(AppRunControl::Continue) => continue,
+                            Ok(AppRunControl::Exit(reason)) => break Ok(reason),
+                            Err(error) => break Err(error),
+                        }
+                    }
+                    let is_initial_session_header = matches!(
+                        &event,
+                        AppEvent::InsertHistoryCell(cell)
+                            if cell.as_any().is::<history_cell::SessionInfoCell>()
+                    );
+                    let event_session = match &event {
+                        AppEvent::SideCreated { backend_id, .. } if *backend_id != displayed_owner => {
+                            parked_side_completions.entry(*backend_id).or_default().push(event);
                             continue;
                         }
-                        if let AppEvent::ResumeBackendSession(target) = event {
-                            let thread_id = target.thread_id;
-                            let result = app.resume_backend_session(tui, &mut backends, target).await;
-                            if app.finish_docked_task_opening(tui, thread_id)
+                        AppEvent::SavedSideChatsLoaded { backend_id, .. }
+                        | AppEvent::SidebarDocumentResolved { backend_id, .. }
+                        | AppEvent::SidebarDocumentLoaded { backend_id, .. }
+                        | AppEvent::SidebarFilesLoaded { backend_id, .. }
+                        | AppEvent::StartupThreadStarted { backend_id, .. } => {
+                            backends.slot(*backend_id).unwrap_or(displayed_session)
+                        }
+                        _ => displayed_session,
+                    };
+                    // A modal deferred behind a snapshot reset still needs its first frame
+                    // and protected-input drain when replay completes.
+                    let had_visible_modal = app.chat_widget.has_active_modal()
+                        && !app.awaiting_side_replay(tui);
+                    match Box::pin(app.handle_event(tui, backends.session_at_mut(event_session), event)).await {
+                        Ok(AppRunControl::Continue) => {
+                            if is_initial_session_header {
+                                waiting_for_initial_session_header = false;
+                            }
+                            if !had_visible_modal
                                 && app.chat_widget.has_active_modal()
                                 && let Err(err) = app.render_startup_frame(tui, &app_event_rx)
                             {
                                 break Err(err);
                             }
-                            match result {
-                                Ok(AppRunControl::Continue) => continue,
-                                Ok(AppRunControl::Exit(reason)) => break Ok(reason),
-                                Err(error) => break Err(error),
-                            }
+                            AppRunControl::Continue
                         }
-                        let is_initial_session_header = matches!(
+                        Ok(AppRunControl::Exit(reason)) => AppRunControl::Exit(reason),
+                        Err(err) if app.recover_transport_error(&err) => AppRunControl::Continue,
+                        Err(err) => break Err(err),
+                    }
+                }
+                active = async {
+                    if let Some(channel) = app.active_thread_id.and_then(|id| app.thread_event_channels.get_mut(&id)) {
+                        channel.receiver.recv().await
+                    } else {
+                        None
+                    }
+                }, if App::should_handle_active_thread_events(
+                    waiting_for_initial_session_configured,
+                    app.active_thread_rx().is_some()
+                ) && !has_pending_app_events && !app.reconnect.offline => {
+                    if let Some(event) = active {
+                        if let Err(err) = app.handle_active_thread_event(tui, backends.session_at_mut(displayed_session), event).await {
+                            break Err(err);
+                        }
+                    } else {
+                        app.clear_active_thread().await;
+                    }
+                    AppRunControl::Continue
+                }
+                event = tui_events.next(), if app.can_read_terminal_after_thread_switch(tui, &app_event_rx)
+                    && (app.reconnect.offline || !block_terminal_input_for_pending_startup_events) => {
+                    if let Some(event) = event {
+                        if (matches!(
                             &event,
-                            AppEvent::InsertHistoryCell(cell)
-                                if cell.as_any().is::<history_cell::SessionInfoCell>()
-                        );
-                        let event_session = match &event {
-                            AppEvent::SideCreated { backend_id, .. } if *backend_id != displayed_owner => {
-                                parked_side_completions.entry(*backend_id).or_default().push(event);
-                                continue;
-                            }
-                            AppEvent::SavedSideChatsLoaded { backend_id, .. }
-                            | AppEvent::SidebarDocumentResolved { backend_id, .. }
-                            | AppEvent::SidebarDocumentLoaded { backend_id, .. }
-                            | AppEvent::SidebarFilesLoaded { backend_id, .. }
-                            | AppEvent::StartupThreadStarted { backend_id, .. } => {
-                                backends.slot(*backend_id).unwrap_or(displayed_session)
-                            }
-                            _ => displayed_session,
-                        };
-                        // A modal deferred behind a snapshot reset still needs its first frame
-                        // and protected-input drain when replay completes.
-                        let had_visible_modal = app.chat_widget.has_active_modal()
-                            && !app.awaiting_side_replay(tui);
-                        match Box::pin(app.handle_event(tui, backends.session_at_mut(event_session), event)).await {
-                            Ok(AppRunControl::Continue) => {
-                                if is_initial_session_header {
-                                    waiting_for_initial_session_header = false;
-                                }
-                                if !had_visible_modal
-                                    && app.chat_widget.has_active_modal()
-                                    && let Err(err) = app.render_startup_frame(tui, &app_event_rx)
-                                {
-                                    break Err(err);
-                                }
-                                AppRunControl::Continue
-                            }
-                            Ok(AppRunControl::Exit(reason)) => AppRunControl::Exit(reason),
+                            TuiEvent::Key(key)
+                                if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+                        ) || matches!(&event, TuiEvent::Paste(_)))
+                            && !app.reconnect.offline
+                            && pending_startup_draft.is_none()
+                            && !waiting_for_initial_session_configured
+                            && app_event_rx.is_empty()
+                            && !app.startup_pending_protected_request
+                            && app
+                                .active_thread_rx()
+                                .is_none_or(tokio::sync::mpsc::Receiver::is_empty)
+                            && !app.pending_primary_events.iter().any(|event| {
+                                matches!(event, ThreadBufferedEvent::Request(_))
+                            })
+                        {
+                            app.startup_protected_input_boundary = false;
+                        }
+                        match app.handle_tui_event(tui, backends.session_at_mut(displayed_session), event).await {
+                            Ok(control) => control,
                             Err(err) if app.recover_transport_error(&err) => AppRunControl::Continue,
-                            Err(err) => break Err(err),
+                        Err(err) => break Err(err),
                         }
+                    } else {
+                        tracing::warn!("terminal input stream closed; shutting down active thread");
+                        app.handle_exit_mode(backends.session_at_mut(displayed_session), ExitMode::ShutdownFirst).await
                     }
-                    active = async {
-                        if let Some(channel) = app.active_thread_id.and_then(|id| app.thread_event_channels.get_mut(&id)) {
-                            channel.receiver.recv().await
-                        } else {
-                            None
+                }
+                (owner, app_server_event) = backends.next_event(paused_backend) => {
+                    match app_server_event {
+                        Some(event) if app.defer_side_startup_notification(&event, displayed_owner) => {
+                            backends.defer_side_startup(event);
                         }
-                    }, if App::should_handle_active_thread_events(
-                        waiting_for_initial_session_configured,
-                        app.active_thread_rx().is_some()
-                    ) && !has_pending_app_events && !app.reconnect.offline => {
-                        if let Some(event) = active {
-                            if let Err(err) = app.handle_active_thread_event(tui, backends.session_at_mut(displayed_session), event).await {
-                                break Err(err);
-                            }
-                        } else {
-                            app.clear_active_thread().await;
-                        }
-                        AppRunControl::Continue
-                    }
-                    event = tui_events.next(), if app.can_read_terminal_after_thread_switch(tui, &app_event_rx)
-                        && (app.reconnect.offline || !block_terminal_input_for_pending_startup_events) => {
-                        if let Some(event) = event {
-                            if (matches!(
-                                &event,
-                                TuiEvent::Key(key)
-                                    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
-                            ) || matches!(&event, TuiEvent::Paste(_)))
-                                && !app.reconnect.offline
-                                && pending_startup_draft.is_none()
-                                && !waiting_for_initial_session_configured
-                                && app_event_rx.is_empty()
-                                && !app.startup_pending_protected_request
-                                && app
-                                    .active_thread_rx()
-                                    .is_none_or(tokio::sync::mpsc::Receiver::is_empty)
-                                && !app.pending_primary_events.iter().any(|event| {
-                                    matches!(event, ThreadBufferedEvent::Request(_))
-                                })
-                            {
-                                app.startup_protected_input_boundary = false;
-                            }
-                            match app.handle_tui_event(tui, backends.session_at_mut(displayed_session), event).await {
-                                Ok(control) => control,
-                                Err(err) if app.recover_transport_error(&err) => AppRunControl::Continue,
-                            Err(err) => break Err(err),
-                            }
-                        } else {
-                            tracing::warn!("terminal input stream closed; shutting down active thread");
-                            app.handle_exit_mode(backends.session_at_mut(displayed_session), ExitMode::ShutdownFirst).await
-                        }
-                    }
-                    (owner, app_server_event) = backends.next_event(paused_backend) => {
-                        match app_server_event {
-                            Some(event) if app.defer_side_startup_notification(&event, displayed_owner) => {
-                                backends.defer_side_startup(event);
-                            }
-                            Some(event) if owner != displayed_owner || !app.reconnect.offline => {
-                                if matches!(&event.event, codex_app_server_client::AppServerEvent::Disconnected { .. }) {
-                                    app.backend_registry.disconnect(owner);
-                                    app.cancel_agents_overview_refresh(owner);
-                                }
-                                if let Some(slot) = backends.slot(owner) {
-                                    let (session, parked_inputs) = backends.session_and_parked_inputs(slot);
-                                    app.handle_polled_backend_event(session, displayed_owner, parked_inputs, event).await;
-                                }
-                            }
-                            Some(_) => {}
-                            None => {
+                        Some(event) if owner != displayed_owner || !app.reconnect.offline => {
+                            if matches!(&event.event, codex_app_server_client::AppServerEvent::Disconnected { .. }) {
                                 app.backend_registry.disconnect(owner);
                                 app.cancel_agents_overview_refresh(owner);
-                                app.reset_agents_overview_discovery(owner);
-                                if owner == displayed_owner {
-                                    if app.reconnect.offline && app.pending_startup_thread_start {
-                                        reconnect = None;
-                                    } else if !app.pending_startup_thread_start {
-                                        app.begin_reconnect();
-                                    }
-                                }
-                                tracing::warn!("app-server event stream closed");
+                            }
+                            if let Some(slot) = backends.slot(owner) {
+                                let (session, parked_inputs) = backends.session_and_parked_inputs(slot);
+                                app.handle_polled_backend_event(session, displayed_owner, parked_inputs, event).await;
                             }
                         }
-                        AppRunControl::Continue
-                    }
-                    result = async {
-                        match app.reconnect.cloud_resume.as_mut() {
-                            Some(resume) => (&mut resume.task).await,
-                            None => std::future::pending().await,
-                        }
-                    }, if app.reconnect.cloud_resume.is_some() && !has_pending_app_events => {
-                        let Some(attempt) = app.reconnect.cloud_resume.take() else { continue };
-                        let outcome = result.unwrap_or_else(|error| Err(error.into()));
-                        match Box::pin(app.finish_cloud_resume(
-                            tui,
-                            backends.session_at_mut(displayed_session),
-                            attempt,
-                            outcome,
-                        )).await {
-                            Ok(control) => control,
-                            Err(err) => break Err(err),
-                        }
-                    }
-                    (reconnect_owner, result) = async { match reconnect.as_mut() { Some((owner, future)) => (*owner, future.await), None => std::future::pending().await } }, if reconnect.is_some() && !has_pending_app_events => {
-                        reconnect = None;
-                        match result {
-                            Ok(connected) if reconnect_owner != displayed_owner => {
-                                let _ = connected.session.shutdown().await;
-                            }
-                            Err(_) if reconnect_owner != displayed_owner => {}
-                            Ok(connected) => {
-                                if let Err(err) = app.finish_reconnect(tui, backends.session_at_mut(displayed_session), &mut app_event_rx, connected, CODEX_CLI_VERSION).await {
-                                    break Err(err);
+                        Some(_) => {}
+                        None => {
+                            app.backend_registry.disconnect(owner);
+                            app.cancel_agents_overview_refresh(owner);
+                            app.reset_agents_overview_discovery(owner);
+                            if owner == displayed_owner {
+                                if app.reconnect.offline && app.pending_startup_thread_start {
+                                    reconnect = None;
+                                } else if !app.pending_startup_thread_start {
+                                    app.begin_reconnect();
                                 }
-                                backends.resume_events(displayed_owner);
-                                waiting_for_initial_session_configured = app.pending_startup_thread_start;
-                                if app.pending_startup_thread_start {
-                                    spawn_startup_thread_start(
-                                        backends.session_at(displayed_session),
-                                        app.local_settings.clone(),
-                                        app.config.clone(),
-                                        launch_choices.clone(),
-                                        app.app_event_tx.clone(),
-                                        managed_worktree.clone(),
+                            }
+                            tracing::warn!("app-server event stream closed");
+                        }
+                    }
+                    AppRunControl::Continue
+                }
+                result = async {
+                    match app.reconnect.cloud_resume.as_mut() {
+                        Some(resume) => (&mut resume.task).await,
+                        None => std::future::pending().await,
+                    }
+                }, if app.reconnect.cloud_resume.is_some() && !has_pending_app_events => {
+                    let Some(attempt) = app.reconnect.cloud_resume.take() else { continue };
+                    let outcome = result.unwrap_or_else(|error| Err(error.into()));
+                    match Box::pin(app.finish_cloud_resume(
+                        tui,
+                        backends.session_at_mut(displayed_session),
+                        attempt,
+                        outcome,
+                    )).await {
+                        Ok(control) => control,
+                        Err(err) => break Err(err),
+                    }
+                }
+                (reconnect_owner, result) = async { match reconnect.as_mut() { Some((owner, future)) => (*owner, future.await), None => std::future::pending().await } }, if reconnect.is_some() && !has_pending_app_events => {
+                    reconnect = None;
+                    match result {
+                        Ok(connected) if reconnect_owner != displayed_owner => {
+                            let _ = connected.session.shutdown().await;
+                        }
+                        Err(_) if reconnect_owner != displayed_owner => {}
+                        Ok(connected) => {
+                            if let Err(err) = app.finish_reconnect(tui, backends.session_at_mut(displayed_session), &mut app_event_rx, connected, cli_version()).await {
+                                break Err(err);
+                            }
+                            backends.resume_events(displayed_owner);
+                            waiting_for_initial_session_configured = app.pending_startup_thread_start;
+                            if app.pending_startup_thread_start {
+                                spawn_startup_thread_start(
+                                    backends.session_at(displayed_session),
+                                    app.local_settings.clone(),
+                                    app.config.clone(),
+                                    launch_choices.clone(),
+                                    app.app_event_tx.clone(),
+                                    managed_worktree.clone(),
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            if app.pending_startup_thread_start {
+                                app.pending_startup_thread_start = false;
+                                app.chat_widget.cancel_startup_submission();
+                                app.chat_widget
+                                    .set_initial_user_message_submit_suppressed(
+                                        /*suppressed*/ true,
                                     );
+                                if let Some(message) =
+                                    app.chat_widget.initial_user_message.take()
+                                {
+                                    app.chat_widget.restore_user_message_to_composer(message);
                                 }
                             }
-                            Err(error) => {
-                                if app.pending_startup_thread_start {
-                                    app.pending_startup_thread_start = false;
-                                    app.chat_widget.cancel_startup_submission();
-                                    app.chat_widget
-                                        .set_initial_user_message_submit_suppressed(
-                                            /*suppressed*/ true,
-                                        );
-                                    if let Some(message) =
-                                        app.chat_widget.initial_user_message.take()
-                                    {
-                                        app.chat_widget.restore_user_message_to_composer(message);
-                                    }
-                                }
-                                app.reconnect.failed = true;
-                                app.chat_widget.reconnect_failed(app.can_retry_reconnect());
-                                app.chat_widget.add_error_message(error.to_string());
-                                if let Ok(mut state) = app.agents_overview.view_state.lock() {
-                                    state.connection_notice = Some(app.offline_overview_notice());
-                                }
+                            app.reconnect.failed = true;
+                            app.chat_widget.reconnect_failed(app.can_retry_reconnect());
+                            app.chat_widget.add_error_message(error.to_string());
+                            if let Ok(mut state) = app.agents_overview.view_state.lock() {
+                                state.connection_notice = Some(app.offline_overview_notice());
                             }
                         }
-                        AppRunControl::Continue
                     }
-                    () = async {
-                        match pending_resize {
-                            Some((_, deadline)) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,
-                            None => std::future::pending().await,
-                        }
-                    } => {
-                        if let Some((expected, _)) = pending_resize.take()
-                            && crate::terminal_size_telemetry::enabled(&app.config)
-                        {
-                            let actual = crate::terminal_size_telemetry::read_size();
-                            if actual != expected {
-                                pending_resize = Some((actual, Instant::now() + Duration::from_secs(/*secs*/ 15)));
-                            } else {
-                                let tags = crate::terminal_size_telemetry::tags(actual);
-                                if tags != settled_size_tags {
-                                    crate::terminal_size_telemetry::record(&app.terminal_size_tags, &app.config, "resize", actual);
-                                }
-                                settled_size_tags = tags;
-                            }
-                        }
-                        AppRunControl::Continue
+                    AppRunControl::Continue
+                }
+                () = async {
+                    match pending_resize {
+                        Some((_, deadline)) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,
+                        None => std::future::pending().await,
                     }
-                    () = async {
-                        match rate_limit_poll_deadline {
-                            Some(deadline) => {
-                                tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
-                            }
-                            None => std::future::pending().await,
-                        }
-                    }, if backends.is_listening(displayed_owner) => {
-                        app.refresh_rate_limits(backends.session_at(displayed_session), RateLimitRefreshOrigin::Periodic);
-                        AppRunControl::Continue
-                    }
-                    _ = cloud_inventory_poll.tick(), if cloud_owner.is_some() => {
-                        let session = backends.session_at(displayed_session);
-                        if let AppServerRequestHandle::Cloud(handle) = session.request_handle() {
-                            app.poll_cloud_inventory(session, handle.has_attachment());
-                        }
-                        AppRunControl::Continue
-                    }
-                    () = async {
-                        match app.chat_widget.terminal_title_next_refresh {
-                            Some(deadline) => {
-                                tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
-                            }
-                            None => std::future::pending().await,
-                        }
-                    } => {
-                        app.chat_widget.refresh_goal_status_indicator_for_time_tick();
-                        app.chat_widget.refresh_terminal_title();
-                        AppRunControl::Continue
-                    }
-                    () = async {
-                        match app.commit_animation.as_mut() {
-                            Some(interval) => {
-                                interval.tick().await;
-                            }
-                            None => std::future::pending().await,
-                        }
-                    }, if !has_pending_app_events => {
-                        crate::session_log::log_commit_tick();
-                        app.chat_widget.on_commit_tick();
-                        AppRunControl::Continue
-                    }
-                };
-                if App::should_stop_waiting_for_initial_session(
-                    waiting_for_initial_session_configured,
-                    app.primary_thread_id,
-                ) {
-                    waiting_for_initial_session_configured = false;
-                    let had_active_modal = app.chat_widget.has_active_modal();
-                    if let Err(err) = app.drain_active_thread_events(tui).await {
-                        break Err(err);
-                    }
-                    if !had_active_modal
-                        && app.chat_widget.has_active_modal()
-                        && let Err(err) = app.render_startup_frame(tui, &app_event_rx)
+                } => {
+                    if let Some((expected, _)) = pending_resize.take()
+                        && crate::terminal_size_telemetry::enabled(&app.config)
                     {
-                        break Err(err);
-                    }
-                }
-                match control {
-                    AppRunControl::Continue => {
-                        if app.reconnect.offline && !app.pending_startup_thread_start {
-                            pending_startup_submission = false;
-                            app.chat_widget.cancel_startup_submission();
-                        }
-                        if app_event_rx.is_empty() && !app.has_queued_startup_protected_request() {
-                            app.chat_widget.restore_startup_input_when_ready(
-                                &mut pending_startup_draft,
-                                &mut pending_startup_submission,
-                            );
-                        }
-                        #[cfg(windows)]
-                        if terminal_color_probe_pending
-                            && app.ready_for_terminal_color_probe(!app_event_rx.is_empty())
-                        {
-                            tui.probe_default_colors_after_protected_startup();
-                            terminal_color_probe_pending = false;
+                        let actual = crate::terminal_size_telemetry::read_size();
+                        if actual != expected {
+                            pending_resize = Some((actual, Instant::now() + Duration::from_secs(/*secs*/ 15)));
+                        } else {
+                            let tags = crate::terminal_size_telemetry::tags(actual);
+                            if tags != settled_size_tags {
+                                crate::terminal_size_telemetry::record(&app.terminal_size_tags, &app.config, "resize", actual);
+                            }
+                            settled_size_tags = tags;
                         }
                     }
-                    AppRunControl::Exit(reason) => break Ok(reason),
+                    AppRunControl::Continue
                 }
+                () = async {
+                    match rate_limit_poll_deadline {
+                        Some(deadline) => {
+                            tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+                        }
+                        None => std::future::pending().await,
+                    }
+                }, if backends.is_listening(displayed_owner) => {
+                    app.refresh_rate_limits(backends.session_at(displayed_session), RateLimitRefreshOrigin::Periodic);
+                    AppRunControl::Continue
+                }
+                _ = cloud_inventory_poll.tick(), if cloud_owner.is_some() => {
+                    let session = backends.session_at(displayed_session);
+                    if let AppServerRequestHandle::Cloud(handle) = session.request_handle() {
+                        app.poll_cloud_inventory(session, handle.has_attachment());
+                    }
+                    AppRunControl::Continue
+                }
+                () = async {
+                match thread_name_poll_deadline {
+                    Some(deadline) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                app.refresh_current_thread_name(backends.session_at(displayed_session));
+                AppRunControl::Continue
+            }
+            () = async {
+                    match app.chat_widget.terminal_title_next_refresh {
+                        Some(deadline) => {
+                            tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await;
+                        }
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    app.chat_widget.refresh_goal_status_indicator_for_time_tick();
+                    app.chat_widget.refresh_terminal_title();
+                    AppRunControl::Continue
+                }
+                () = async {
+                    match app.commit_animation.as_mut() {
+                        Some(interval) => {
+                            interval.tick().await;
+                        }
+                        None => std::future::pending().await,
+                    }
+                }, if !has_pending_app_events => {
+                    crate::session_log::log_commit_tick();
+                    app.chat_widget.on_commit_tick();
+                    AppRunControl::Continue
+                }
+            };
+            if App::should_stop_waiting_for_initial_session(
+                waiting_for_initial_session_configured,
+                app.primary_thread_id,
+            ) {
+                waiting_for_initial_session_configured = false;
+                let had_active_modal = app.chat_widget.has_active_modal();
+                if let Err(err) = app.drain_active_thread_events(tui).await {
+                    break Err(err);
+                }
+                if !had_active_modal
+                    && app.chat_widget.has_active_modal()
+                    && let Err(err) = app.render_startup_frame(tui, &app_event_rx)
+                {
+                    break Err(err);
+                }
+            }
+            match control {
+                AppRunControl::Continue => {
+                    if app.reconnect.offline && !app.pending_startup_thread_start {
+                        pending_startup_submission = false;
+                        app.chat_widget.cancel_startup_submission();
+                    }
+                    if app_event_rx.is_empty() && !app.has_queued_startup_protected_request() {
+                        app.chat_widget.restore_startup_input_when_ready(
+                            &mut pending_startup_draft,
+                            &mut pending_startup_submission,
+                        );
+                    }
+                    #[cfg(windows)]
+                    if terminal_color_probe_pending
+                        && app.ready_for_terminal_color_probe(!app_event_rx.is_empty())
+                    {
+                        tui.probe_default_colors_after_protected_startup();
+                        terminal_color_probe_pending = false;
+                    }
+                }
+                AppRunControl::Exit(reason) => break Ok(reason),
             }
         };
         // Let the pending terminal poll unwind while the app server shuts down.

@@ -41,6 +41,9 @@ fn shimmer_and_progress_are_independent_and_obey_master_switch() {
                 let lines = StatusIndicator {
                     row: &row,
                     timer: &timer,
+                    elapsed_override: None,
+                    show_interrupt_hint: true,
+                    single_line: false,
                 }
                 .lines(/*width*/ 80);
                 let header = &lines[0];

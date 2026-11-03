@@ -30,6 +30,7 @@
 | 0022 | [terminfo 颜色能力回退](0022-terminfo-color-detection.md) |
 | 0023 | [通过 @ 选择插件提供的 skill](0023-at-plugin-skills.md) |
 | 0024 | [首轮由 Agent 主动命名会话](0024-agent-thread-title.md) |
+| 0025 | [分栏任务状态与共享底栏](0025-workspace-status-and-footer.md) |
 | 0027 | [按项忽略 Cloud config](0027-ignore-cloud-config.md) |
 | 0031 | [内置会话管理 skill](0031-session-skill.md) |
 

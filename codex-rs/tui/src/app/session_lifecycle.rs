@@ -618,6 +618,15 @@ impl App {
         self.conversation_frame = Default::default();
         self.statusline_picker = None;
         chat_widget.inherit_view_transition_key_guard(&mut self.chat_widget);
+        if let Some(route) = self
+            .chat_widget
+            .thread_id()
+            .and_then(|id| self.pending_side_composers.get(&id))
+            .map(|pending| pending.route)
+        {
+            self.chat_widget.park_side_projection(route);
+        }
+        chat_widget.generation_speeds = std::mem::take(&mut self.chat_widget.generation_speeds);
         chat_widget.fork_in_progress = self.chat_widget.fork_in_progress;
         self.pending_right_click_paste = None;
         self.config_notification_test_pending = None;
@@ -692,6 +701,11 @@ impl App {
         if previous.realtime_conversation_is_running() {
             previous.park_voice();
             self.background_voice = Some(Box::new(previous));
+        } else if let Some(pending) = previous
+            .thread_id()
+            .and_then(|id| self.pending_side_composers.get_mut(&id))
+        {
+            pending.projection = Some(Box::new(previous));
         }
         self.refresh_agent_picker();
     }
@@ -930,13 +944,19 @@ impl App {
                 .conversation_area(tui.terminal.last_known_screen_size.into())
                 .width;
             self.sync_owned_transcript(conversation_width);
-            let width = self.transcript_view.remaining_area().width.max(1);
-            let (stream, display) = self.chat_widget.take_side_display(width);
+            let bottom = self.chat_widget.prepare_side_composer();
+            self.pending_side_composers
+                .insert(old, side::PendingSideComposer::new(old, bottom));
             self.app_event_tx.send(AppEvent::ParkSideCompanion {
                 pair,
                 thread_id: old,
-                stream,
-                display,
+                stream: None,
+                display: crate::app_event::CapturedSideDisplay {
+                    rendered_completion_turn_ids: Default::default(),
+                    generated_images: Default::default(),
+                    active: None,
+                    auxiliary: Vec::new(),
+                },
             });
         }
         if is_replay_only && let Some(session) = snapshot.session.as_mut() {
@@ -1167,6 +1187,13 @@ impl App {
                     .any(|side| side.parent_thread_id == *id)
         });
         self.sidebars.remove(&None);
+        self.pending_side_composers.retain(|id, _| {
+            self.side_threads.contains_key(id)
+                || self
+                    .side_threads
+                    .values()
+                    .any(|side| side.parent_thread_id == *id)
+        });
         self.pending_realtime_speech_replay.clear();
         self.pending_realtime_transcript_replay.clear();
         self.realtime_replay_order.clear();

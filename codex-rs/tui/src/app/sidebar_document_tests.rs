@@ -644,7 +644,11 @@ size 123
 
     let child = ThreadId::new();
     app.side_threads.insert(child, SideThreadState::new(parent));
-    let (stream, display) = app.chat_widget.take_side_display(/*width*/ 120);
+    let (stream, display, bottom) = app.chat_widget.take_side_display(/*width*/ 120);
+    app.pending_side_composers.insert(
+        parent,
+        super::super::side::PendingSideComposer::new(parent, bottom),
+    );
     assert!(app.transcript_view.document_links);
     Box::pin(app.handle_event(
         &mut tui,

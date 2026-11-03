@@ -1162,6 +1162,54 @@ fn slash_suggestions_take_space_before_status_expands() {
 }
 
 #[test]
+fn workspace_shared_queries_position_the_cursor_below_the_status_line() {
+    let mut composer = composer();
+    let area = Rect::new(80, 8, 40, 5);
+    let shared = Rect::new(0, 22, 120, 2);
+    composer.begin_history_search();
+    let options = composer.resolve_render_options(ComposerRenderOptions {
+        shared_footer: Some(shared),
+        separate_status_line: true,
+        ..Default::default()
+    });
+    assert_eq!(
+        composer
+            .cursor_pos_with_options(area, options)
+            .map(|(_, y)| y),
+        Some(23)
+    );
+}
+
+#[test]
+fn workspace_history_search_takes_priority_over_transcript_navigation() {
+    let mut composer = composer();
+    composer.begin_history_search();
+    let footer = TranscriptFooter {
+        text: Line::from("Old transcript navigation").into(),
+        cursor_column: None,
+        is_interactive: false,
+    };
+    let shared = Rect::new(0, 22, 120, 2);
+    let mut buf = Buffer::empty(Rect::new(0, 0, 120, 24));
+    composer.render_shared_footer(
+        shared,
+        &mut buf,
+        ComposerRenderOptions {
+            shared_footer: Some(shared),
+            footer: Some(&footer),
+            ..Default::default()
+        },
+    );
+    let text = buf
+        .content
+        .iter()
+        .map(ratatui::buffer::Cell::symbol)
+        .collect::<String>();
+    assert!(text.contains("reverse-i-search"), "{text}");
+    assert!(!text.contains("Old transcript navigation"), "{text}");
+}
+
+#[test]
 fn slash_popup_preserves_footer_and_selection_style() {
     let (tx, _rx) = unbounded_channel::<AppEvent>();
     let mut composer = ChatComposer::new(
@@ -1249,4 +1297,32 @@ fn activity_shortcut_help_follows_runtime_binding() {
         snapshots.push(format!("{configured}\n{text}"));
     }
     insta::assert_snapshot!(snapshots.join("\n---\n"));
+}
+
+#[test]
+fn workspace_shared_footer_preserves_multiline_extension_status() {
+    let mut composer = composer();
+    let tree: crate::ui_tree::UiTree = r#""one\ntwo\nthree""#.parse().unwrap();
+    composer.set_status_line(Some(StatusLine::from(tree)));
+    let shared = Rect::new(0, 0, 80, 4);
+    let layout = composer.layout_with_options(
+        Rect::new(0, 0, 40, 8),
+        ComposerRenderOptions {
+            shared_footer: Some(shared),
+            ..Default::default()
+        },
+    );
+    assert_eq!(layout.status.height, 0);
+    assert_eq!(layout.footer.height, 0);
+    let (status, hints) = composer.shared_footer_areas(shared);
+    assert_eq!(status.height, 3);
+    assert_eq!(hints.height, 1);
+    let mut buf = Buffer::empty(shared);
+    composer.render_shared_footer(shared, &mut buf, ComposerRenderOptions::default());
+    for (row, expected) in ["one", "two", "three"].iter().enumerate() {
+        let text = (0..shared.width)
+            .map(|x| buf[(x, row as u16)].symbol())
+            .collect::<String>();
+        assert!(text.contains(expected), "{text}");
+    }
 }

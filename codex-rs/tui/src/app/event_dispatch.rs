@@ -155,6 +155,7 @@ impl App {
                     | AppEvent::SidebarDocumentLoaded { .. }
                     | AppEvent::SidebarFilesLoaded { .. }
                     | AppEvent::SavedSideChatsLoaded { .. }
+                    | AppEvent::SideProjectionEvent { .. }
                     | AppEvent::SideReplayFinished(_)
                     | AppEvent::ResetTranscriptForThreadSwitch
                     | AppEvent::ResetTranscriptForThreadSwitchPreservingScreen
@@ -1141,19 +1142,21 @@ impl App {
                 self.begin_thread_switch_history_replay_buffer();
             }
             AppEvent::ParkSideCompanion { pair, thread_id, stream, display } => {
-                if self.side_threads.contains_key(&pair)
-                    || self.sidebars.get(&self.primary_thread_id)
-                        .is_some_and(|pane| pane.agents.detail == Some(pair))
-                {
+                if let Some(pending) = self.pending_side_composers.remove(&thread_id)
+                    && (self.side_threads.contains_key(&pair)
+                         || self.sidebars.get(&self.primary_thread_id)
+                             .is_some_and(|pane| pane.agents.detail == Some(pair)))
+                 {
+                    let mut bottom = pending.bottom;
+                    if let Some(channel) = self.thread_event_channels.get(&thread_id) {
+                        bottom.set_workspace_status(channel.store.lock().await.workspace_status());
+                    }
                     self.transcript_view.sync_history_tail(&self.transcript_cells);
-                    let mut answer = None;
                     if let Some(stream) = stream {
                         let cells = &mut self.transcript_cells;
                         let (start, replacement): (_, Arc<dyn HistoryCell>) = match stream {
-                            CapturedSideStream::Answer { cell, item } => {
-                                let start = trailing_run_start::<history_cell::AgentMessageCell>(cells);
-                                answer = item.map(|item| super::side_companion::SideAnswer::new(item, start));
-                                (start, cell)
+                            CapturedSideStream::Answer(cell) => {
+                                (trailing_run_start::<history_cell::AgentMessageCell>(cells), cell)
                             }
                             CapturedSideStream::Plan(cell) => {
                                 (trailing_run_start::<history_cell::ProposedPlanStreamCell>(cells), cell)
@@ -1164,12 +1167,16 @@ impl App {
                         cells.splice(range, [replacement]);
                     }
                     self.transcript_view.document_links = false;
+                    let commit_ticks = pending.projection.as_ref().is_some_and(|widget| widget.has_side_stream())
+                        || self.background_voice.as_ref().is_some_and(|owner| owner.thread_id() == Some(thread_id) && owner.has_side_stream());
                     self.side_companions.insert(thread_id, SideCompanion {
+                        route: pending.route,
+                        projection: pending.projection,
+                        commit_ticks,
+                        bottom,
                         display,
-                        parked_tail: self.transcript_cells.len(),
                         cells: std::mem::take(&mut self.transcript_cells),
                         view: std::mem::take(&mut self.transcript_view),
-                        answer,
                     });
                 }
             }
@@ -1256,6 +1263,11 @@ impl App {
                 self.prepare_collab_history(app_server, cell.as_mut());
                 self.insert_history_cell(tui, cell);
             }
+            AppEvent::SideProjectionEvent { route, event } => {
+                self.handle_side_projection_event(route, *event);
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::SideCommandCompleted(_) => {}
             AppEvent::TurnTipReady { thread_id, turn_id } => {
                 self.turn_tips.ready(thread_id, &turn_id, self.transcript_cells.last());
                 tui.frame_requester().schedule_frame();

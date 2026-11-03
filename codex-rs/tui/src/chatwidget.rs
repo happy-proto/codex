@@ -348,8 +348,6 @@ mod luna_reserve_return;
 mod security_setup;
 pub(crate) use backend_banners::AutomaticModelSwitchReason;
 mod protocol;
-pub(crate) use protocol::final_agent_message;
-pub(crate) use protocol::needs_agent_message;
 mod protocol_requests;
 mod rate_limits;
 mod usage_notice;
@@ -1257,6 +1255,9 @@ impl ChatWidget {
     }
 
     pub(crate) fn refresh_terminal_program_status(&self) {
+        if !self.owns_terminal_surfaces() {
+            return;
+        }
         let status = self.desired_program_status();
         if let Err(err) = crate::terminal_program_status::set_terminal_program_status(
             status,

@@ -6,6 +6,8 @@ use super::*;
 use crate::bottom_pane::footer::status_line_right_indicator_line;
 use ratatui::layout::Size;
 
+const MAX_SHARED_STATUS_ROWS: u16 = 4;
+
 impl ChatComposer {
     pub(crate) fn status_line_area(&self) -> Rect {
         self.footer.status_line_area.get()
@@ -74,6 +76,9 @@ impl ChatComposer {
         mut bounds: Size,
         options: ComposerRenderOptions<'_>,
     ) -> u16 {
+        if options.shared_footer.is_some() {
+            return 0;
+        }
         let focus = options.status_line_focus();
         if focus == StatusLineFocus::Focused && self.active_status_transition().is_some() {
             bounds.height = bounds.height.min(1);
@@ -81,6 +86,34 @@ impl ChatComposer {
         self.with_status_surface_content(focus, |status| {
             status.map_or(0, |status| status.height(bounds))
         })
+    }
+
+    pub(crate) fn shared_status_height(&self, width: u16) -> u16 {
+        if !self.footer.status_line_enabled {
+            return 0;
+        }
+        self.status_surface_height(
+            inset_footer_hint_area(Rect::new(0, 0, width, MAX_SHARED_STATUS_ROWS)).as_size(),
+            ComposerRenderOptions {
+                separate_status_line: true,
+                ..Default::default()
+            },
+        )
+    }
+
+    pub(super) fn shared_footer_areas(&self, area: Rect) -> (Rect, Rect) {
+        let status_height = self.shared_status_height(area.width).min(area.height);
+        (
+            Rect {
+                height: status_height,
+                ..area
+            },
+            Rect {
+                y: area.y + status_height,
+                height: area.height - status_height,
+                ..area
+            },
+        )
     }
 
     pub(super) fn hint_footer_props(&self) -> FooterProps {

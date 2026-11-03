@@ -148,12 +148,12 @@ impl App {
                     return None;
                 }
                 let inserted = index..index + split_images.len();
-                pane.splice_older_cells(index..index, split_images);
+                pane.cells.splice(index..index, split_images);
                 Some(inserted)
             });
             let index = history_prefix_len(&pane.cells);
             let inserted = index..index + cells.len();
-            pane.splice_older_cells(index..index, cells);
+            pane.cells.splice(index..index, cells);
             pane.view.history_page_loaded(&pane.cells, inserted, images);
             pane.view.history = if app_server.has_older_history(thread_id) {
                 TranscriptHistoryState::Partial
@@ -240,7 +240,7 @@ impl App {
             && let Some(pane) = self.side_companions.get_mut(&thread_id)
         {
             for index in hidden_transcript_indices(&pane.cells, persisted_user_cells) {
-                pane.splice_older_cells(index..index + 1, Vec::new());
+                pane.cells.splice(index..index + 1, Vec::new());
                 pane.view.restart_search();
             }
             return;
@@ -385,12 +385,16 @@ impl App {
                     self.side_companions.get_mut(&thread_id)
                     && self.chat_widget.thread_id() != Some(thread_id)
                 {
-                    history_cell::FinalMessageSeparator::from_turn_once(
-                        turn,
-                        &mut pane.display.rendered_completion_turn_ids,
-                        /*fallback_elapsed*/ None,
-                        /*fallback_completed_at*/ None,
-                    )
+                    if let Some(projection) = pane.projection.as_mut() {
+                        projection.completion_cell(turn, Some(ReplayKind::ResumeInitialMessages))
+                    } else {
+                        history_cell::FinalMessageSeparator::from_turn_once(
+                            turn,
+                            &mut pane.display.rendered_completion_turn_ids,
+                            /*fallback_elapsed*/ None,
+                            /*fallback_completed_at*/ None,
+                        )
+                    }
                 } else {
                     self.chat_widget
                         .completion_cell(turn, Some(ReplayKind::ResumeInitialMessages))

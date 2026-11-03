@@ -4,6 +4,7 @@ use super::read_only::BlockedThreadView;
 use super::transcript::ActiveCellLayoutCache;
 use super::transcript::ActiveCellLayoutCacheKey;
 use super::*;
+use crate::bottom_pane::ComposerRenderOptions;
 use crate::keymap::KeymapContext;
 use crate::line_truncation::span_width;
 use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
@@ -219,6 +220,22 @@ impl BlockedThreadNotice<'_> {
 }
 
 impl ChatWidget {
+    pub(crate) fn set_workspace_status(
+        &mut self,
+        status: crate::bottom_pane::workspace_status::WorkspaceStatus,
+    ) {
+        self.bottom_pane.set_workspace_status(status);
+    }
+
+    pub(crate) fn render_shared_footer(
+        &self,
+        area: Rect,
+        buf: &mut ratatui::buffer::Buffer,
+        mut options: ComposerRenderOptions<'_>,
+    ) {
+        options.warning_count = self.warning_display_state.count;
+        self.bottom_pane.render_shared_footer(area, buf, options);
+    }
     pub(crate) fn prepare_composer_images(&mut self, protocol: Option<crate::pets::ImageProtocol>) {
         self.composer_images = protocol
             .filter(|_| {
