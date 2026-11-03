@@ -27,6 +27,12 @@ async fn pair() -> Result<(Box<App>, tui::Tui, ThreadId, ThreadId)> {
     app.side_companions.insert(
         side,
         side::SideCompanion {
+            route: crate::app_event_sender::SideProjectionRoute {
+                thread_id: side,
+                generation: uuid::Uuid::new_v4(),
+            },
+            projection: None,
+            commit_ticks: false,
             bottom,
             display,
             cells: vec![plain_line_cell("Side answer")],

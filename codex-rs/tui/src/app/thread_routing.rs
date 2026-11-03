@@ -1149,6 +1149,7 @@ impl App {
         thread_id: ThreadId,
         mut notification: ServerNotification,
     ) -> Result<()> {
+        self.deliver_side_projection_notification(thread_id, &notification);
         self.deliver_background_voice_notification(thread_id, &notification);
         if self.abandoned_side_threads.contains(&thread_id) {
             return Ok(());
