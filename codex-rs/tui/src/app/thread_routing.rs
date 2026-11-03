@@ -1105,6 +1105,11 @@ impl App {
         thread_id: ThreadId,
         notification: ServerNotification,
     ) -> Result<()> {
+        if self.current_displayed_thread_id() != Some(thread_id)
+            && matches!(&notification, ServerNotification::TurnCompleted(_))
+        {
+            self.refresh_parked_generation_speeds(thread_id).await;
+        }
         self.deliver_side_projection_notification(thread_id, &notification);
         self.deliver_background_voice_notification(thread_id, &notification);
         if self.abandoned_side_threads.contains(&thread_id) {
