@@ -11,11 +11,26 @@ STORAGE = ROOT / "codex-rs/state/src/runtime/generation_speed.rs"
 SCHEMA = STORAGE.with_suffix(".sql")
 
 
-def production_query(prefix):
+def production_query(prefix, *, ephemeral=False):
     queries = re.findall(
-        r'sqlx::query(?:_scalar[^\n(]*)?\(\s*"([^"]+)"', STORAGE.read_text()
+        r'sqlx::query(?:_scalar[^\n(]*)?\(\s*(?:&format!\(\s*)?"([^"]+)"',
+        STORAGE.read_text(),
     )
-    return next(query for query in queries if query.startswith(prefix))
+    for query in queries:
+        # Writers share SQL across the two lifetimes; identify the live snapshot by its columns.
+        table = (
+            "fork_live_generation_speeds_v1"
+            if "run_id" in query or "updated_at_ms" in query
+            else "fork_generation_speeds_v1"
+        )
+        query = query.replace("{table}", table)
+        if query.startswith(prefix):
+            return (
+                query.replace(table, table.replace("fork_", "fork_ephemeral_", 1))
+                if ephemeral
+                else query
+            )
+    raise AssertionError(f"Production SQL not found: {prefix}")
 
 
 class GenerationSpeedStorageTests(unittest.TestCase):
@@ -32,6 +47,12 @@ class GenerationSpeedStorageTests(unittest.TestCase):
         self.writer.executescript(
             SCHEMA.with_name("live_generation_speed.sql").read_text()
         )
+        self.writer.executescript(
+            SCHEMA.with_name("ephemeral_generation_speed.sql").read_text()
+        )
+        self.writer.executescript(
+            SCHEMA.with_name("ephemeral_live_generation_speed.sql").read_text()
+        )
         self.writer.executemany(
             "INSERT INTO threads VALUES (?)", [("first",), ("second",)]
         )
@@ -47,6 +68,54 @@ class GenerationSpeedStorageTests(unittest.TestCase):
             (thread, thread),
         )
         self.writer.commit()
+
+    def test_ephemeral_metrics_are_readable_without_persisting_a_thread(self):
+        reader = sqlite3.connect(self.path)
+        self.addCleanup(reader.close)
+        self.writer.execute(
+            production_query("INSERT INTO fork_generation_speeds_v1", ephemeral=True),
+            ("side", "turn", 220, 10_000_000, 10, 14, 4000),
+        )
+        self.writer.execute(
+            production_query("INSERT INTO fork_live_generation_speeds", ephemeral=True),
+            ("side", "turn", "run", 10000),
+        )
+        self.writer.execute(
+            production_query("UPDATE fork_live_generation_speeds", ephemeral=True),
+            (22.0, 10000, "side", "turn", "run"),
+        )
+        self.writer.commit()
+        self.assertEqual(self.read(reader, "side"), [("turn", 220, 10_000_000)])
+        self.assertEqual(self.read_live(reader, "side", "turn"), 22.0)
+        self.assertIsNone(
+            reader.execute("SELECT id FROM threads WHERE id = 'side'").fetchone()
+        )
+        self.assertEqual(
+            reader.execute("SELECT COUNT(*) FROM fork_generation_speeds_v1").fetchone()[
+                0
+            ],
+            0,
+        )
+
+    def test_ephemeral_retention_is_bounded_across_threads(self):
+        insert = production_query(
+            "INSERT INTO fork_generation_speeds_v1", ephemeral=True
+        )
+        prune = production_query(
+            "DELETE FROM fork_generation_speeds_v1 WHERE rowid NOT IN", ephemeral=True
+        )
+        for index in range(1001):
+            self.writer.execute(insert, (f"side-{index}", "turn", 1, 1, 10, 14, 4000))
+            self.writer.execute(prune)
+        self.writer.commit()
+        self.assertEqual(
+            self.writer.execute(
+                "SELECT COUNT(*) FROM fork_ephemeral_generation_speeds_v1"
+            ).fetchone()[0],
+            1000,
+        )
+        self.assertEqual(self.read(self.writer, "side-0"), [])
+        self.assertEqual(len(self.read(self.writer, "side-1000")), 1)
 
     def read(self, connection, thread):
         return [
@@ -143,7 +212,7 @@ class GenerationSpeedStorageTests(unittest.TestCase):
 
     def read_live(self, connection, thread, turn, observed_at=0):
         row = connection.execute(
-            production_query("SELECT speed FROM fork_live_generation_speeds"),
+            production_query("SELECT speed FROM ("),
             (thread, turn, max(7000, observed_at + 1), 10000),
         ).fetchone()
         return row[0] if row else None
