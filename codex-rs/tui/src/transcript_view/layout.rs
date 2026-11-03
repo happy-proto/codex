@@ -231,6 +231,9 @@ impl TranscriptView {
             })));
         };
         let width = self.area.width.max(/*other*/ 1);
+        if !full_content && self.workspace_completion == Some(EntryKey::cell(cell)) {
+            return Some(Arc::new(TextLayout::new(Vec::new(), width)));
+        }
         // Session information belongs before all history, including pages not loaded yet.
         // Pinned displayed revisions above remain visible; hidden headers never enter the cache.
         if self.history.has_unloaded_history()
