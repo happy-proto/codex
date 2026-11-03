@@ -352,6 +352,16 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
 
     sess.drain_code_mode_messages().await;
 
+    if sess.state_db().is_none()
+        && let Some(db) = sess.generation_speed_db().await
+    {
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            db.clear_ephemeral_generation_speeds(sess.thread_id),
+        )
+        .await;
+    }
+
     crate::hook_runtime::run_session_end_hooks(sess).await;
     emit_thread_stop_lifecycle(sess).await;
 }
