@@ -291,6 +291,7 @@ mod sidebar_document;
 mod sidebar_files;
 pub(crate) mod sidebar_loading;
 mod sidebar_subagents;
+mod side_projection;
 mod startup;
 pub(crate) mod startup_bootstrap;
 mod startup_prompts;
@@ -691,7 +692,7 @@ pub(crate) struct App {
     passive_link_drag: Option<(ThreadId, Rect)>,
     sidebar_press: Option<side_focus::SidebarPress>,
     // UI objects stay on the App task while the cross-thread event queue drains history edits.
-    pending_side_composers: HashMap<ThreadId, Box<crate::bottom_pane::BottomPane>>,
+    pending_side_composers: HashMap<ThreadId, side::PendingSideComposer>,
     abandoned_side_threads: HashSet<ThreadId>,
     active_thread_id: Option<ThreadId>,
     active_thread_rx: Option<mpsc::Receiver<ThreadBufferedEvent>>,
@@ -1409,6 +1410,7 @@ impl App {
                         owner.refresh_realtime_microphone_level();
                     }
                     self.chat_widget.pre_draw_tick();
+                    self.tick_side_projections(&tui.frame_requester());
                     self.refresh_agents_overview_usage(app_server, tui.frame_requester());
                     let rendered_area = self.render_chat_widget_frame(tui, screen_size)?;
                     if tui.is_owned_screen()
