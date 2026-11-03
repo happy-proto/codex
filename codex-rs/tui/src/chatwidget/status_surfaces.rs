@@ -106,6 +106,11 @@ pub(super) struct CachedProjectRootName {
 }
 
 impl ChatWidget {
+    pub(super) fn owns_terminal_surfaces(&self) -> bool {
+        !self.app_event_tx.voice_only.load(Ordering::Relaxed)
+            && self.app_event_tx.side_projection.get().is_none()
+    }
+
     pub(crate) fn displays_thread_name(&self) -> bool {
         let selections = self.status_surface_selections();
         selections.status_line_items.iter().any(|item| {
@@ -246,6 +251,9 @@ impl ChatWidget {
     /// it only clears the managed title and updates the cache after a successful
     /// OSC write.
     pub(crate) fn clear_managed_terminal_title(&mut self) -> std::io::Result<()> {
+        if !self.owns_terminal_surfaces() {
+            return Ok(());
+        }
         if self.last_terminal_title.is_some() {
             clear_terminal_title()?;
             self.last_terminal_title = None;
@@ -262,7 +270,7 @@ impl ChatWidget {
     /// Animated titles record their next refresh for the foreground loop, independently
     /// of full TUI redraws.
     fn refresh_terminal_title_from_selections(&mut self, selections: &StatusSurfaceSelections) {
-        if self.app_event_tx.voice_only.load(Ordering::Relaxed) {
+        if !self.owns_terminal_surfaces() {
             return;
         }
         self.last_terminal_title_requires_action =
