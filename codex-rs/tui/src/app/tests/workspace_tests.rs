@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::bottom_pane::workspace_status::WorkspacePhase;
+use pretty_assertions::assert_eq;
 
 #[test]
 fn workspace_events_remain_send_with_parked_composers() {
