@@ -259,6 +259,7 @@ impl App {
                 companion.view.image_protocol = self.transcript_view.image_protocol;
                 panes.paint_companion(
                     companion,
+                    self.background_voice.as_deref(),
                     frame,
                     self.divider_drag,
                     highlight_divider,
