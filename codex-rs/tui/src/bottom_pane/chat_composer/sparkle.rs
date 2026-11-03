@@ -1,4 +1,5 @@
-//! One short Astra flourish for a confirmed new task with an untouched prompt.
+//! One short flourish for a confirmed new task with an untouched prompt.
+//! `tui.effects.starfield_all_models` extends Astra's eligibility to every model.
 //!
 //! Ordinary draft content ends the opportunity permanently; slash commands can still select Astra
 //! if the flourish has never started. The original field fills blank composer cells without drawing
@@ -84,10 +85,11 @@ impl Default for Sparkle {
 }
 
 impl BottomPane {
-    pub(crate) fn is_sparkle_model(model: &str) -> bool {
-        model
-            .split(|ch: char| !ch.is_alphanumeric() && ch != '_')
-            .any(|part| part.eq_ignore_ascii_case("astra"))
+    pub(crate) fn is_sparkle_model(model: &str, settings: &Tui) -> bool {
+        settings.effects.starfield_all_models
+            || model
+                .split(|ch: char| !ch.is_alphanumeric() && ch != '_')
+                .any(|part| part.eq_ignore_ascii_case("astra"))
     }
 
     pub(crate) fn mark_fresh_task_for_sparkle(&mut self, model: &str, settings: &Tui) {
@@ -98,7 +100,7 @@ impl BottomPane {
         ) && self.composer.sparkle.phase.get() == Phase::Unarmed
             && settings.animations
             && settings.effects.starfield
-            && Self::is_sparkle_model(model)
+            && Self::is_sparkle_model(model, settings)
         {
             self.composer.sparkle.phase.set(Phase::Waiting);
             self.request_redraw();
@@ -112,7 +114,10 @@ impl BottomPane {
     }
 
     pub(crate) fn stop_ineligible_sparkle(&self, model: &str, settings: &Tui) {
-        if !settings.animations || !settings.effects.starfield || !Self::is_sparkle_model(model) {
+        if !settings.animations
+            || !settings.effects.starfield
+            || !Self::is_sparkle_model(model, settings)
+        {
             self.composer.stop_visible_sparkle();
         }
     }
