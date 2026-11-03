@@ -41,7 +41,7 @@ impl ChatWidget {
             self.bottom_pane
                 .mark_fresh_task_for_sparkle(&started.session.model, &self.local_settings.tui);
         } else {
-            self.bottom_pane.dismiss_composer_sparkle();
+            self.bottom_pane.suspend_composer_sparkle();
         }
     }
 

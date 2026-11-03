@@ -92,7 +92,7 @@ impl ChatWidget {
         self.bottom_pane.set_recent_generation_speed(None);
         self.status_state.program_status_after_turn =
             crate::terminal_program_status::ProgramStatus::Idle;
-        self.bottom_pane.dismiss_composer_sparkle();
+        self.bottom_pane.suspend_composer_sparkle();
         self.clear_context_compaction();
         self.input_queue.user_turn_pending_start = false;
         self.reset_safety_buffering_for_turn_start();
