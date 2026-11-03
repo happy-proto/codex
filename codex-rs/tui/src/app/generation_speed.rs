@@ -3,31 +3,61 @@
 use super::*;
 
 impl App {
+    fn passive_generation_speed_target(
+        &self,
+    ) -> Option<crate::chatwidget::LiveGenerationSpeedTarget> {
+        let active = self.current_displayed_thread_id()?;
+        let passive = self
+            .side_threads
+            .get(&active)
+            .map(|side| side.parent_thread_id)
+            .or_else(|| self.side_thread_for_parent(active))?;
+        self.side_companions
+            .get(&passive)?
+            .bottom
+            .workspace_generation_speed_target(passive)
+    }
+
+    pub(super) fn has_live_generation_speed_target(&self) -> bool {
+        self.chat_widget.live_generation_speed_target().is_some()
+            || self.passive_generation_speed_target().is_some()
+    }
+
     pub(super) fn refresh_live_generation_speed(&mut self) {
-        let target = self.chat_widget.live_generation_speed_target();
         let state_db = self
             .state_db
             .clone()
             .filter(|_| !self.app_server_target.uses_remote_workspace() && !self.reconnect.offline);
-        let (Some(target), Some(state_db)) = (target, state_db) else {
+        let Some(state_db) = state_db else {
             self.chat_widget.set_live_generation_speed(None);
+            for companion in self.side_companions.values_mut() {
+                companion.bottom.set_recent_generation_speed(None);
+            }
             return;
         };
+        let targets: Vec<_> = self
+            .chat_widget
+            .live_generation_speed_target()
+            .into_iter()
+            .chain(self.passive_generation_speed_target())
+            .collect();
         let tx = self.app_event_tx.clone();
         tokio::spawn(async move {
-            let speed = tokio::time::timeout(
-                Duration::from_millis(100),
-                state_db.live_generation_speed(
-                    target.thread_id,
-                    &target.turn_id,
-                    target.observed_at_ms,
-                ),
-            )
-            .await
-            .ok()
-            .and_then(Result::ok)
-            .flatten();
-            tx.send(AppEvent::LiveGenerationSpeedUpdated { target, speed });
+            for target in targets {
+                let speed = tokio::time::timeout(
+                    Duration::from_millis(100),
+                    state_db.live_generation_speed(
+                        target.thread_id,
+                        &target.turn_id,
+                        target.observed_at_ms,
+                    ),
+                )
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .flatten();
+                tx.send(AppEvent::LiveGenerationSpeedUpdated { target, speed });
+            }
         });
     }
 
@@ -36,12 +66,15 @@ impl App {
         target: crate::chatwidget::LiveGenerationSpeedTarget,
         speed: Option<f64>,
     ) {
-        if self.chat_widget.live_generation_speed_target() != Some(target) {
-            return;
-        }
         let speed = speed
             .filter(|_| !self.app_server_target.uses_remote_workspace() && !self.reconnect.offline);
-        self.chat_widget.set_live_generation_speed(speed);
+        if self.chat_widget.live_generation_speed_target().as_ref() == Some(&target) {
+            self.chat_widget.set_live_generation_speed(speed);
+        } else if self.passive_generation_speed_target().as_ref() == Some(&target)
+            && let Some(companion) = self.side_companions.get_mut(&target.thread_id)
+        {
+            companion.bottom.set_recent_generation_speed(speed);
+        }
     }
 
     pub(super) async fn refresh_generation_speeds(&mut self, thread_id: ThreadId) {
