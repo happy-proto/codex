@@ -8,7 +8,9 @@
 未聚焦侧也随后台通知显示运行、等待输入、等待审批、完成、失败、中断或关闭；
 计时归线程所有，切换焦点不重置，等待交互时暂停，结束后冻结。
 状态行始终占用一行，任务完成不会收起该行。
-最新回合结束后，固定状态行显示完成耗时及经完成身份校验的最终生成速度，
+最新回合结束后，固定状态行复用普通回合 `Worked for…` 的缩进、淡色和 ` • ` 分隔，
+显示同一条完成记录中的耗时、完成时间、运行指标及经完成身份校验的最终生成速度。
+窄栏只裁切为一行，不换行增加输入区域高度；不再单独拼接 `• Completed · …`。
 正文不再重复绘制该回合末尾的 `Worked for…`。源记录仍保留，旧回合及单栏视图正常展示。
 后台回合完成前也读取所属线程的最终速度记录，不以最后一次实时采样代替最终速度。
 side 使用临时会话的独立数值指标通道，保留不创建对话历史的行为；
@@ -38,6 +40,7 @@ side 使用临时会话的独立数值指标通道，保留不创建对话历史
 - `tui/src/app/thread_events.rs`、`thread_routing.rs`：线程状态、计时和后台更新。
 - `tui/src/app/side_projection.rs`、`app_event_sender.rs`：后台展示投影、历史事件路由与隔离。
 - `tui/src/bottom_pane/workspace_status.rs`：紧凑任务状态展示。
+- `tui/src/history_cell/separators.rs`：普通回合与分栏共用的完成元数据及样式。
 - `tui/src/status_indicator_widget.rs`：单行渲染复用原状态动画及提示。
 - `tui/src/app/generation_speed.rs`：两侧实时速度轮询及回调归属校验。
 - `tui/src/bottom_pane/chat_composer/`：测量、光标及底栏共用布局。
