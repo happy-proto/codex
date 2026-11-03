@@ -33,6 +33,8 @@
 | 0025 | [terminfo 颜色能力回退](0025-terminfo-color-detection.md) |
 | 0026 | [通过 @ 选择插件提供的 skill](0026-at-plugin-skills.md) |
 | 0027 | [首轮由 Agent 主动命名会话](0027-agent-thread-title.md) |
+| 0028 | [分栏任务状态与共享底栏](0028-workspace-status-and-footer.md) |
+| 0029 | [为所有模型开启输入框星光](0029-all-model-composer-stars.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 同步上游使用独立的 [上游同步 skill](../../.agents/skills/codex-upstream-sync/SKILL.md)。
