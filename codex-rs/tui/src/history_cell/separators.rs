@@ -63,6 +63,13 @@ impl FinalMessageSeparator {
         self.generation_speed
     }
 
+    /// The same completion metadata and styling in a fixed, single-row footer.
+    /// The renderer clips the line to the available width instead of wrapping it.
+    pub(crate) fn status_line(&self) -> Option<Line<'static>> {
+        self.label(self.display_date)
+            .map(|label| Line::from(format!("  {label}")).dim())
+    }
+
     /// Creates completion metadata using the protocol turn duration when available.
     pub(crate) fn new(
         elapsed_seconds: Option<u64>,
