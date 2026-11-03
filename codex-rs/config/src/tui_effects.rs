@@ -11,6 +11,8 @@ use serde::Serialize;
 pub struct TuiEffects {
     /// Animate the composer starfield.
     pub starfield: bool,
+    /// Allow composer stars for every model, rather than only Astra.
+    pub starfield_all_models: bool,
     /// Shimmer status and loading text.
     pub shimmer: bool,
     /// Animate the welcome artwork.
@@ -27,6 +29,7 @@ impl Default for TuiEffects {
     fn default() -> Self {
         Self {
             starfield: true,
+            starfield_all_models: false,
             shimmer: true,
             welcome: true,
             effort: true,
