@@ -772,7 +772,8 @@ impl App {
                 .width;
             self.sync_owned_transcript(conversation_width);
             let width = self.transcript_view.remaining_area().width.max(1);
-            let (stream, display) = self.chat_widget.take_side_display(width);
+            let (stream, display, bottom) = self.chat_widget.take_side_display(width);
+            self.pending_side_composers.insert(old, bottom);
             self.app_event_tx.send(AppEvent::ParkSideCompanion {
                 pair,
                 thread_id: old,
@@ -976,6 +977,13 @@ impl App {
                     .any(|side| side.parent_thread_id == *id)
         });
         self.sidebars.remove(&None);
+        self.pending_side_composers.retain(|id, _| {
+            self.side_threads.contains_key(id)
+                || self
+                    .side_threads
+                    .values()
+                    .any(|side| side.parent_thread_id == *id)
+        });
         self.pending_realtime_speech_replay.clear();
         self.pending_realtime_transcript_replay.clear();
         self.realtime_replay_order.clear();

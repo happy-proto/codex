@@ -305,11 +305,11 @@ pub(crate) enum CapturedSideStream {
 }
 
 /// Presentation retained alongside the transcript while its composer is inactive.
+#[derive(Debug)]
 pub(crate) struct CapturedSideDisplay {
     pub(crate) rendered_completion_turn_ids: std::collections::HashSet<String>,
     pub(crate) active: Option<Box<dyn HistoryCell>>,
     pub(crate) auxiliary: Vec<crate::terminal_hyperlinks::HyperlinkLine>,
-    pub(crate) bottom: Box<crate::bottom_pane::BottomPane>,
     pub(crate) draft: Box<crate::bottom_pane::TextArea>,
     pub(crate) status: Option<String>,
     pub(crate) work: Option<CapturedSideWork>,
