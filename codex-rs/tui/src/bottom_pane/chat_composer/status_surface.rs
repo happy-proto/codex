@@ -5,13 +5,31 @@
 use super::*;
 
 impl ChatComposer {
+    pub(super) fn shared_footer_areas(&self, area: Rect) -> (Rect, Rect) {
+        let status_height = u16::from(self.footer.status_line_enabled).min(area.height);
+        (
+            Rect {
+                height: status_height,
+                ..area
+            },
+            Rect {
+                y: area.y + status_height,
+                height: area.height - status_height,
+                ..area
+            },
+        )
+    }
     pub(super) fn status_surface_height(&self, options: ComposerRenderOptions<'_>) -> u16 {
-        u16::from(options.separate_status_line && self.footer.status_line_enabled)
+        u16::from(
+            options.shared_footer.is_none()
+                && options.separate_status_line
+                && self.footer.status_line_enabled,
+        )
     }
 
     pub(super) fn hint_footer_props(&self, options: ComposerRenderOptions<'_>) -> FooterProps {
         let mut props = self.footer_props();
-        if self.status_surface_height(options) > 0 {
+        if options.separate_status_line && self.footer.status_line_enabled {
             props.status_line_enabled = false;
             props.status_line_value = None;
             props.active_agent_label = None;

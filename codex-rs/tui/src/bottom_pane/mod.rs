@@ -85,6 +85,7 @@ mod empty_state_policy;
 mod hook_status;
 mod mcp_server_elicitation;
 mod multi_select_picker;
+pub(crate) mod workspace_status;
 pub(crate) use multi_select_picker::MultiSelectItem;
 pub(crate) use multi_select_picker::MultiSelectPicker;
 #[cfg(test)]
@@ -334,6 +335,7 @@ pub(crate) struct BottomPane {
     inline_banner: Option<actionable_banner::InlineBanner>,
     /// Streaming may drop the row without losing its elapsed time or modal pause.
     status_timer: crate::status_indicator_widget::StatusTimer,
+    workspace_status: workspace_status::WorkspaceStatus,
     /// Unified exec session summary source.
     ///
     /// When a status row exists, this summary is mirrored inline in that row;
@@ -427,6 +429,7 @@ impl BottomPane {
             hook_status_message: None,
             inline_banner: None,
             status_timer: crate::status_indicator_widget::StatusTimer::default(),
+            workspace_status: Default::default(),
             unified_exec_footer: UnifiedExecFooter::new(),
             pending_input_preview: PendingInputPreview::new(),
             pending_thread_approvals: PendingThreadApprovals::new(),
@@ -442,6 +445,49 @@ impl BottomPane {
     pub fn set_skills(&mut self, skills: Option<Vec<SkillMetadata>>) {
         self.composer.set_skill_mentions(skills);
         self.request_redraw();
+    }
+
+    /// Retain the real composer for the read-only half of a docked conversation.
+    /// The outgoing widget is about to be replaced; its input recovery state was saved already.
+    pub(crate) fn take_for_side(&mut self) -> Box<Self> {
+        self.composer.flush_pending_paste_burst();
+        let replacement = Self::new(BottomPaneParams {
+            app_event_tx: self.app_event_tx.clone(),
+            frame_requester: self.frame_requester.clone(),
+            has_input_focus: false,
+            enhanced_keys_supported: self.enhanced_keys_supported,
+            placeholder_text: String::new(),
+            disable_paste_burst: self.disable_paste_burst,
+            animations_enabled: self.animations_enabled,
+            effects: self.effects,
+            skills: None,
+        });
+        let mut parked = Box::new(std::mem::replace(self, replacement));
+        parked.has_input_focus = false;
+        parked.composer.set_has_focus(false);
+        parked.composer.dismiss_sparkle();
+        parked
+    }
+
+    pub(crate) fn set_workspace_status(&mut self, status: workspace_status::WorkspaceStatus) {
+        self.workspace_status = status;
+        self.request_redraw();
+    }
+
+    pub(crate) fn parked_renderable<'a>(
+        &'a self,
+        options: ComposerRenderOptions<'a>,
+    ) -> RenderableItem<'a> {
+        self.renderable_for_views(options, &[])
+    }
+
+    pub(crate) fn render_shared_footer(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        options: ComposerRenderOptions<'_>,
+    ) {
+        self.composer.render_shared_footer(area, buf, options);
     }
 
     /// Update image-paste behavior for the active composer and repaint immediately.
@@ -2491,13 +2537,37 @@ impl BottomPane {
             {
                 flex.push(/*flex*/ 0, RenderableItem::Borrowed(banner));
             }
-            if let Some(status) = self.status_widget() {
+            if options.shared_footer.is_some() {
+                let running =
+                    self.workspace_status.phase == workspace_status::WorkspacePhase::Working;
+                let header = (running && !options.passive)
+                    .then(|| {
+                        self.status
+                            .as_ref()
+                            .map(|status| status.header_at(Instant::now()))
+                    })
+                    .flatten();
+                let interrupt = (!options.passive)
+                    .then(|| {
+                        self.keymap
+                            .primary_hint(KeymapContext::Chat, "interrupt_turn")
+                            .map(|key| key.display_label())
+                    })
+                    .flatten();
+                let line = self.workspace_status.line(header.as_deref(), interrupt);
+                flex.push(0, RenderableItem::Owned(Box::new(line)));
+                if running {
+                    self.frame_requester
+                        .schedule_frame_in(Duration::from_secs(1));
+                }
+            } else if let Some(status) = self.status_widget() {
                 flex.push(
                     /*flex*/ 0,
                     RenderableItem::Owned(Box::new(status.with_timer(&self.status_timer))),
                 );
             }
-            if self.status.is_none()
+            if options.shared_footer.is_none()
+                && self.status.is_none()
                 && let Some(message) = &self.hook_status_message
             {
                 flex.push(
@@ -2510,7 +2580,10 @@ impl BottomPane {
             }
             // Avoid double-surfacing the same summary and avoid adding an extra
             // row while the status line is already visible.
-            if self.status_widget().is_none() && !self.unified_exec_footer.is_empty() {
+            if options.shared_footer.is_none()
+                && self.status_widget().is_none()
+                && !self.unified_exec_footer.is_empty()
+            {
                 flex.push(
                     /*flex*/ 0,
                     RenderableItem::Borrowed(&self.unified_exec_footer),
@@ -2525,11 +2598,13 @@ impl BottomPane {
                 || !self.pending_input_preview.queued_messages.is_empty()
                 || !self.pending_input_preview.pending_steers.is_empty()
                 || !self.pending_input_preview.rejected_steers.is_empty();
-            let has_status_or_footer = self.status_widget().is_some()
+            let has_status_or_footer = options.shared_footer.is_some()
+                || self.status_widget().is_some()
                 || self.hook_status_message.is_some()
                 || !self.unified_exec_footer.is_empty();
             let has_inline_previews = has_pending_thread_approvals || has_pending_input;
-            if !has_inline_previews
+            if options.shared_footer.is_none()
+                && !has_inline_previews
                 && self.status_widget().is_some()
                 && let Some(tip) = options.working_tip
             {
@@ -2557,7 +2632,10 @@ impl BottomPane {
                     RenderableItem::Borrowed(&self.pending_input_preview)
                 },
             );
-            let question_editor = self.questions.as_ref().filter(|q| q.expanded);
+            let question_editor = self
+                .questions
+                .as_ref()
+                .filter(|q| q.expanded && !options.passive);
             // An empty shared gap already separates activity from the composer.
             if !has_inline_previews
                 && has_status_or_footer
@@ -2758,6 +2836,84 @@ mod tests {
         let mut buf = Buffer::empty(area);
         pane.render(area, &mut buf);
         snapshot_buffer(&buf)
+    }
+
+    #[test]
+    fn workspace_focus_and_completion_preserve_multiline_composer_geometry() {
+        let (tx, _rx) = unbounded_channel();
+        let mut pane = test_pane_with_disable_paste_burst(AppEventSender::new(tx), true);
+        pane.insert_str("first draft line\nsecond draft line\nthird draft line");
+        let mut status = workspace_status::WorkspaceStatus::default();
+        status.start("turn", Duration::from_secs(75));
+        pane.set_workspace_status(status.clone());
+        for width in [36, 80] {
+            let gap = ComposerGap::default();
+            let options = ComposerRenderOptions {
+                shared_footer: Some(Rect::default()),
+                separate_status_line: true,
+                composer_gap: Some(&gap),
+                max_height: Some(16),
+                command_popup_placement: CommandPopupPlacement::Overlay,
+                ..Default::default()
+            };
+            let focused = pane.as_renderable_with_options(options);
+            let height = focused.desired_height(width);
+            let area = Rect::new(0, 0, width, height);
+            let before = render_snapshot(&focused, area);
+            drop(focused);
+            let parked = pane.parked_renderable(ComposerRenderOptions {
+                passive: true,
+                command_popup_placement: CommandPopupPlacement::Hidden,
+                ..options
+            });
+            assert_eq!(parked.desired_height(width), height);
+            let after = render_snapshot(&parked, area);
+            for text in ["first draft line", "second draft line", "third draft line"] {
+                assert_eq!(
+                    before.lines().position(|line| line.contains(text)),
+                    after.lines().position(|line| line.contains(text))
+                );
+                assert!(after.contains(text), "{after}");
+            }
+            assert!(before.contains("to inter"));
+            assert!(!after.contains("to inter"));
+            drop(parked);
+            status.set_phase(workspace_status::WorkspacePhase::Completed);
+            pane.set_workspace_status(status.clone());
+            assert_eq!(
+                pane.as_renderable_with_options(options)
+                    .desired_height(width),
+                height
+            );
+            status.set_phase(workspace_status::WorkspacePhase::Working);
+            pane.set_workspace_status(status.clone());
+        }
+    }
+
+    #[test]
+    fn workspace_suggestions_keep_the_task_state_visible() {
+        let (tx, _rx) = unbounded_channel();
+        let mut pane = test_pane_with_disable_paste_burst(AppEventSender::new(tx), true);
+        pane.set_task_running(true);
+        let mut status = workspace_status::WorkspaceStatus::default();
+        status.start("turn", Duration::ZERO);
+        pane.set_workspace_status(status);
+        pane.handle_key_event(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        let gap = ComposerGap::default();
+        let options = ComposerRenderOptions {
+            shared_footer: Some(Rect::default()),
+            separate_status_line: true,
+            composer_gap: Some(&gap),
+            command_popup_placement: CommandPopupPlacement::Overlay,
+            ..Default::default()
+        };
+        let renderable = pane.as_renderable_with_options(options);
+        let text = render_snapshot(
+            &renderable,
+            Rect::new(0, 0, 80, renderable.desired_height(80)),
+        );
+        assert!(text.contains("Working"), "{text}");
+        assert!(pane.composer.popup_active());
     }
 
     pub(super) fn test_pane(app_event_tx: AppEventSender) -> BottomPane {

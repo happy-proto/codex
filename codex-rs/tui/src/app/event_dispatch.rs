@@ -959,8 +959,11 @@ impl App {
             AppEvent::BeginThreadSwitchHistoryReplayBuffer => {
                 self.begin_thread_switch_history_replay_buffer();
             }
-            AppEvent::ParkSideCompanion { pair, thread_id, stream, display } => {
+            AppEvent::ParkSideCompanion { pair, thread_id, stream, mut display } => {
                 if self.side_threads.contains_key(&pair) {
+                    if let Some(channel) = self.thread_event_channels.get(&thread_id) {
+                        display.bottom.set_workspace_status(channel.store.lock().await.workspace_status());
+                    }
                     self.transcript_view.sync_history_tail(&self.transcript_cells);
                     let mut answer = None;
                     if let Some(stream) = stream {
