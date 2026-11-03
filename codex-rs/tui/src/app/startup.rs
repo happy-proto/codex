@@ -1061,6 +1061,7 @@ See the Codex keymap documentation for supported actions and examples."
             agents_overview,
             side_threads: HashMap::new(),
             side_companions: HashMap::new(),
+            pending_side_composers: HashMap::new(),
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,
             active_thread_rx: None,

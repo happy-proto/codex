@@ -650,6 +650,8 @@ pub(crate) struct App {
     side_threads: HashMap<ThreadId, SideThreadState>,
     /// A parked parent view survives child cleanup until its own replay finishes.
     side_companions: HashMap<ThreadId, SideCompanion>,
+    // UI objects stay on the App task while the cross-thread event queue drains history edits.
+    pending_side_composers: HashMap<ThreadId, Box<crate::bottom_pane::BottomPane>>,
     abandoned_side_threads: HashSet<ThreadId>,
     active_thread_id: Option<ThreadId>,
     active_thread_rx: Option<mpsc::Receiver<ThreadBufferedEvent>>,

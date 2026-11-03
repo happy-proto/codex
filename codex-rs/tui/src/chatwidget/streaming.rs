@@ -208,7 +208,11 @@ impl ChatWidget {
     pub(crate) fn take_side_display(
         &mut self,
         width: u16,
-    ) -> (Option<CapturedSideStream>, CapturedSideDisplay) {
+    ) -> (
+        Option<CapturedSideStream>,
+        CapturedSideDisplay,
+        Box<crate::bottom_pane::BottomPane>,
+    ) {
         self.flush_completed_tool_activity();
         let stream = if let Some(controller) = &self.stream_controller {
             let source = controller.source_snapshot();
@@ -253,9 +257,8 @@ impl ChatWidget {
             auxiliary: self
                 .active_cell_transcript_hyperlink_lines(width)
                 .unwrap_or_default(),
-            bottom: self.bottom_pane.take_for_side(),
         };
-        (stream, display)
+        (stream, display, self.bottom_pane.take_for_side())
     }
 
     fn completed_agent_message_was_flushed(&self, message: &str) -> bool {

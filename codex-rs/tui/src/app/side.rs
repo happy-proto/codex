@@ -211,6 +211,7 @@ impl SideParentStatusChange {
 
 /// Transcript state retained while the other conversation is active.
 pub(super) struct SideCompanion {
+    pub(super) bottom: Box<crate::bottom_pane::BottomPane>,
     pub(super) display: crate::app_event::CapturedSideDisplay,
     pub(super) cells: Vec<Arc<dyn HistoryCell>>,
     pub(super) view: crate::transcript_view::TranscriptView,
@@ -565,6 +566,7 @@ impl App {
         self.agents_overview.activity.remove(&thread_id);
         self.side_threads.remove(&thread_id);
         self.side_companions.remove(&thread_id);
+        self.pending_side_composers.remove(&thread_id);
         self.agent_navigation.remove(thread_id);
         if self.active_thread_id == Some(thread_id) {
             self.clear_active_thread().await;

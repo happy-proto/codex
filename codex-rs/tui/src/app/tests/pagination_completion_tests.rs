@@ -157,7 +157,8 @@ async fn side_replay_retries_an_older_find_page_discarded_while_inactive() -> Re
     let child = ThreadId::new();
     app.side_threads
         .insert(child, SideThreadState::new(thread_id));
-    let (stream, display) = app.chat_widget.take_side_display(/*width*/ 100);
+    let (stream, display, bottom) = app.chat_widget.take_side_display(/*width*/ 100);
+    app.pending_side_composers.insert(thread_id, bottom);
     boxed_future!(app.handle_event(
         &mut tui,
         &mut app_server,
