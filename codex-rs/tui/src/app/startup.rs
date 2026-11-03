@@ -1561,6 +1561,10 @@ See the Codex keymap documentation for supported actions and examples."
                 }
                 let thread_name_poll_deadline = app.thread_name_poll_deadline();
                 let control = select! {
+                _ = generation_speed_poll.tick(), if app.has_live_generation_speed_target() => {
+                    app.refresh_live_generation_speed();
+                    AppRunControl::Continue
+                }
                     result = async {
                         match app.daemon_restart.as_mut() {
                             Some(task) => task.await,
