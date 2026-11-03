@@ -282,9 +282,9 @@ mod server_version_notice;
 mod session_lifecycle;
 mod session_picker;
 mod side;
-mod side_companion;
 mod side_focus;
 mod side_pane;
+mod side_projection;
 mod sidebar;
 mod sidebar_close;
 mod sidebar_document;
@@ -331,10 +331,10 @@ use self::loaded_threads::find_loaded_subagent_threads_for_primary;
 use self::pending_interactive_replay::PendingInteractiveReplayState;
 pub(crate) use self::platform_actions::WindowsSandboxHost;
 use self::platform_actions::*;
+use self::side::SideCompanion;
 use self::side::SideParentStatus;
 use self::side::SideParentStatusChange;
 use self::side::SideThreadState;
-use self::side_companion::SideCompanion;
 use self::startup_prompts::*;
 use self::thread_events::*;
 
@@ -706,6 +706,8 @@ pub(crate) struct App {
     pane_resize: Option<side_pane::PaneResize>,
     passive_link_drag: Option<(ThreadId, Rect)>,
     sidebar_press: Option<side_focus::SidebarPress>,
+    // UI objects stay on the App task while the cross-thread event queue drains history edits.
+    pending_side_composers: HashMap<ThreadId, side::PendingSideComposer>,
     abandoned_side_threads: HashSet<ThreadId>,
     active_thread_id: Option<ThreadId>,
     primary_thread_id: Option<ThreadId>,
@@ -1246,7 +1248,7 @@ impl App {
             if let Some(current) = side_pane::layout(self, tui, size.into())
                 && current.passive_thread == painted.passive_thread
                 && let Some(peer) = self.current_displayed_thread_id()
-                && painted.passive.union(painted.focused) == self.workspace_chat_area(size.into())
+                && painted == &current
             {
                 let painted_area = painted.passive;
                 if let Some(link) = self.transcript_link_at(*press) {
@@ -1276,10 +1278,9 @@ impl App {
                     .side_companions
                     .get_mut(&current.passive_thread)
                     .and_then(|pane| {
-                        let draft = &mut pane.display.draft;
-                        draft
-                            .handle_mouse(*press, Default::default())
-                            .then(|| draft.cursor())
+                        pane.bottom
+                            .handle_composer_mouse(*press)
+                            .then(|| pane.bottom.composer_cursor())
                     });
                 if let Err(err) = self.toggle_side_conversation(tui, app_server).await {
                     self.chat_widget.add_error_message(err.to_string());
@@ -1488,6 +1489,7 @@ impl App {
                         owner.refresh_realtime_microphone_level();
                     }
                     self.chat_widget.pre_draw_tick();
+                    self.tick_side_projections(&tui.frame_requester());
                     self.refresh_agents_overview_usage(app_server, tui.frame_requester());
                     let rendered_area =
                         self.render_chat_frame(tui, screen_size, /*preserve_pet*/ true)?;

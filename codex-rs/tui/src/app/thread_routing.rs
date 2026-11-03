@@ -1107,6 +1107,13 @@ impl App {
 
         let mut pending_thread_ids = HashSet::new();
         for (thread_id, store) in channels {
+            let status = store.lock().await.workspace_status();
+            if self.chat_widget.thread_id() == Some(thread_id) {
+                self.chat_widget.set_workspace_status(status.clone());
+            }
+            if let Some(companion) = self.side_companions.get_mut(&thread_id) {
+                companion.bottom.set_workspace_status(status);
+            }
             if Some(thread_id) == self.active_thread_id || Some(thread_id) == side_parent_thread_id
             {
                 continue;
@@ -1154,6 +1161,12 @@ impl App {
         thread_id: ThreadId,
         mut notification: ServerNotification,
     ) -> Result<()> {
+        if self.current_displayed_thread_id() != Some(thread_id)
+            && matches!(&notification, ServerNotification::TurnCompleted(_))
+        {
+            self.refresh_parked_generation_speeds(thread_id).await;
+        }
+        self.deliver_side_projection_notification(thread_id, &notification);
         self.deliver_background_voice_notification(thread_id, &notification);
         if self.abandoned_side_threads.contains(&thread_id) {
             return Ok(());
@@ -1345,13 +1358,6 @@ impl App {
                     .is_none_or(|owner| owner.thread_id() != Some(thread_id))
                 {
                     self.retain_inactive_realtime_transcript(thread_id, &notification);
-                }
-                if let Some(companion) = self.side_companions.get_mut(&thread_id)
-                    && companion.apply_notification(&notification, &guard, || {
-                        self.chat_widget.new_status_indicator()
-                    })
-                {
-                    self.chat_widget.request_redraw();
                 }
                 // Status traffic alone does not change the displayed transcript.
                 guard.replay_may_have_output |= !matches!(
@@ -2329,27 +2335,6 @@ impl App {
             // thread, so unrelated shutdowns cannot consume this marker.
             self.pending_shutdown_exit_thread_id = None;
         }
-<<<<<<< HEAD
-        // Attached side chats generate a title from their first direct submission.
-        let attached_side_chat = self
-            .active_thread_id
-            .and_then(|id| self.side_threads.get(&id))
-            .is_some_and(|side| {
-                side.storage == crate::app_server_session::SideChatStorage::Attached
-            });
-        let automatic_title_user_message = if self.chat_widget.thread_name().is_none()
-            && !attached_side_chat
-            && !(self.side_retention_enabled(tui) && self.active_side_parent_thread_id().is_some())
-            && let ThreadBufferedEvent::Notification(notification) = &event
-            && let ServerNotification::ItemCompleted(notification) = notification.as_ref()
-            && let ThreadItemPayload::UserMessage { content, .. } = &notification.item.payload
-        {
-            super::thread_title::user_message_text(content)
-        } else {
-            None
-        };
-=======
->>>>>>> 3e0cbc5 (feat(tui): name new threads after basic investigation)
         let had_active_modal = self.chat_widget.has_active_modal();
         self.handle_thread_event_now_recovering_file_changes(event)
             .await;

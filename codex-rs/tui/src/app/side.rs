@@ -174,6 +174,45 @@ impl SideParentStatusChange {
     }
 }
 
+/// Transcript state retained while the other conversation is active.
+pub(super) struct SideCompanion {
+    pub(super) route: crate::app_event_sender::SideProjectionRoute,
+    pub(super) projection: Option<Box<ChatWidget>>,
+    pub(super) commit_ticks: bool,
+    pub(super) bottom: Box<crate::bottom_pane::BottomPane>,
+    pub(super) display: crate::app_event::CapturedSideDisplay,
+    pub(super) cells: Vec<Arc<dyn HistoryCell>>,
+    pub(super) view: crate::transcript_view::TranscriptView,
+}
+
+impl SideCompanion {
+    pub(super) fn can_scroll_without_refresh(&self) -> bool {
+        !self.commit_ticks
+            && self
+                .view
+                .can_scroll_without_refresh(&self.cells, /*live_key*/ None)
+    }
+}
+
+pub(super) struct PendingSideComposer {
+    pub(super) bottom: Box<crate::bottom_pane::BottomPane>,
+    pub(super) route: crate::app_event_sender::SideProjectionRoute,
+    pub(super) projection: Option<Box<ChatWidget>>,
+}
+
+impl PendingSideComposer {
+    pub(super) fn new(thread_id: ThreadId, bottom: Box<crate::bottom_pane::BottomPane>) -> Self {
+        Self {
+            bottom,
+            route: crate::app_event_sender::SideProjectionRoute {
+                thread_id,
+                generation: uuid::Uuid::new_v4(),
+            },
+            projection: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct SideThreadState {
     /// Thread to return to when the current side conversation is dismissed.
@@ -704,6 +743,7 @@ impl App {
             pane.remove_chat(thread_id, side.storage);
         }
         self.side_companions.remove(&thread_id);
+        self.pending_side_composers.remove(&thread_id);
         self.agent_navigation.remove(thread_id);
         if self.active_thread_id == Some(thread_id) {
             self.clear_active_thread().await;
@@ -1064,7 +1104,39 @@ impl App {
                 if !enter {
                     self.side_companions
                         .entry(child_thread_id)
-                        .or_insert_with(|| SideCompanion::empty(forked.session.cwd.to_path_buf()));
+                        .or_insert_with(|| SideCompanion {
+                            route: crate::app_event_sender::SideProjectionRoute {
+                                thread_id: child_thread_id,
+                                generation: uuid::Uuid::new_v4(),
+                            },
+                            projection: None,
+                            commit_ticks: false,
+                            bottom: Box::new(crate::bottom_pane::BottomPane::new(
+                                crate::bottom_pane::BottomPaneParams {
+                                    app_event_tx: self.app_event_tx.clone(),
+                                    frame_requester: tui.frame_requester(),
+                                    has_input_focus: false,
+                                    enhanced_keys_supported: self.enhanced_keys_supported,
+                                    placeholder_text: String::new(),
+                                    disable_paste_burst: self
+                                        .local_settings
+                                        .tui
+                                        .disable_paste_burst
+                                        .unwrap_or(false),
+                                    animations_enabled: self.local_settings.tui.animations,
+                                    effects: self.local_settings.tui.effects,
+                                    skills: None,
+                                },
+                            )),
+                            display: crate::app_event::CapturedSideDisplay {
+                                rendered_completion_turn_ids: Default::default(),
+                                generated_images: Default::default(),
+                                active: None,
+                                auxiliary: Vec::new(),
+                            },
+                            cells: Vec::new(),
+                            view: Default::default(),
+                        });
                 }
                 let channel = self.ensure_thread_channel(child_thread_id);
                 channel.backend_id = Some(app_server.backend_id());

@@ -70,8 +70,12 @@ mod permission_selection_tests;
 mod projectless_tests;
 #[path = "tests/quick_dials_tests.rs"]
 mod quick_dials_tests;
+#[path = "tests/side_projection_tests.rs"]
+mod side_projection_tests;
 #[path = "tests/unavailable_commands_tests.rs"]
 mod unavailable_commands;
+#[path = "tests/workspace_tests.rs"]
+mod workspace_tests;
 
 #[path = "tests/backend_sessions_tests.rs"]
 mod backend_sessions;
@@ -4600,7 +4604,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         app.transcript_view.end_select_mode();
         let reopened = side_frame(&mut app, &mut tui, size)?;
         assert!(
-            reopened.contains("child-29") && reopened.contains("child draft!"),
+            reopened.contains(child_row) && reopened.contains("child draft!"),
             "{reopened}"
         );
         assert_eq!(
@@ -4871,7 +4875,15 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         }
         side_frame(&mut app, &mut tui, wide)?;
         assert!(!app.key_chord_matcher.is_pending());
-        let columns: Vec<_> = (0..wide.height).map(|y| divider_at(&tui, y)).collect();
+        let footer = side_pane::layout(&app, &tui, wide.into())
+            .expect("side pane layout")
+            .footer;
+        let columns: Vec<_> = (0..footer.y).map(|y| divider_at(&tui, y)).collect();
+        for y in footer.y..wide.height {
+            assert!(
+                (0..wide.width).all(|x| tui.terminal.previous_buffer()[(x, y)].symbol() != "│")
+            );
+        }
         previews.push(*columns.iter().min().unwrap());
         assert_eq!(std::fs::read(&path).ok(), before);
         if let Some(area) = image {
@@ -4928,12 +4940,19 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         assert_eq!(divider_at(&tui, 0), column);
     }
     let zoom = KeyEvent::from(KeyCode::Char('z'));
+    // The synthetic live turn starts at the epoch; keep wall-clock time out of snapshots.
+    let elapsed = regex_lite::Regex::new(r"Working \([^•\n]* •")?;
+    let keyboard_frame = |frame: String| {
+        elapsed
+            .replace_all(&frame, "Working (<elapsed> •")
+            .into_owned()
+    };
     keys!(prefix, zoom);
     assert!(app.conversation_frame.side_pane().is_none());
-    let zoomed = side_frame(&mut app, &mut tui, wide)?;
+    let zoomed = keyboard_frame(side_frame(&mut app, &mut tui, wide)?);
     keys!(prefix, zoom);
     assert!(app.conversation_frame.side_pane().is_some());
-    let restored = side_frame(&mut app, &mut tui, wide)?;
+    let restored = keyboard_frame(side_frame(&mut app, &mut tui, wide)?);
     assert_eq!(divider_at(&tui, 0), 197);
     keys!(prefix, zoom);
     keys!(toggle);
@@ -4946,7 +4965,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     tui.terminal = terminal_at(even);
     keys!(prefix, zoom);
     keys!(prefix, KeyCode::Char('=').into());
-    let equalized = side_frame(&mut app, &mut tui, even)?;
+    let equalized = keyboard_frame(side_frame(&mut app, &mut tui, even)?);
     assert_app_snapshot!(
         "keyboard_pane_widths",
         format!("Zoomed\n{zoomed}\nRestored\n{restored}\nEqualized\n{equalized}")
@@ -5004,10 +5023,9 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     let resizing = side_frame(&mut app, &mut tui, even)?;
     let hint = resizing
         .lines()
-        .filter_map(|row| row.split_once('│'))
-        .map(|(main, _)| main.trim())
-        .find(|main| main.starts_with("Resize"));
-    insta::assert_snapshot!(hint.expect("resize hint in main pane"), @"Resize · ←/h →/l · Shift+←/→ 10 cols · Enter/Esc done");
+        .map(str::trim)
+        .find(|row| row.starts_with("Resize"));
+    insta::assert_snapshot!(hint.expect("resize hint in shared footer"), @"Resize · ←/h →/l · Shift+←/→ 10 cols · Enter/Esc done");
     let divider_bold = |tui: &tui::Tui| {
         let cell = &tui.terminal.previous_buffer()[(divider_at(tui, 4), 4)];
         cell.modifier.contains(ratatui::style::Modifier::BOLD)
@@ -5061,6 +5079,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     assert_eq!(app.current_displayed_thread_id(), Some(side_thread_id));
     let delta = agent_message_delta_notification(parent, turn, "reply", "while unfocused");
     app.enqueue_thread_notification(parent, delta).await?;
+    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     let streaming = side_frame(&mut app, &mut tui, size)?;
     let item = ThreadItemPayload::AgentMessage {
         moderation: None,
@@ -5084,6 +5103,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         }),
     )
     .await?;
+    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     let completed = side_frame(&mut app, &mut tui, size)?;
     // Normalize the changing timer while preserving any shortcut hint.
     let visible_turn = |frame: &str| {
@@ -5185,6 +5205,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         )
         .await?;
     }
+    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     let finished = side_frame(&mut app, &mut tui, size)?;
     let (_, after_command) = finished
         .split_once("Ran echo sidebar-check")
@@ -5201,6 +5222,35 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         1,
         "{finished}"
     );
+    app.enqueue_thread_notification(
+        parent,
+        ServerNotification::ItemCompleted(
+            codex_app_server_protocol::ItemCompletedNotification::new(
+                parent.to_string(),
+                turn.into(),
+                ThreadItemPayload::AgentMessage {
+                    id: "after-command".into(),
+                    text: "Command finished.".into(),
+                    phase: None,
+                    memory_citation: None,
+                    delivery: None,
+                    questions: None,
+                    moderation: None,
+                },
+                None,
+                0,
+            ),
+        ),
+    )
+    .await?;
+    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
+    let settled = side_frame(&mut app, &mut tui, size)?;
+    assert_eq!(
+        settled.matches("echo sidebar-check").count(),
+        1,
+        "{settled}"
+    );
+    assert_eq!(settled.matches("Command finished.").count(), 1, "{settled}");
     // Check feedback after capturing the layout snapshots and before the clipboard toast appears.
     app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
         .await?;
@@ -9210,6 +9260,7 @@ async fn make_test_app() -> Box<App> {
         pane_resize: None,
         passive_link_drag: None,
         sidebar_press: None,
+        pending_side_composers: HashMap::new(),
         abandoned_side_threads: HashSet::new(),
         active_thread_id: None,
         primary_thread_id: None,
@@ -9360,6 +9411,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             pane_resize: None,
             passive_link_drag: None,
             sidebar_press: None,
+            pending_side_composers: HashMap::new(),
             abandoned_side_threads: HashSet::new(),
             active_thread_id: None,
             primary_thread_id: None,

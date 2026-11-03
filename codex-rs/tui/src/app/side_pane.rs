@@ -2,18 +2,18 @@
 
 use super::App;
 use super::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
-use super::side_companion::SideCompanion;
+use super::side::SideCompanion;
 use super::sidebar;
 use super::sidebar::PaneFocus;
 use super::sidebar::SidebarContent;
 use super::sidebar::SidebarLayout;
-use crate::bottom_pane::FooterLayout;
-use crate::bottom_pane::StatusLineFocus;
+use crate::bottom_pane::CommandPopupPlacement;
+use crate::bottom_pane::ComposerGap;
+use crate::bottom_pane::ComposerRenderOptions;
 use crate::custom_terminal::Frame;
 use crate::legacy_core::config::edit::ConfigEdit;
 use crate::legacy_core::config::edit::ConfigEditsBuilder;
 use crate::render::renderable::Renderable;
-use crate::tui::FrameRequester;
 use crate::tui::Tui;
 use crate::tui::TuiEvent;
 use codex_protocol::ThreadId;
@@ -28,8 +28,6 @@ use crossterm::event::MouseEventKind::Up;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Rect;
-use ratatui::widgets::StatefulWidgetRef;
-use std::time::Duration;
 
 pub(super) const GAP: u16 = 1;
 pub(super) const MIN_SPLIT_WIDTH: u16 = 100;
@@ -131,6 +129,7 @@ pub(super) struct SidePaneLayout {
     pub(super) passive: Rect,
     pub(super) divider: u16,
     pub(super) tab_strip: Rect,
+    pub(super) footer: Rect,
 }
 
 /// The settled chat split used to check pointer events against the last painted frame.
@@ -188,6 +187,39 @@ pub(super) fn pair_layout(
                 .filter(|(_, agent)| *agent == child)
                 .map(|(parent, _)| parent)
         })?;
+    let area = Rect::new(
+        parent.x,
+        parent.y,
+        sidebar.right() - parent.x,
+        parent.height,
+    );
+    let width = area.width.saturating_sub(2);
+    let hint = app.prompt_navigation_footer(width).or_else(|| {
+        app.transcript_view.footer_with_navigation(
+            width,
+            crate::motion::MotionMode::from_animations_enabled(app.local_settings.tui.animations),
+            "esc latest",
+        )
+    });
+    let height = area.height.saturating_sub(1).min(
+        app.chat_widget.shared_status_height(area.width).max(1)
+            + hint
+                .as_ref()
+                .map_or(1, |footer| footer.text.height().max(1) as u16),
+    );
+    let footer = Rect {
+        y: area.bottom() - height,
+        height,
+        ..area
+    };
+    let parent = Rect {
+        height: parent.height - height,
+        ..parent
+    };
+    let sidebar = Rect {
+        height: sidebar.height.saturating_sub(height),
+        ..sidebar
+    };
     let [tab_strip, sidebar] = tab_and_body(sidebar);
     let (focused, passive, passive_thread) = if active == child {
         (sidebar, parent, owner)
@@ -202,6 +234,7 @@ pub(super) fn pair_layout(
         passive,
         passive_thread,
         tab_strip,
+        footer,
         divider: parent.right(),
     })
 }
@@ -542,57 +575,93 @@ impl SidePaneLayout {
     pub(super) fn paint_companion(
         &self,
         companion: &mut SideCompanion,
+        voice: Option<&crate::chatwidget::ChatWidget>,
         frame: &mut Frame<'_>,
         collapse_turn_details: bool,
-        frames: &FrameRequester,
         watch_only: bool,
     ) {
-        companion.flush_answer();
         let area = self.passive;
-        // Keep the live composer's bottom hint row blank on the inactive side.
-        let hint_rows = 1;
-        let composer_height = if watch_only {
+        let completion = companion.cells.last().and_then(|cell| {
+            cell.as_any()
+                .downcast_ref::<crate::history_cell::FinalMessageSeparator>()
+        });
+        let hide_completion = companion.bottom.set_workspace_completion(completion);
+        companion
+            .view
+            .set_workspace_completion(&companion.cells, hide_completion);
+        let gap = ComposerGap::default();
+        let bottom = companion.bottom.parked_renderable(ComposerRenderOptions {
+            shared_footer: Some(Rect::default()),
+            passive: true,
+            separate_status_line: true,
+            composer_gap: Some(&gap),
+            max_height: Some(composer_height_limit(area.height)),
+            command_popup_placement: CommandPopupPlacement::Hidden,
+            ..Default::default()
+        });
+        let bottom_height = if watch_only {
             0
         } else {
-            area.height.saturating_sub(hint_rows).min(3)
+            bottom.desired_height(area.width).min(area.height)
         };
-        let available = area.height - composer_height;
-        let footer = FooterLayout::new(
-            Some(composer_height_limit(area.height)),
-            hint_rows,
-            /*priority_hint_rows*/ hint_rows,
-        );
-        let status = companion
-            .display
-            .status_line
-            .as_ref()
-            .filter(|_| !watch_only);
-        let wanted_status = status.map_or(0, |status| {
-            status.height(footer.status_bounds(area.width, available))
-        });
-        let footer = footer.allocate(available, wanted_status);
-        let above = available - footer.height();
-        let mut transcript = Rect {
-            height: above.saturating_sub(1),
+        let above = area.height - bottom_height;
+        let transcript = Rect {
+            height: above,
             ..area
         };
-        if let Some(work) = &companion.display.work {
-            let row = work.row.with_timer(&work.timer);
-            let height = row.desired_height(area.width).min(transcript.height);
-            if height > 0 {
-                transcript.height -= height;
-                let status_area = Rect::new(area.x, transcript.bottom(), area.width, height);
-                row.render(status_area, frame.buffer);
-                frames.schedule_frame_in(Duration::from_secs(1));
-            }
-        }
+        let widget = companion
+            .projection
+            .as_deref()
+            .or_else(|| voice.filter(|owner| owner.thread_id() == Some(self.passive_thread)));
+        let stream = widget.and_then(|widget| widget.side_stream_snapshot());
+        let has_stream = stream.is_some();
+        let reflowed_cells =
+            stream.map(|stream| {
+                use crate::app_event::CapturedSideStream;
+                use crate::history_cell;
+                use crate::history_cell::HistoryCell;
+                use std::sync::Arc;
+                let (start, cell): (_, Arc<dyn HistoryCell>) = match stream {
+                    CapturedSideStream::Answer(cell) => (
+                        super::resize_reflow::trailing_run_start::<history_cell::AgentMessageCell>(
+                            &companion.cells,
+                        ),
+                        cell,
+                    ),
+                    CapturedSideStream::Plan(cell) => (
+                        super::resize_reflow::trailing_run_start::<
+                            history_cell::ProposedPlanStreamCell,
+                        >(&companion.cells),
+                        cell,
+                    ),
+                };
+                let mut cells = companion.cells[..start].to_vec();
+                cells.push(cell);
+                cells
+            });
+        let active = if let Some(widget) = widget {
+            widget.side_active_cell().filter(|cell| {
+                !has_stream
+                    || (!cell
+                        .as_any()
+                        .is::<crate::history_cell::StreamingAgentTailCell>()
+                        && !cell
+                            .as_any()
+                            .is::<crate::history_cell::StreamingPlanTailCell>())
+            })
+        } else {
+            companion.display.active.as_deref()
+        };
+        let auxiliary = widget
+            .map(|widget| widget.side_auxiliary_lines(area.width))
+            .unwrap_or_else(|| companion.display.auxiliary.clone());
         crate::markdown_render::preferences::with_visible_local_paths(|| {
             companion.view.render_parked(
                 transcript,
                 frame.buffer,
-                &companion.cells,
-                companion.display.active.as_deref(),
-                &companion.display.auxiliary,
+                reflowed_cells.as_deref().unwrap_or(&companion.cells),
+                active,
+                &auxiliary,
                 collapse_turn_details,
             );
         });
@@ -602,41 +671,18 @@ impl SidePaneLayout {
 
         let composer = Rect {
             y: area.y + above,
-            height: composer_height,
+            height: bottom_height,
             ..area
         };
-        frame
-            .buffer
-            .set_style(composer, crate::style::quiet_workspace_style());
-        let inset = u16::from(composer_height > 1);
-        let text_area = Rect::new(
-            composer.x.saturating_add(/*rhs*/ 2),
-            composer.y + inset,
-            composer.width.saturating_sub(/*rhs*/ 2),
-            composer_height - inset,
-        );
-        if !text_area.is_empty() {
-            frame.buffer[(composer.x, text_area.y)].set_symbol("›");
-            StatefulWidgetRef::render_ref(
-                &companion.display.draft.as_ref(),
-                text_area,
-                frame.buffer,
-                &mut Default::default(),
-            );
-        }
-        if let Some(status) = status {
-            status.render(
-                footer.status_area(area),
-                frame.buffer,
-                StatusLineFocus::Unfocused,
-            );
+        if !watch_only {
+            bottom.render(composer, frame.buffer);
         }
     }
 }
 
 pub(super) fn paint_divider(
     frame: &mut Frame<'_>,
-    divider: u16,
+    divider: Rect,
     drag: Option<DividerDrag>,
     highlight_divider: bool,
 ) {
@@ -644,7 +690,7 @@ pub(super) fn paint_divider(
     // of retained pixels can erase the rest of that terminal row.
     let guide = drag
         .filter(|drag| drag.guide_only)
-        .map_or(divider, |drag| match drag.target {
+        .map_or(divider.x, |drag| match drag.target {
             ResizeTarget::CommandCenter => drag.screen.x + drag.width,
             ResizeTarget::Sidebar { .. } => drag.screen.right() - drag.width - GAP,
         });
@@ -653,12 +699,12 @@ pub(super) fn paint_divider(
     } else {
         ratatui::style::Style::default().dim()
     };
-    for y in frame.area().y..frame.area().bottom() {
-        let x = if guide != divider
+    for y in divider.y..divider.bottom() {
+        let x = if guide != divider.x
             && frame.image_placements.iter().any(|image| {
                 (image.area.y..image.area.bottom()).contains(&y) && guide < image.area.right()
             }) {
-            divider
+            divider.x
         } else {
             guide
         };

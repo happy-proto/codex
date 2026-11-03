@@ -257,7 +257,12 @@ impl App {
                     .entry(thread_id)
                     .or_default();
             }
-            let cells = self.chat_widget.take_realtime_transcript_cells_for_replay();
+            let cells = if self.chat_widget.side_projection_route().is_some() {
+                // The parked display keeps pending/live captions until its scoped commit.
+                self.chat_widget.realtime_transcript_cells_for_replay()
+            } else {
+                self.chat_widget.take_realtime_transcript_cells_for_replay()
+            };
             if !cells.is_empty() {
                 self.note_realtime_replay_thread(thread_id);
                 let pending = self

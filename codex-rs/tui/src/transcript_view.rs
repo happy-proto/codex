@@ -96,6 +96,7 @@ struct VisibleRow {
 
 /// Shared scrolling and interaction state for compact and detailed transcript presentations.
 pub(crate) struct TranscriptView {
+    workspace_completion: Option<EntryKey>,
     pub(crate) image_protocol: Option<crate::pets::ImageProtocol>,
     pub(crate) bidi_layout: bool,
     pub(crate) agent_links: Option<crate::backend_id::BackendId>,
@@ -143,6 +144,7 @@ pub(crate) struct TranscriptView {
 impl Default for TranscriptView {
     fn default() -> Self {
         Self {
+            workspace_completion: None,
             image_protocol: None,
             bidi_layout: false,
             agent_links: None,
