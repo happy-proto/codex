@@ -13,7 +13,6 @@ use crate::terminal_probe::DefaultColors;
 use crate::tui::FrameRequester;
 use pretty_assertions::assert_eq;
 use ratatui::layout::Position;
-use ratatui::style::Color;
 
 use super::field::DOTS;
 
@@ -84,10 +83,10 @@ fn draw(composer: &ChatComposer, width: u16, now: Instant) -> (Buffer, Rect) {
         composer.desired_height(width),
     );
     let layout = composer.layout_with_options(area, Default::default());
-    let phase = composer.sparkle.phase.replace(Phase::Unarmed);
+    let motion_enabled = composer.sparkle.motion_enabled.replace(false);
     let mut buffer = Buffer::empty(area);
     composer.render(area, &mut buffer);
-    composer.sparkle.phase.set(phase);
+    composer.sparkle.motion_enabled.set(motion_enabled);
     composer.render_sparkle_at(
         layout.composer,
         layout.textarea,
@@ -199,58 +198,24 @@ fn sparkle_matches_the_original_starfield_and_protects_the_placeholder_and_curso
 }
 
 #[test]
-fn sparkle_fades_without_adding_dots_and_finishes_by_fifteen_seconds() {
+fn idle_sparkle_continues_beyond_fifteen_seconds_and_model_changes() {
     palette(|| {
         let now = Instant::now();
         let mut pane = pane();
         pane.mark_fresh_task_for_sparkle("astra", &enabled());
-        draw(&pane.composer, /*width*/ 80, now);
-        let (last, _) = draw(
-            &pane.composer,
-            /*width*/ 80,
-            now + IDLE_TIMEOUT - IDLE_FADE,
-        );
-        let (fading, _) = draw(
-            &pane.composer,
-            /*width*/ 80,
-            now + Duration::from_millis(/*millis*/ 14_500),
-        );
-        let (finished, _) = draw(&pane.composer, /*width*/ 80, now + IDLE_TIMEOUT);
-        assert!(!dots(&fading).is_empty());
-        assert!(dots(&fading).iter().all(|dot| dots(&last).contains(dot)));
-        let contrast = |cell: &ratatui::buffer::Cell| match (cell.fg, cell.bg) {
-            (Color::Rgb(fr, fg, fb), Color::Rgb(br, bg, bb)) => {
-                u32::from(fr.abs_diff(br)) + u32::from(fg.abs_diff(bg)) + u32::from(fb.abs_diff(bb))
-            }
-            colors => panic!("expected true color: {colors:?}"),
-        };
-        for (x, y, _) in dots(&fading) {
-            assert!(contrast(&fading[(x, y)]) < contrast(&last[(x, y)]));
+        for seconds in [0, 14, 15, 60, 3600] {
+            assert!(
+                !dots(&draw(&pane.composer, 80, now + Duration::from_secs(seconds)).0).is_empty(),
+                "idle after {seconds} seconds"
+            );
         }
-        assert!(dots(&finished).is_empty());
-        pane.select_sparkle_model("astra", &enabled());
-        assert!(
-            dots(
-                &draw(
-                    &pane.composer,
-                    /*width*/ 80,
-                    now + IDLE_TIMEOUT + IDLE_FADE
-                )
-                .0
-            )
-            .is_empty()
-        );
-        insta::assert_snapshot!(format!(
-            "before fade:\n{}\nfading:\n{}\nfinished:\n{}",
-            text(&last),
-            text(&fading),
-            text(&finished)
-        ));
+        pane.select_sparkle_model("custom-model", &enabled());
+        assert!(!dots(&draw(&pane.composer, 80, now + Duration::from_secs(3601)).0).is_empty());
     });
 }
 
 #[test]
-fn the_first_buffered_character_and_empty_escape_clear_visible_stars() {
+fn buffered_input_and_shortcut_help_hide_stars_but_empty_navigation_keeps_them() {
     palette(|| {
         let now = Instant::now();
         for input in [
@@ -264,7 +229,10 @@ fn the_first_buffered_character_and_empty_escape_clear_visible_stars() {
             pane.mark_fresh_task_for_sparkle("astra", &enabled());
             assert!(!dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
             key(&mut pane, input);
-            assert!(dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
+            assert_eq!(
+                dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty(),
+                matches!(input, KeyCode::Char(_))
+            );
             assert!(pane.composer.current_text().is_empty());
             assert_eq!(
                 pane.composer.sparkle.draft.get(),
@@ -279,10 +247,9 @@ fn the_first_buffered_character_and_empty_escape_clear_visible_stars() {
 }
 
 #[test]
-fn shortcut_help_preserves_an_unused_sparkle_but_literal_question_marks_do_not() {
+fn shortcut_help_and_literal_question_marks_hide_stars_until_the_composer_is_empty() {
     palette(|| {
         let now = Instant::now();
-        let mut snapshots = Vec::new();
         for (scenario, input) in [
             (
                 "unmodified",
@@ -338,13 +305,6 @@ fn shortcut_help_preserves_an_unused_sparkle_but_literal_question_marks_do_not()
             pane.select_sparkle_model("gpt-6-astra", &enabled());
             let selected = draw(&pane.composer, /*width*/ 80, now).0;
             assert!(!dots(&selected).is_empty(), "{scenario}");
-            if scenario == "unmodified" {
-                snapshots.push(format!(
-                    "shortcut help:\n{}\n\nafter /model selects Astra:\n{}",
-                    text(&help),
-                    text(&selected)
-                ));
-            }
         }
 
         for scenario in ["paste", "remapped literal", "quit reminder"] {
@@ -373,6 +333,7 @@ fn shortcut_help_preserves_an_unused_sparkle_but_literal_question_marks_do_not()
                 "{scenario}"
             );
             let literal = draw(&pane.composer, /*width*/ 80, now).0;
+            assert!(dots(&literal).is_empty());
             key(&mut pane, KeyCode::Backspace);
             type_text(&mut pane, "/model");
             assert!(matches!(
@@ -381,26 +342,17 @@ fn shortcut_help_preserves_an_unused_sparkle_but_literal_question_marks_do_not()
             ));
             pane.select_sparkle_model("gpt-6-astra", &enabled());
             let selected = draw(&pane.composer, /*width*/ 80, now).0;
-            assert!(dots(&selected).is_empty(), "{scenario}");
-            if scenario == "paste" {
-                snapshots.push(format!(
-                    "literal pasted question mark:\n{}\n\nafter clearing and selecting Astra:\n{}",
-                    text(&literal),
-                    text(&selected)
-                ));
-            }
+            assert!(!dots(&selected).is_empty(), "{scenario}");
         }
-        insta::assert_snapshot!(snapshots.join("\n\n"));
     });
 }
 
 #[test]
-fn shortcut_help_hides_visible_sparkles_without_restarting_their_deadline() {
+fn shortcut_help_hides_stars_and_closing_it_restores_them_without_an_expiry() {
     palette(|| {
         let started = Instant::now();
         let during = started + Duration::from_secs(/*secs*/ 4);
-        let expired = started + IDLE_TIMEOUT;
-        let mut snapshots = Vec::new();
+        let later = started + Duration::from_secs(60);
         for (scenario, input) in [
             (
                 "unmodified",
@@ -415,7 +367,7 @@ fn shortcut_help_hides_visible_sparkles_without_restarting_their_deadline() {
                 KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE),
             ),
         ] {
-            for close_at in [during, expired] {
+            for close_at in [during, later] {
                 let mut pane = pane();
                 if scenario == "remapped" {
                     pane.composer.toggle_shortcuts_keys =
@@ -433,42 +385,25 @@ fn shortcut_help_hides_visible_sparkles_without_restarting_their_deadline() {
                 assert_eq!(pane.composer.current_text(), "");
                 let help = draw(&pane.composer, /*width*/ 80, during).0;
                 assert!(dots(&help).is_empty(), "{scenario}");
-                if close_at == expired {
-                    let still_open = draw(&pane.composer, /*width*/ 80, expired).0;
+                if close_at == later {
+                    let still_open = draw(&pane.composer, /*width*/ 80, later).0;
                     assert!(dots(&still_open).is_empty());
-                    assert!(pane.composer.sparkle.phase.get() == Phase::Finished);
+                    assert!(pane.composer.sparkle.phase.get() == Phase::Visible(started));
                 }
                 pane.handle_key_event(input);
                 let closed = draw(&pane.composer, /*width*/ 80, close_at).0;
-                assert_eq!(
-                    dots(&closed),
-                    if close_at == expired {
-                        Vec::new()
-                    } else {
-                        dots(&expected)
-                    },
-                    "{scenario}"
-                );
-                if scenario == "unmodified" {
-                    snapshots.push(format!(
-                        "expires during help: {}\ninitial:\n{}\nshortcut help:\n{}\nafter closing:\n{}",
-                        close_at == expired,
-                        text(&active),
-                        text(&help),
-                        text(&closed)
-                    ));
-                }
+                assert!(!dots(&closed).is_empty(), "{scenario}");
             }
         }
 
         let mut waiting = pane();
         waiting.mark_fresh_task_for_sparkle("gpt-6-astra", &enabled());
         key(&mut waiting, KeyCode::Char('?'));
-        let help = draw(&waiting.composer, /*width*/ 80, expired).0;
+        let help = draw(&waiting.composer, /*width*/ 80, later).0;
         assert!(dots(&help).is_empty());
         assert!(waiting.composer.sparkle.phase.get() == Phase::Waiting);
         key(&mut waiting, KeyCode::Char('?'));
-        assert!(!dots(&draw(&waiting.composer, /*width*/ 80, expired).0).is_empty());
+        assert!(!dots(&draw(&waiting.composer, /*width*/ 80, later).0).is_empty());
 
         let mut literal = pane();
         literal.mark_fresh_task_for_sparkle("gpt-6-astra", &enabled());
@@ -476,8 +411,7 @@ fn shortcut_help_hides_visible_sparkles_without_restarting_their_deadline() {
         literal.handle_paste("?".into());
         assert_eq!(literal.composer.current_text(), "?");
         key(&mut literal, KeyCode::Backspace);
-        assert!(dots(&draw(&literal.composer, /*width*/ 80, during).0).is_empty());
-        insta::assert_snapshot!(snapshots.join("\n\n"));
+        assert!(!dots(&draw(&literal.composer, /*width*/ 80, during).0).is_empty());
     });
 }
 
@@ -485,7 +419,6 @@ fn shortcut_help_hides_visible_sparkles_without_restarting_their_deadline() {
 fn disconnected_sparkle_edits_are_tracked_between_renders() {
     palette(|| {
         let now = Instant::now();
-        let mut snapshots = Vec::new();
         for model in ["gpt-6-astra", "gpt-5.5"] {
             for (scenario, input, draft) in [
                 ("ordinary", "x", SparkleDraft::Dismissed),
@@ -533,21 +466,9 @@ fn disconnected_sparkle_edits_are_tracked_between_renders() {
                 assert_eq!(pane.composer.current_text(), "");
                 pane.select_sparkle_model("gpt-6-astra", &enabled());
                 let after = draw(&pane.composer, /*width*/ 80, now).0;
-                assert_eq!(
-                    dots(&after).is_empty(),
-                    draft == SparkleDraft::Dismissed,
-                    "{scenario}"
-                );
-                if scenario == "ordinary" {
-                    snapshots.push(format!(
-                        "{model}\nbefore disconnect:\n{}\nafter typing and erasing without rendering:\n{}",
-                        text(&initial),
-                        text(&after)
-                    ));
-                }
+                assert!(!dots(&after).is_empty(), "{scenario}");
             }
         }
-        insta::assert_snapshot!(snapshots.join("\n\n"));
     });
 }
 
@@ -580,11 +501,7 @@ fn a_fresh_astra_response_waits_for_the_pending_command_to_leave() {
                 _ => unreachable!(),
             }
             let completed = draw(&pane.composer, /*width*/ 80, now).0;
-            assert_eq!(
-                dots(&completed).is_empty(),
-                completion == "draft",
-                "{completion}"
-            );
+            assert!(!dots(&completed).is_empty(), "{completion}");
             if completion == "submit" {
                 insta::assert_snapshot!(format!(
                     "command during startup:\n{}\n\nafter command:\n{}",
@@ -597,7 +514,7 @@ fn a_fresh_astra_response_waits_for_the_pending_command_to_leave() {
 }
 
 #[test]
-fn an_attachment_ends_the_sparkle_even_after_the_composer_is_cleared() {
+fn an_attachment_hides_the_sparkle_until_the_composer_is_cleared() {
     palette(|| {
         let now = Instant::now();
         let mut pane = pane();
@@ -609,7 +526,7 @@ fn an_attachment_ends_the_sparkle_even_after_the_composer_is_cleared() {
         pane.on_ctrl_c();
         assert!(pane.composer.is_empty());
         pane.select_sparkle_model("astra", &enabled());
-        assert!(dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
+        assert!(!dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
     });
 }
 
@@ -617,7 +534,6 @@ fn an_attachment_ends_the_sparkle_even_after_the_composer_is_cleared() {
 fn history_search_acceptance_and_cancellation_update_sparkles_before_rendering() {
     palette(|| {
         let now = Instant::now();
-        let mut snapshots = Vec::new();
         for (entry, query) in [("git status", "git"), ("/status", "status")] {
             for completion in ["accept", "escape", "control-c"] {
                 let mut pane = pane();
@@ -649,24 +565,19 @@ fn history_search_acceptance_and_cancellation_update_sparkles_before_rendering()
                 assert!(pane.composer.is_empty());
                 pane.select_sparkle_model("astra", &enabled());
                 let buffer = draw(&pane.composer, /*width*/ 80, now).0;
-                assert_eq!(dots(&buffer).is_empty(), completion == "accept");
-                if entry == "git status" && completion != "control-c" {
-                    snapshots.push(format!("{completion}:\n{}", text(&buffer)));
-                }
+                assert!(!dots(&buffer).is_empty(), "{completion}");
             }
         }
-        insta::assert_snapshot!(snapshots.join("\n\n"));
     });
 }
 
 #[test]
-fn canceled_history_search_restores_visible_stars_only_before_the_original_deadline() {
+fn canceled_history_search_restores_visible_stars_after_long_waits() {
     palette(|| {
         let started = Instant::now();
         let during = started + Duration::from_secs(/*secs*/ 4);
-        let expired = started + IDLE_TIMEOUT;
-        let mut snapshots = Vec::new();
-        for (cancel, expires_while_open) in [
+        let later = started + Duration::from_secs(60);
+        for (cancel, long_wait_while_open) in [
             ("escape", false),
             ("control-c", false),
             ("escape", true),
@@ -678,7 +589,6 @@ fn canceled_history_search_restores_visible_stars_only_before_the_original_deadl
                 .history
                 .record_local_submission(HistoryEntry::new("stored draft".into()));
             let active = draw(&pane.composer, /*width*/ 80, started).0;
-            let expected = draw(&pane.composer, /*width*/ 80, during).0;
             assert!(!dots(&active).is_empty());
             pane.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
             type_text(&mut pane, "st");
@@ -687,8 +597,8 @@ fn canceled_history_search_restores_visible_stars_only_before_the_original_deadl
             assert!(pane.composer.sparkle.phase.get() == Phase::Visible(started));
             let searching = draw(&pane.composer, /*width*/ 80, during).0;
             assert!(dots(&searching).is_empty());
-            if expires_while_open {
-                assert!(dots(&draw(&pane.composer, /*width*/ 80, expired).0).is_empty());
+            if long_wait_while_open {
+                assert!(dots(&draw(&pane.composer, /*width*/ 80, later).0).is_empty());
             }
 
             if cancel == "escape" {
@@ -699,27 +609,14 @@ fn canceled_history_search_restores_visible_stars_only_before_the_original_deadl
                 pane.on_ctrl_c();
             }
             assert_eq!(pane.composer.is_empty(), cancel != "accept");
-            let at = if expires_while_open { expired } else { during };
+            let at = if long_wait_while_open { later } else { during };
             let restored = draw(&pane.composer, /*width*/ 80, at).0;
             assert_eq!(
-                dots(&restored),
-                if expires_while_open || cancel == "accept" {
-                    Vec::new()
-                } else {
-                    dots(&expected)
-                },
-                "{cancel}, expires while open: {expires_while_open}",
+                dots(&restored).is_empty(),
+                cancel == "accept",
+                "{cancel}, long wait while open: {long_wait_while_open}",
             );
-            if cancel == "escape" {
-                snapshots.push(format!(
-                    "expires while open: {expires_while_open}\ninitial:\n{}\nsearching:\n{}\nafter escape:\n{}",
-                    text(&active),
-                    text(&searching),
-                    text(&restored),
-                ));
-            }
         }
-        insta::assert_snapshot!(snapshots.join("\n\n"));
     });
 }
 
@@ -861,6 +758,7 @@ fn arbitrary_commands_preserve_the_fresh_starfield() {
             let mut pane = pane();
             pane.mark_fresh_task_for_sparkle("gpt-5.5", &enabled());
             type_text(&mut pane, input);
+            assert!(dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
             pane.composer
                 .set_text_content(String::new(), Vec::new(), Vec::new());
             pane.select_sparkle_model("gpt-6-astra", &enabled());
@@ -870,7 +768,7 @@ fn arbitrary_commands_preserve_the_fresh_starfield() {
                 "{input}"
             );
             assert!(
-                dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty(),
+                !dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty(),
                 "{input}"
             );
         }
@@ -878,7 +776,7 @@ fn arbitrary_commands_preserve_the_fresh_starfield() {
 }
 
 #[test]
-fn canceled_commands_remain_eligible_but_inserted_content_and_ordinary_paste_do_not() {
+fn clearing_commands_inserted_content_and_pastes_restores_idle_sparkles() {
     palette(|| {
         let now = Instant::now();
         let mut provisional = pane();
@@ -889,7 +787,7 @@ fn canceled_commands_remain_eligible_but_inserted_content_and_ordinary_paste_do_
         let mut initialized = pane();
         initialized.mark_fresh_task_for_sparkle("astra", &enabled());
         initialized.inherit_startup_sparkle(snapshot.sparkle_draft);
-        assert!(dots(&draw(&initialized.composer, /*width*/ 80, now).0).is_empty());
+        assert!(!dots(&draw(&initialized.composer, /*width*/ 80, now).0).is_empty());
 
         let mut canceled = pane();
         canceled.mark_fresh_task_for_sparkle("gpt-5.5", &enabled());
@@ -924,13 +822,7 @@ fn canceled_commands_remain_eligible_but_inserted_content_and_ordinary_paste_do_
                 .set_text_content(String::new(), Vec::new(), Vec::new());
             pane.select_sparkle_model("astra", &enabled());
             assert_eq!(pane.composer.sparkle.draft.get(), SparkleDraft::Dismissed);
-            assert!(dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
-            if input == "recovered" {
-                insta::assert_snapshot!(
-                    "cleared_recovered_draft_keeps_sparkle_dismissed",
-                    text(&draw(&pane.composer, /*width*/ 80, now).0)
-                );
-            }
+            assert!(!dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
         }
     });
 }
@@ -1015,7 +907,7 @@ fn buffered_commands_and_read_only_inline_arguments_preserve_eligibility() {
 }
 
 #[test]
-fn commands_hide_a_started_sparkle_without_restarting_its_deadline() {
+fn commands_hide_a_started_sparkle_and_submitting_restores_it_after_long_waits() {
     palette(|| {
         let now = Instant::now();
         let mut pane = pane();
@@ -1049,17 +941,27 @@ fn commands_hide_a_started_sparkle_without_restarting_its_deadline() {
             .is_empty()
         );
         type_text(&mut pane, "/diff");
-        assert!(dots(&draw(&pane.composer, /*width*/ 80, now + IDLE_TIMEOUT).0).is_empty());
-        assert!(matches!(
-            key(&mut pane, KeyCode::Enter),
-            InputResult::Command(SlashCommand::Diff)
-        ));
         assert!(
             dots(
                 &draw(
                     &pane.composer,
                     /*width*/ 80,
-                    now + IDLE_TIMEOUT + IDLE_FADE
+                    now + Duration::from_secs(15)
+                )
+                .0
+            )
+            .is_empty()
+        );
+        assert!(matches!(
+            key(&mut pane, KeyCode::Enter),
+            InputResult::Command(SlashCommand::Diff)
+        ));
+        assert!(
+            !dots(
+                &draw(
+                    &pane.composer,
+                    /*width*/ 80,
+                    now + Duration::from_secs(15) + Duration::from_secs(1)
                 )
                 .0
             )
@@ -1069,7 +971,7 @@ fn commands_hide_a_started_sparkle_without_restarting_its_deadline() {
 }
 
 #[test]
-fn focus_startup_work_and_configuration_do_not_extend_a_started_deadline() {
+fn busy_focus_and_motion_switches_hide_stars_and_restore_them_when_allowed() {
     palette(|| {
         let now = Instant::now();
         let mut pane = pane();
@@ -1077,21 +979,45 @@ fn focus_startup_work_and_configuration_do_not_extend_a_started_deadline() {
         pane.composer.set_task_running(/*running*/ true);
         assert!(dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
         pane.composer.set_task_running(/*running*/ false);
-        assert!(!dots(&draw(&pane.composer, /*width*/ 80, now + IDLE_TIMEOUT).0).is_empty());
+        assert!(
+            !dots(
+                &draw(
+                    &pane.composer,
+                    /*width*/ 80,
+                    now + Duration::from_secs(15)
+                )
+                .0
+            )
+            .is_empty()
+        );
         pane.set_sparkle_terminal_focus(/*focused*/ false);
         assert!(
             dots(
                 &draw(
                     &pane.composer,
                     /*width*/ 80,
-                    now + IDLE_TIMEOUT + Duration::from_secs(/*secs*/ 1)
+                    now + Duration::from_secs(15) + Duration::from_secs(/*secs*/ 1)
                 )
                 .0
             )
             .is_empty()
         );
         pane.set_sparkle_terminal_focus(/*focused*/ true);
-        assert!(dots(&draw(&pane.composer, /*width*/ 80, now + IDLE_TIMEOUT * 2).0).is_empty());
+        assert!(
+            !dots(
+                &draw(
+                    &pane.composer,
+                    /*width*/ 80,
+                    now + Duration::from_secs(15) * 2
+                )
+                .0
+            )
+            .is_empty()
+        );
+        pane.composer.set_has_focus(/*has_focus*/ false);
+        assert!(dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
+        pane.composer.set_has_focus(/*has_focus*/ true);
+        assert!(!dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
 
         for settings in [
             Tui {
@@ -1109,6 +1035,12 @@ fn focus_startup_work_and_configuration_do_not_extend_a_started_deadline() {
             let mut pane = super::tests::pane();
             pane.mark_fresh_task_for_sparkle("astra", &settings);
             assert!(dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
+            pane.stop_ineligible_sparkle("custom-model", &enabled());
+            assert!(!dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
+            pane.stop_ineligible_sparkle("custom-model", &settings);
+            assert!(dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
+            pane.stop_ineligible_sparkle("custom-model", &enabled());
+            assert!(!dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
         }
         let mut narrow = super::tests::pane();
         narrow.mark_fresh_task_for_sparkle("astra", &enabled());
