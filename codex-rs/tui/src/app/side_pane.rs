@@ -12,7 +12,6 @@ use codex_protocol::ThreadId;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Rect;
-use ratatui::style::Stylize;
 
 pub(super) struct SidePaneLayout {
     pub(super) focused: Rect,

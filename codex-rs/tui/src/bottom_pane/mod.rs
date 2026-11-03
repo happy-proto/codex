@@ -463,7 +463,7 @@ impl BottomPane {
         let mut parked = Box::new(std::mem::replace(self, replacement));
         parked.has_input_focus = false;
         parked.composer.set_has_focus(false);
-        parked.composer.dismiss_sparkle();
+        parked.dismiss_composer_sparkle();
         parked
     }
 
