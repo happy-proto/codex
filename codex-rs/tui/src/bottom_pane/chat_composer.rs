@@ -4968,7 +4968,11 @@ impl ChatComposer {
             selection.register(status.intersection(buf.area), changed);
             selection.register(footer_rect.intersection(buf.area), changed);
         }
-        let style = user_message_style();
+        let style = if options.passive {
+            crate::style::quiet_workspace_style()
+        } else {
+            user_message_style()
+        };
         let background = composer_layout::background_rect(composer_rect, buf.area, options);
         Block::default().style(style).render(background, buf);
         if let Some(previews) = options.image_previews {
