@@ -2519,7 +2519,8 @@ impl BottomPane {
         mut options: ComposerRenderOptions<'a>,
         views: &'a [Box<dyn BottomPaneView>],
     ) -> RenderableItem<'a> {
-        if self.warnings_active()
+        if !options.passive
+            && self.warnings_active()
             && let Some(warnings) = &self.warnings_view
         {
             return RenderableItem::Borrowed(warnings);
@@ -2540,7 +2541,7 @@ impl BottomPane {
             if let Some(banner) = self
                 .inline_banner
                 .as_ref()
-                .filter(|_| !self.is_task_running)
+                .filter(|_| !self.is_task_running && !options.passive)
             {
                 flex.push(/*flex*/ 0, RenderableItem::Borrowed(banner));
             }
@@ -2596,15 +2597,18 @@ impl BottomPane {
                     RenderableItem::Borrowed(&self.unified_exec_footer),
                 );
             }
-            let has_pending_thread_approvals = !self.pending_thread_approvals.is_empty();
-            let has_questions = self
-                .questions
-                .as_ref()
-                .is_some_and(|q| q.unanswered_count() > 0);
-            let has_pending_input = has_questions
-                || !self.pending_input_preview.queued_messages.is_empty()
-                || !self.pending_input_preview.pending_steers.is_empty()
-                || !self.pending_input_preview.rejected_steers.is_empty();
+            let has_pending_thread_approvals =
+                !options.passive && !self.pending_thread_approvals.is_empty();
+            let has_questions = !options.passive
+                && self
+                    .questions
+                    .as_ref()
+                    .is_some_and(|q| q.unanswered_count() > 0);
+            let has_pending_input = !options.passive
+                && (has_questions
+                    || !self.pending_input_preview.queued_messages.is_empty()
+                    || !self.pending_input_preview.pending_steers.is_empty()
+                    || !self.pending_input_preview.rejected_steers.is_empty());
             let has_status_or_footer = options.shared_footer.is_some()
                 || self.status_widget().is_some()
                 || self.hook_status_message.is_some()
@@ -2620,25 +2624,29 @@ impl BottomPane {
             if has_inline_previews && has_status_or_footer {
                 flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
             }
-            flex.push(
-                /*flex*/ 1,
-                RenderableItem::Borrowed(&self.pending_thread_approvals),
-            );
-            if has_pending_thread_approvals && has_pending_input {
-                flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
+            if !options.passive {
+                // Parked panes receive task state, not interactive-preview updates. Keep
+                // those previews in the focused widget where events can reconcile them.
+                flex.push(
+                    /*flex*/ 1,
+                    RenderableItem::Borrowed(&self.pending_thread_approvals),
+                );
+                if has_pending_thread_approvals && has_pending_input {
+                    flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
+                }
+                flex.push(
+                    /*flex*/ 1,
+                    if has_questions {
+                        RenderableItem::Owned(Box::new(
+                            pending_input_preview::PendingInputPreviewContent(
+                                &self.pending_input_preview,
+                            ),
+                        ))
+                    } else {
+                        RenderableItem::Borrowed(&self.pending_input_preview)
+                    },
+                );
             }
-            flex.push(
-                /*flex*/ 1,
-                if has_questions {
-                    RenderableItem::Owned(Box::new(
-                        pending_input_preview::PendingInputPreviewContent(
-                            &self.pending_input_preview,
-                        ),
-                    ))
-                } else {
-                    RenderableItem::Borrowed(&self.pending_input_preview)
-                },
-            );
             let question_editor = self
                 .questions
                 .as_ref()
@@ -2651,7 +2659,11 @@ impl BottomPane {
             {
                 flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
             }
-            let question_summary = self.question_summary(Instant::now());
+            let question_summary = if options.passive {
+                None
+            } else {
+                self.question_summary(Instant::now())
+            };
             // History overlays must not clear the status and previews above this composer.
             if options.command_popup_placement == CommandPopupPlacement::Overlay
                 && (has_status_or_footer
@@ -2862,7 +2874,16 @@ mod tests {
             ..Default::default()
         };
         let area = Rect::new(0, 0, 80, 36);
-        let focused = render_snapshot(&pane.as_renderable_with_options(options), area);
+        let bottom_frame = |renderable: &dyn Renderable| {
+            let mut buf = Buffer::empty(area);
+            let height = renderable.desired_height(area.width).min(area.height);
+            renderable.render(
+                Rect::new(0, area.bottom() - height, area.width, height),
+                &mut buf,
+            );
+            snapshot_buffer(&buf)
+        };
+        let focused = bottom_frame(&pane.as_renderable_with_options(options));
         for marker in [
             "stale queued",
             "stale steer",
@@ -2879,13 +2900,10 @@ mod tests {
         ] {
             status.set_phase(phase);
             pane.set_workspace_status(status.clone());
-            let parked = render_snapshot(
-                &pane.parked_renderable(ComposerRenderOptions {
-                    passive: true,
-                    ..options
-                }),
-                area,
-            );
+            let parked = bottom_frame(&pane.parked_renderable(ComposerRenderOptions {
+                passive: true,
+                ..options
+            }));
             assert!(!parked.contains("stale"), "{parked}");
             assert!(
                 parked.contains("retained draft") && parked.contains("second draft line"),
