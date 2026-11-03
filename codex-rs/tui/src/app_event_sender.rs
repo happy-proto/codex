@@ -4,6 +4,7 @@
 //! without duplicating event construction or session logging behavior.
 
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
@@ -22,10 +23,17 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::app_event::AppEvent;
 use crate::session_log;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SideProjectionRoute {
+    pub(crate) thread_id: ThreadId,
+    pub(crate) generation: uuid::Uuid,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct AppEventSender {
     pub app_event_tx: UnboundedSender<AppEvent>,
     pub(crate) voice_only: Arc<AtomicBool>,
+    pub(crate) side_projection: Arc<OnceLock<SideProjectionRoute>>,
 }
 
 impl AppEventSender {
@@ -33,12 +41,35 @@ impl AppEventSender {
         Self {
             app_event_tx,
             voice_only: Arc::default(),
+            side_projection: Arc::default(),
         }
     }
 
     /// Send an event to the app event channel. If it fails, we swallow the
     /// error and log it.
     pub(crate) fn send(&self, event: AppEvent) {
+        if let Some(route) = self.side_projection.get().copied() {
+            if matches!(
+                &event,
+                AppEvent::InsertHistoryCell(_)
+                    | AppEvent::ConsolidateAgentMessage { .. }
+                    | AppEvent::ConsolidateProposedPlan(_)
+                    | AppEvent::StartCommitAnimation
+                    | AppEvent::StopCommitAnimation
+                    | AppEvent::CommitRealtimeTranscriptHistory
+            ) {
+                let _ = self.app_event_tx.send(AppEvent::SideProjectionEvent {
+                    route,
+                    event: Box::new(event),
+                });
+                return;
+            }
+            // A retained typed widget is a display projection, never another controller.
+            // The existing voice owner keeps its separate voice-only allowlist below.
+            if !self.voice_only.load(Ordering::Relaxed) {
+                return;
+            }
+        }
         // A parked voice owner keeps processing its session, but its UI and queued
         // typed work must not act on the visible session. Thread-scoped metadata still applies.
         if self.voice_only.load(Ordering::Relaxed)

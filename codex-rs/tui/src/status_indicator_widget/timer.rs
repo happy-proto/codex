@@ -4,7 +4,7 @@
 use std::time::Duration;
 use std::time::Instant;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct StatusTimer {
     /// Optional wall-clock origin for the displayed phase, without resetting turn accounting.
     pub(crate) display_started_at: Option<Instant>,
