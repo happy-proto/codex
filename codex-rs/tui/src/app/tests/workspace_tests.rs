@@ -96,7 +96,7 @@ async fn workspace_passive_generation_speed_survives_idle_focus_and_rejects_fini
     app.finish_live_generation_speed(target.clone(), Some(999.0));
     let text = side_frame(&mut app, &mut tui, Size::new(150, 24))?;
     assert!(
-        text.contains("Completed") && !text.contains("token/s"),
+        text.contains("Worked for") && !text.contains("token/s"),
         "{text}"
     );
     assert!(!app.has_live_generation_speed_target());
@@ -130,7 +130,7 @@ async fn workspace_background_status_updates_without_taking_input_focus() -> Res
     )
     .await?;
     let complete = side_frame(&mut app, &mut tui, Size::new(120, 24))?;
-    assert!(complete.contains("Completed"), "{complete}");
+    assert!(complete.contains("Worked for"), "{complete}");
     assert_eq!(app.current_displayed_thread_id(), Some(main));
     let row = |frame: &str, text| frame.lines().position(|line| line.contains(text));
     for text in [
