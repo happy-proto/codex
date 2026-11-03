@@ -210,6 +210,36 @@ impl SideParentStatusChange {
     }
 }
 
+/// Transcript state retained while the other conversation is active.
+pub(super) struct SideCompanion {
+    pub(super) route: crate::app_event_sender::SideProjectionRoute,
+    pub(super) projection: Option<Box<ChatWidget>>,
+    pub(super) commit_ticks: bool,
+    pub(super) bottom: Box<crate::bottom_pane::BottomPane>,
+    pub(super) display: crate::app_event::CapturedSideDisplay,
+    pub(super) cells: Vec<Arc<dyn HistoryCell>>,
+    pub(super) view: crate::transcript_view::TranscriptView,
+}
+
+pub(super) struct PendingSideComposer {
+    pub(super) bottom: Box<crate::bottom_pane::BottomPane>,
+    pub(super) route: crate::app_event_sender::SideProjectionRoute,
+    pub(super) projection: Option<Box<ChatWidget>>,
+}
+
+impl PendingSideComposer {
+    pub(super) fn new(thread_id: ThreadId, bottom: Box<crate::bottom_pane::BottomPane>) -> Self {
+        Self {
+            bottom,
+            route: crate::app_event_sender::SideProjectionRoute {
+                thread_id,
+                generation: uuid::Uuid::new_v4(),
+            },
+            projection: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct SideThreadState {
     /// Thread to return to when the current side conversation is dismissed.

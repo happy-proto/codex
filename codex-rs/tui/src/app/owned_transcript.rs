@@ -337,7 +337,7 @@ impl App {
                 Some(sidebar::SidebarLayout::Chat(panes)) => {
                     if let Some(companion) = self.side_companions.get_mut(&panes.passive_thread) {
                         companion.view.image_protocol = self.transcript_view.image_protocol;
-                        panes.paint_companion(companion, frame, &frames);
+                        panes.paint_companion(companion, self.background_voice.as_deref(), frame, &frames);
                     }
                 }
                 Some(sidebar::SidebarLayout::Chooser { sidebar, focus, .. }) => {

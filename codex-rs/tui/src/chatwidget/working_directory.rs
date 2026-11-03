@@ -8,6 +8,9 @@ impl ChatWidget {
         &mut self,
         local_workspace: bool,
     ) -> std::io::Result<()> {
+        if !self.owns_terminal_surfaces() {
+            return Ok(());
+        }
         self.terminal_working_directory
             .update(self.config.cwd.as_path(), local_workspace)
     }
