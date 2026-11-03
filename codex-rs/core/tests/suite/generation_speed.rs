@@ -9,13 +9,19 @@ use core_test_support::wait_for_event;
 use serde_json::json;
 use wiremock::ResponseTemplate;
 
-#[rstest::rstest]
-#[case(false)]
-#[case(true)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn live_generation_speed_is_available_while_a_follow_up_call_is_pending(
-    #[case] ephemeral: bool,
-) -> anyhow::Result<()> {
+async fn live_generation_speed_is_available_while_a_follow_up_call_is_pending() -> anyhow::Result<()>
+{
+    check_live_generation_speed(false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ephemeral_live_generation_speed_is_available_without_persisting_history()
+-> anyhow::Result<()> {
+    check_live_generation_speed(true).await
+}
+
+async fn check_live_generation_speed(ephemeral: bool) -> anyhow::Result<()> {
     use codex_protocol::user_input::UserInput;
     use core_test_support::wait_for_event_match;
     use std::time::Duration;
@@ -95,13 +101,19 @@ async fn live_generation_speed_is_available_while_a_follow_up_call_is_pending(
     Ok(())
 }
 
-#[rstest::rstest]
-#[case(false)]
-#[case(true)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn generation_speed_is_saved_before_completion_and_missing_usage_hides_next_turn(
-    #[case] ephemeral: bool,
-) -> anyhow::Result<()> {
+async fn generation_speed_is_saved_before_completion_and_missing_usage_hides_next_turn()
+-> anyhow::Result<()> {
+    check_generation_speed_completion(false).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ephemeral_generation_speed_is_saved_before_completion_and_cleared_on_shutdown()
+-> anyhow::Result<()> {
+    check_generation_speed_completion(true).await
+}
+
+async fn check_generation_speed_completion(ephemeral: bool) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
     responses::mount_sse_sequence(
