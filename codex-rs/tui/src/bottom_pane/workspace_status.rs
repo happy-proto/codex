@@ -86,7 +86,14 @@ impl WorkspaceStatus {
             WorkspacePhase::Working => header.unwrap_or("Working"),
             WorkspacePhase::NeedsInput => "Needs input",
             WorkspacePhase::NeedsApproval => "Needs approval",
-            WorkspacePhase::Completed => "Completed",
+            WorkspacePhase::Completed => {
+                return crate::history_cell::FinalMessageSeparator::new(
+                    Some(self.elapsed().as_secs()),
+                    None,
+                )
+                .status_line()
+                .unwrap_or_default();
+            }
             WorkspacePhase::Failed => "Failed",
             WorkspacePhase::Interrupted => "Interrupted",
             WorkspacePhase::Closed => "Closed",
