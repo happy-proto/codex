@@ -96,6 +96,14 @@ impl SidePaneLayout {
         frame: &mut Frame<'_>,
     ) {
         let area = self.passive;
+        let completion = companion.cells.last().and_then(|cell| {
+            cell.as_any()
+                .downcast_ref::<crate::history_cell::FinalMessageSeparator>()
+        });
+        let hide_completion = companion.bottom.set_workspace_completion(completion);
+        companion
+            .view
+            .set_workspace_completion(&companion.cells, hide_completion);
         for y in area.y..area.bottom() {
             frame.buffer[(self.divider, y)]
                 .set_symbol("│")
