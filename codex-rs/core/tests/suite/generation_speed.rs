@@ -9,9 +9,13 @@ use core_test_support::wait_for_event;
 use serde_json::json;
 use wiremock::ResponseTemplate;
 
+#[rstest::rstest]
+#[case(false)]
+#[case(true)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn live_generation_speed_is_available_while_a_follow_up_call_is_pending() -> anyhow::Result<()>
-{
+async fn live_generation_speed_is_available_while_a_follow_up_call_is_pending(
+    #[case] ephemeral: bool,
+) -> anyhow::Result<()> {
     use codex_protocol::user_input::UserInput;
     use core_test_support::wait_for_event_match;
     use std::time::Duration;
@@ -39,7 +43,8 @@ async fn live_generation_speed_is_available_while_a_follow_up_call_is_pending() 
     )
     .await;
     let test = test_codex()
-        .with_config(|config| {
+        .with_config(move |config| {
+            config.ephemeral = ephemeral;
             config
                 .features
                 .enable(Feature::Sqlite)
@@ -47,7 +52,9 @@ async fn live_generation_speed_is_available_while_a_follow_up_call_is_pending() 
         })
         .build_with_auto_env(&server)
         .await?;
-    let db = test.codex.state_db().expect("state db enabled");
+    assert_eq!(test.codex.state_db().is_none(), ephemeral);
+    let db =
+        codex_state::StateRuntime::init(test.config.sqlite_config().clone(), "test".into()).await?;
     let thread_id = test.session_configured.thread_id;
     test.codex
         .start_or_steer_turn(codex_core::TurnInputRequest::user_input(vec![
@@ -81,12 +88,20 @@ async fn live_generation_speed_is_available_while_a_follow_up_call_is_pending() 
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    if ephemeral {
+        assert!(test.session_configured.rollout_path.is_none());
+        assert!(db.get_thread(thread_id).await?.is_none());
+    }
     Ok(())
 }
 
+#[rstest::rstest]
+#[case(false)]
+#[case(true)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn generation_speed_is_saved_before_completion_and_missing_usage_hides_next_turn()
--> anyhow::Result<()> {
+async fn generation_speed_is_saved_before_completion_and_missing_usage_hides_next_turn(
+    #[case] ephemeral: bool,
+) -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = responses::start_mock_server().await;
     responses::mount_sse_sequence(
@@ -109,7 +124,8 @@ async fn generation_speed_is_saved_before_completion_and_missing_usage_hides_nex
     )
     .await;
     let test = test_codex()
-        .with_config(|config| {
+        .with_config(move |config| {
+            config.ephemeral = ephemeral;
             config
                 .features
                 .enable(Feature::Sqlite)
@@ -117,7 +133,9 @@ async fn generation_speed_is_saved_before_completion_and_missing_usage_hides_nex
         })
         .build_with_auto_env(&server)
         .await?;
-    let db = test.codex.state_db().expect("state db enabled");
+    assert_eq!(test.codex.state_db().is_none(), ephemeral);
+    let db =
+        codex_state::StateRuntime::init(test.config.sqlite_config().clone(), "test".into()).await?;
     let thread_id = test.session_configured.thread_id;
     test.submit_turn("first").await?;
     let speeds = db.generation_speeds(thread_id).await?;
@@ -129,6 +147,18 @@ async fn generation_speed_is_saved_before_completion_and_missing_usage_hides_nex
     );
     test.submit_turn("missing usage").await?;
     assert_eq!(db.generation_speeds(thread_id).await?, speeds);
+    if ephemeral {
+        assert!(test.session_configured.rollout_path.is_none());
+        assert!(db.get_thread(thread_id).await?.is_none());
+        test.codex
+            .submit(codex_protocol::protocol::Op::Shutdown)
+            .await?;
+        wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::ShutdownComplete)
+        })
+        .await;
+        assert!(db.generation_speeds(thread_id).await?.is_empty());
+    }
     Ok(())
 }
 
