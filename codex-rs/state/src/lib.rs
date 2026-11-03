@@ -95,6 +95,7 @@ pub use runtime::ExternalAgentConfigImportHistoryRecord;
 pub use runtime::ExternalAgentConfigImportSuccessRecord;
 pub use runtime::GenerationSpeedCompletion;
 pub use runtime::GenerationSpeedRecord;
+pub use runtime::GenerationSpeedWriter;
 pub use runtime::GoalAccountingMode;
 pub use runtime::GoalAccountingOutcome;
 pub use runtime::GoalStore;

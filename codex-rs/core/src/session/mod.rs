@@ -1590,6 +1590,22 @@ impl Session {
         self.services.state_db.clone()
     }
 
+    /// The numeric-only metrics channel does not opt an ephemeral session into persistence.
+    pub(crate) async fn generation_speed_db(&self) -> Option<state_db::StateDbHandle> {
+        if let Some(db) = self.state_db() {
+            return Some(db);
+        }
+        if let Some(store) = self
+            .services
+            .thread_store
+            .as_any()
+            .downcast_ref::<LocalThreadStore>()
+        {
+            return store.state_db().await;
+        }
+        None
+    }
+
     pub(crate) fn live_thread_for_persistence(
         &self,
         operation: &str,
