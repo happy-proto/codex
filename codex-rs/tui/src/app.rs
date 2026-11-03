@@ -670,6 +670,8 @@ pub(crate) struct App {
     divider_drag: Option<side_pane::DividerDrag>,
     pane_resize: Option<side_pane::PaneResize>,
     passive_link_drag: Option<(ThreadId, Rect)>,
+    // UI objects stay on the App task while the cross-thread event queue drains history edits.
+    pending_side_composers: HashMap<ThreadId, Box<crate::bottom_pane::BottomPane>>,
     abandoned_side_threads: HashSet<ThreadId>,
     active_thread_id: Option<ThreadId>,
     active_thread_rx: Option<mpsc::Receiver<ThreadBufferedEvent>>,

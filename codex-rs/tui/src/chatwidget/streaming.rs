@@ -210,7 +210,11 @@ impl ChatWidget {
     pub(crate) fn take_side_display(
         &mut self,
         width: u16,
-    ) -> (Option<CapturedSideStream>, CapturedSideDisplay) {
+    ) -> (
+        Option<CapturedSideStream>,
+        CapturedSideDisplay,
+        Box<crate::bottom_pane::BottomPane>,
+    ) {
         self.flush_completed_tool_activity();
         let visualizations = self.thread_id.and_then(|id| {
             crate::inline_visualization::InlineVisualizationContext::from_config(&self.config, id)
@@ -275,11 +279,10 @@ impl ChatWidget {
                         self.bottom_pane.status_elapsed().unwrap_or_default(),
                     )
                 }),
-            bottom: self.bottom_pane.take_for_side(),
             cwd: self.config.cwd.clone(),
             visualizations,
         };
-        (stream, display)
+        (stream, display, self.bottom_pane.take_for_side())
     }
 
     pub(super) fn finalize_completed_assistant_message(&mut self, message: Option<&str>) {
