@@ -109,6 +109,60 @@ async fn workspace_retained_projection_stream_and_history_stay_on_the_background
         },
     );
 
+    let db = codex_state::StateRuntime::init(app.config.sqlite_config().clone(), "test".into())
+        .await
+        .unwrap();
+    let metadata = codex_state::ThreadMetadataBuilder::new(
+        side_thread,
+        app.config
+            .codex_home
+            .join("rollout-side.jsonl")
+            .to_path_buf(),
+        chrono::Utc::now(),
+        codex_protocol::protocol::SessionSource::Cli,
+    )
+    .build("test");
+    db.upsert_thread(&metadata).await.unwrap();
+    db.save_generation_speed(
+        side_thread,
+        "side-turn",
+        220,
+        10_000_000,
+        codex_state::GenerationSpeedCompletion {
+            started_at: 10,
+            completed_at: 14,
+            duration_ms: 4000,
+        },
+    )
+    .await
+    .unwrap();
+    let foreground_record = db
+        .generation_speeds(side_thread)
+        .await
+        .unwrap()
+        .remove("side-turn")
+        .unwrap();
+    app.chat_widget
+        .generation_speeds
+        .insert((main_thread, "foreground-turn".into()), foreground_record);
+    app.state_db = Some(db);
+    app.refresh_parked_generation_speeds(side_thread).await;
+    assert!(
+        app.chat_widget
+            .generation_speeds
+            .contains_key(&(main_thread, "foreground-turn".into()))
+    );
+    assert_eq!(
+        app.side_companions[&side_thread]
+            .projection
+            .as_ref()
+            .unwrap()
+            .generation_speeds
+            .get(&(side_thread, "side-turn".into()))
+            .map(codex_state::GenerationSpeedRecord::tokens_per_second),
+        Some(22.0)
+    );
+
     // A delta updates the retained widget's source-backed stream while the foreground widget
     // and transcript continue to belong to the main thread.
     app.deliver_side_projection_notification(

@@ -31,6 +31,31 @@ fn finish_scan(view: &mut TranscriptView, cells: &[Arc<dyn HistoryCell>]) {
 }
 
 #[test]
+fn workspace_hidden_completion_remains_searchable() {
+    let cells: Vec<Arc<dyn HistoryCell>> = vec![
+        cell("final answer"),
+        Arc::new(
+            crate::history_cell::FinalMessageSeparator::new(Some(40), None)
+                .with_generation_speed(Some(22.0)),
+        ),
+    ];
+    let area = Rect::new(0, 0, 80, 16);
+    let mut view = TranscriptView::default();
+    view.set_workspace_completion(&cells, true);
+    view.render(area, &mut Buffer::empty(area), &cells);
+    assert_eq!(view.current_layout(&cells, 1).unwrap().row_count(), 0);
+    view.begin_search();
+    view.paste_search("22.0 token/s");
+    finish_scan(&mut view, &cells);
+    assert_eq!(view.search.current.as_ref().unwrap().anchor.index, 1);
+    let mut buffer = Buffer::empty(area);
+    view.render(area, &mut buffer, &cells);
+    assert!(crate::transcript_view::tests::text(&buffer).contains("22.0 token/s"));
+    view.cancel_search();
+    assert_eq!(view.current_layout(&cells, 1).unwrap().row_count(), 0);
+}
+
+#[test]
 fn search_match_separates_user_prompts_only_while_visible() {
     use crate::history_cell::ReasoningSummaryCell;
     use crate::history_cell::new_user_prompt;

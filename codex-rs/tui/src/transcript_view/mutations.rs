@@ -6,6 +6,16 @@ use super::*;
 use crate::history_cell::is_session_history_prefix_cell;
 
 impl TranscriptView {
+    /// Move only the latest completion's presentation into the dock's persistent status row.
+    /// Keep the source cell for history, copying, search, and the single-pane viewport.
+    pub(crate) fn set_workspace_completion(
+        &mut self,
+        cells: &[Arc<dyn HistoryCell>],
+        hidden: bool,
+    ) {
+        self.workspace_completion = hidden.then(|| cells.last().map(EntryKey::cell)).flatten();
+    }
+
     /// Rebuild the layout of an observed revision without counting the reflow as new output.
     pub(crate) fn rebind_observed_live_revision(&mut self, observed: u64, updated: u64) {
         if let Some((_, key)) = &mut self.live_key
