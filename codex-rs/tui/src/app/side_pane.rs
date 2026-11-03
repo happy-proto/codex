@@ -2,12 +2,11 @@
 
 use super::App;
 use super::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
-use super::side_companion::SideCompanion;
+use super::side::SideCompanion;
 use super::sidebar;
 use super::sidebar::PaneFocus;
 use super::sidebar::SidebarContent;
 use super::sidebar::SidebarLayout;
-use crate::bottom_pane::render_unfocused_status;
 use crate::bottom_pane::CommandPopupPlacement;
 use crate::bottom_pane::ComposerGap;
 use crate::bottom_pane::ComposerRenderOptions;
@@ -437,10 +436,10 @@ impl SidePaneLayout {
     pub(super) fn paint_companion(
         &self,
         companion: &mut SideCompanion,
+        voice: Option<&crate::chatwidget::ChatWidget>,
         frame: &mut Frame<'_>,
         frames: &FrameRequester,
     ) {
-        companion.flush_answer();
         let area = self.passive;
         let gap = ComposerGap::default();
         let bottom = companion.bottom.parked_renderable(ComposerRenderOptions {
@@ -463,22 +462,58 @@ impl SidePaneLayout {
             height: above,
             ..area
         };
-        if let Some(work) = &companion.display.work {
-            let row = work.row.with_timer(&work.timer);
-            let height = row.desired_height(area.width).min(transcript.height);
-            if height > 0 {
-                transcript.height -= height;
-                let status_area = Rect::new(area.x, transcript.bottom(), area.width, height);
-                row.render(status_area, frame.buffer);
-                frames.schedule_frame_in(Duration::from_secs(1));
-            }
-        }
+        let widget = companion
+            .projection
+            .as_deref()
+            .or_else(|| voice.filter(|owner| owner.thread_id() == Some(self.passive_thread)));
+        let stream = widget.and_then(|widget| widget.side_stream_snapshot());
+        let has_stream = stream.is_some();
+        let reflowed_cells =
+            stream.map(|stream| {
+                use crate::app_event::CapturedSideStream;
+                use crate::history_cell;
+                use crate::history_cell::HistoryCell;
+                use std::sync::Arc;
+                let (start, cell): (_, Arc<dyn HistoryCell>) = match stream {
+                    CapturedSideStream::Answer(cell) => (
+                        super::resize_reflow::trailing_run_start::<history_cell::AgentMessageCell>(
+                            &companion.cells,
+                        ),
+                        cell,
+                    ),
+                    CapturedSideStream::Plan(cell) => (
+                        super::resize_reflow::trailing_run_start::<
+                            history_cell::ProposedPlanStreamCell,
+                        >(&companion.cells),
+                        cell,
+                    ),
+                };
+                let mut cells = companion.cells[..start].to_vec();
+                cells.push(cell);
+                cells
+            });
+        let active = if let Some(widget) = widget {
+            widget.side_active_cell().filter(|cell| {
+                !has_stream
+                    || (!cell
+                        .as_any()
+                        .is::<crate::history_cell::StreamingAgentTailCell>()
+                        && !cell
+                            .as_any()
+                            .is::<crate::history_cell::StreamingPlanTailCell>())
+            })
+        } else {
+            companion.display.active.as_deref()
+        };
+        let auxiliary = widget
+            .map(|widget| widget.side_auxiliary_lines(area.width))
+            .unwrap_or_else(|| companion.display.auxiliary.clone());
         companion.view.render_parked(
             transcript,
             frame.buffer,
-            &companion.cells,
-            companion.display.active.as_deref(),
-            &companion.display.auxiliary,
+            reflowed_cells.as_deref().unwrap_or(&companion.cells),
+            active,
+            &auxiliary,
         );
         frame
             .image_placements

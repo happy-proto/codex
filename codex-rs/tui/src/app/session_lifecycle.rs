@@ -531,6 +531,14 @@ impl App {
     /// This helper copies every known nickname/role from `AgentNavigationState` into the
     /// replacement widget so that replayed collab items render agent names immediately.
     pub(super) fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) {
+        if let Some(route) = self
+            .chat_widget
+            .thread_id()
+            .and_then(|id| self.pending_side_composers.get(&id))
+            .map(|pending| pending.route)
+        {
+            self.chat_widget.park_side_projection(route);
+        }
         chat_widget.generation_speeds = std::mem::take(&mut self.chat_widget.generation_speeds);
         chat_widget.fork_in_progress = self.chat_widget.fork_in_progress;
         self.pending_right_click_paste = None;
@@ -582,6 +590,11 @@ impl App {
         if previous.realtime_conversation_is_running() {
             previous.park_voice();
             self.background_voice = Some(Box::new(previous));
+        } else if let Some(pending) = previous
+            .thread_id()
+            .and_then(|id| self.pending_side_composers.get_mut(&id))
+        {
+            pending.projection = Some(Box::new(previous));
         }
         self.refresh_agent_picker();
     }
@@ -771,14 +784,17 @@ impl App {
                 .conversation_area(tui.terminal.last_known_screen_size.into())
                 .width;
             self.sync_owned_transcript(conversation_width);
-            let width = self.transcript_view.remaining_area().width.max(1);
-            let (stream, display, bottom) = self.chat_widget.take_side_display(width);
-            self.pending_side_composers.insert(old, bottom);
+            let bottom = self.chat_widget.prepare_side_composer();
+            self.pending_side_composers
+                .insert(old, side::PendingSideComposer::new(old, bottom));
             self.app_event_tx.send(AppEvent::ParkSideCompanion {
                 pair,
                 thread_id: old,
-                stream,
-                display,
+                stream: None,
+                display: crate::app_event::CapturedSideDisplay {
+                    active: None,
+                    auxiliary: Vec::new(),
+                },
             });
         }
         self.refresh_generation_speeds(thread_id).await;

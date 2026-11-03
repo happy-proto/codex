@@ -459,7 +459,7 @@ impl BottomPane {
     /// The outgoing widget is about to be replaced; its input recovery state was saved already.
     pub(crate) fn take_for_side(&mut self) -> Box<Self> {
         self.composer.flush_pending_paste_burst();
-        let replacement = Self::new(BottomPaneParams {
+        let mut replacement = Self::new(BottomPaneParams {
             app_event_tx: self.app_event_tx.clone(),
             frame_requester: self.frame_requester.clone(),
             has_input_focus: false,
@@ -470,6 +470,14 @@ impl BottomPane {
             effects: self.effects,
             skills: None,
         });
+        // Keep task presentation in the retained widget, while the real draft
+        // and its modal views move to the read-only pane.
+        replacement.is_task_running = self.is_task_running;
+        replacement.composer.set_task_running(self.is_task_running);
+        replacement.status = self.status.clone();
+        replacement.status_timer = self.status_timer.clone();
+        replacement.recent_generation_speed = self.recent_generation_speed.clone();
+        replacement.hook_status_message = self.hook_status_message.clone();
         let mut parked = Box::new(std::mem::replace(self, replacement));
         parked.has_input_focus = false;
         parked.composer.set_has_focus(false);
@@ -492,6 +500,16 @@ impl BottomPane {
         thread_id: codex_protocol::ThreadId,
     ) -> Option<crate::chatwidget::LiveGenerationSpeedTarget> {
         self.workspace_status.generation_speed_target(thread_id)
+    }
+
+    pub(crate) fn update_workspace_activity_from(&mut self, source: &Self) {
+        if let Some(status) = source.status_widget() {
+            self.workspace_indicator = status.clone();
+        } else {
+            self.workspace_indicator.update_header("Working".into());
+        }
+        self.workspace_indicator
+            .set_recent_generation_speed(self.recent_generation_speed.clone());
     }
 
     pub(crate) fn parked_renderable<'a>(
