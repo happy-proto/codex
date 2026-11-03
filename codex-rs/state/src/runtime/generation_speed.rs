@@ -63,10 +63,119 @@ pub(super) async fn initialize(pool: &SqlitePool) -> anyhow::Result<()> {
     sqlx::query(include_str!("live_generation_speed.sql"))
         .execute(pool)
         .await?;
+    sqlx::query(include_str!("ephemeral_generation_speed.sql"))
+        .execute(pool)
+        .await?;
+    sqlx::query(include_str!("ephemeral_live_generation_speed.sql"))
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
+/// Writes numeric metrics without enabling thread/history persistence for ephemeral sessions.
+pub struct GenerationSpeedWriter<'a> {
+    runtime: &'a StateRuntime,
+    ephemeral: bool,
+}
+
+impl GenerationSpeedWriter<'_> {
+    fn final_table(&self) -> &'static str {
+        if self.ephemeral {
+            "fork_ephemeral_generation_speeds_v1"
+        } else {
+            "fork_generation_speeds_v1"
+        }
+    }
+
+    fn live_table(&self) -> &'static str {
+        if self.ephemeral {
+            "fork_ephemeral_live_generation_speeds_v1"
+        } else {
+            "fork_live_generation_speeds_v1"
+        }
+    }
+}
+
 impl StateRuntime {
+    pub fn generation_speed_writer(&self, ephemeral: bool) -> GenerationSpeedWriter<'_> {
+        GenerationSpeedWriter {
+            runtime: self,
+            ephemeral,
+        }
+    }
+
+    pub async fn start_live_generation_speed(
+        &self,
+        thread_id: ThreadId,
+        turn_id: &str,
+        run_id: &str,
+    ) -> anyhow::Result<()> {
+        self.generation_speed_writer(false)
+            .start_live_generation_speed(thread_id, turn_id, run_id)
+            .await
+    }
+
+    pub async fn update_live_generation_speed(
+        &self,
+        thread_id: ThreadId,
+        turn_id: &str,
+        run_id: &str,
+        speed: Option<f64>,
+    ) -> anyhow::Result<()> {
+        self.generation_speed_writer(false)
+            .update_live_generation_speed(thread_id, turn_id, run_id, speed)
+            .await
+    }
+
+    pub async fn clear_generation_speed(
+        &self,
+        thread_id: ThreadId,
+        turn_id: &str,
+    ) -> anyhow::Result<()> {
+        self.generation_speed_writer(false)
+            .clear_generation_speed(thread_id, turn_id)
+            .await
+    }
+
+    pub async fn save_generation_speed(
+        &self,
+        thread_id: ThreadId,
+        turn_id: &str,
+        output_tokens: u64,
+        request_duration_us: u64,
+        completion: GenerationSpeedCompletion,
+    ) -> anyhow::Result<()> {
+        self.generation_speed_writer(false)
+            .save_generation_speed(
+                thread_id,
+                turn_id,
+                output_tokens,
+                request_duration_us,
+                completion,
+            )
+            .await
+    }
+
+    pub async fn clear_ephemeral_generation_speeds(
+        &self,
+        thread_id: ThreadId,
+    ) -> anyhow::Result<()> {
+        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        for query in [
+            "DELETE FROM fork_ephemeral_generation_speeds_v1 WHERE thread_id = ?",
+            "DELETE FROM fork_ephemeral_live_generation_speeds_v1 WHERE thread_id = ?",
+        ] {
+            sqlx::query(query)
+                .bind(thread_id.to_string())
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+}
+
+impl GenerationSpeedWriter<'_> {
     /// Reset the transient snapshot before a new local turn starts, including recovery.
     pub async fn start_live_generation_speed(
         &self,
@@ -77,31 +186,35 @@ impl StateRuntime {
         // Serialize claims inside a transaction. A cancelled SQLite worker can finish its
         // statement, but rollback (including a cancelled BEGIN) releases the lock before a
         // replacement claim can commit. No wall-clock ordering is needed.
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let current =
-            sqlx::query("SELECT run_id FROM fork_live_generation_speeds_v1 WHERE thread_id = ?")
-                .bind(thread_id.to_string())
-                .fetch_optional(&mut *tx)
-                .await?;
+        let table = self.live_table();
+        let mut tx = self.runtime.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let current = sqlx::query(&format!("SELECT run_id FROM {table} WHERE thread_id = ?"))
+            .bind(thread_id.to_string())
+            .fetch_optional(&mut *tx)
+            .await?;
         if let Some(row) = &current
             && row.try_get::<String, _>("run_id")? == run_id
         {
             tx.commit().await?;
             return Ok(());
         }
-        sqlx::query(
-            "INSERT INTO fork_live_generation_speeds_v1 (thread_id, turn_id, run_id, updated_at_ms, speed)
+        sqlx::query(&format!(
+            "INSERT INTO {table} (thread_id, turn_id, run_id, updated_at_ms, speed)
              VALUES (?, ?, ?, ?, NULL)
              ON CONFLICT(thread_id) DO UPDATE SET
                turn_id = excluded.turn_id, run_id = excluded.run_id,
                updated_at_ms = excluded.updated_at_ms, speed = NULL",
-        )
+        ))
         .bind(thread_id.to_string())
         .bind(turn_id)
         .bind(run_id)
         .bind(chrono::Utc::now().timestamp_millis())
         .execute(&mut *tx)
         .await?;
+        if self.ephemeral {
+            sqlx::query(&format!("DELETE FROM {table} WHERE rowid NOT IN (SELECT rowid FROM {table} ORDER BY updated_at_ms DESC LIMIT 1000)"))
+                .execute(&mut *tx).await?;
+        }
         tx.commit().await?;
         Ok(())
     }
@@ -115,20 +228,23 @@ impl StateRuntime {
         speed: Option<f64>,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(speed.is_none_or(|speed| speed.is_finite() && speed >= 0.0));
-        sqlx::query(
-            "UPDATE fork_live_generation_speeds_v1 SET speed = ?, updated_at_ms = ?
+        let table = self.live_table();
+        sqlx::query(&format!(
+            "UPDATE {table} SET speed = ?, updated_at_ms = ?
              WHERE thread_id = ? AND turn_id = ? AND run_id = ?",
-        )
+        ))
         .bind(speed)
         .bind(chrono::Utc::now().timestamp_millis())
         .bind(thread_id.to_string())
         .bind(turn_id)
         .bind(run_id)
-        .execute(self.pool.as_ref())
+        .execute(self.runtime.pool.as_ref())
         .await?;
         Ok(())
     }
+}
 
+impl StateRuntime {
     /// Only the displayed active turn may use a transient metric.
     pub async fn live_generation_speed(
         &self,
@@ -139,7 +255,10 @@ impl StateRuntime {
         // Wall time is only a reporter heartbeat, never the rolling sampling clock.
         let now_ms = chrono::Utc::now().timestamp_millis();
         let speed = sqlx::query_scalar::<_, Option<f64>>(
-            "SELECT speed FROM fork_live_generation_speeds_v1 WHERE thread_id = ? AND turn_id = ?
+            "SELECT speed FROM (
+               SELECT * FROM fork_live_generation_speeds_v1
+               UNION ALL SELECT * FROM fork_ephemeral_live_generation_speeds_v1
+             ) WHERE thread_id = ? AND turn_id = ?
              AND updated_at_ms BETWEEN ? AND ?",
         )
         .bind(thread_id.to_string())
@@ -156,18 +275,23 @@ impl StateRuntime {
         .flatten();
         Ok(speed.filter(|speed| speed.is_finite() && *speed >= 0.0))
     }
+}
 
+impl GenerationSpeedWriter<'_> {
     /// Remove any pre-crash measurement when the same turn resumes or becomes invalid.
     pub async fn clear_generation_speed(
         &self,
         thread_id: ThreadId,
         turn_id: &str,
     ) -> anyhow::Result<()> {
-        sqlx::query("DELETE FROM fork_generation_speeds_v1 WHERE thread_id = ? AND turn_id = ?")
-            .bind(thread_id.to_string())
-            .bind(turn_id)
-            .execute(self.pool.as_ref())
-            .await?;
+        let table = self.final_table();
+        sqlx::query(&format!(
+            "DELETE FROM {table} WHERE thread_id = ? AND turn_id = ?"
+        ))
+        .bind(thread_id.to_string())
+        .bind(turn_id)
+        .execute(self.runtime.pool.as_ref())
+        .await?;
         Ok(())
     }
 
@@ -188,9 +312,10 @@ impl StateRuntime {
                 && !turn_id.is_empty()
                 && completion.duration_ms >= 0
         );
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        sqlx::query(
-            "INSERT INTO fork_generation_speeds_v1 (thread_id, turn_id, output_tokens, request_duration_us, started_at, completed_at, duration_ms)
+        let table = self.final_table();
+        let mut tx = self.runtime.pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::query(&format!(
+            "INSERT INTO {table} (thread_id, turn_id, output_tokens, request_duration_us, started_at, completed_at, duration_ms)
              VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(thread_id, turn_id) DO UPDATE SET
                output_tokens = excluded.output_tokens,
@@ -198,7 +323,7 @@ impl StateRuntime {
                started_at = excluded.started_at,
                completed_at = excluded.completed_at,
                duration_ms = excluded.duration_ms",
-        )
+        ))
         .bind(thread_id.to_string())
         .bind(turn_id)
         .bind(output_tokens)
@@ -209,21 +334,27 @@ impl StateRuntime {
         .execute(&mut *tx)
         .await?;
         // Old histories may omit this optional metric. Bound storage and TUI replay caches.
-        sqlx::query(
-            "DELETE FROM fork_generation_speeds_v1
+        sqlx::query(&format!(
+            "DELETE FROM {table}
              WHERE thread_id = ? AND rowid NOT IN (
-               SELECT rowid FROM fork_generation_speeds_v1 WHERE thread_id = ?
+               SELECT rowid FROM {table} WHERE thread_id = ?
                ORDER BY rowid DESC LIMIT 1000
              )",
-        )
+        ))
         .bind(thread_id.to_string())
         .bind(thread_id.to_string())
         .execute(&mut *tx)
         .await?;
+        if self.ephemeral {
+            sqlx::query(&format!("DELETE FROM {table} WHERE rowid NOT IN (SELECT rowid FROM {table} ORDER BY rowid DESC LIMIT 1000)"))
+                .execute(&mut *tx).await?;
+        }
         tx.commit().await?;
         Ok(())
     }
+}
 
+impl StateRuntime {
     /// Read final metrics only; legacy turns and unavailable storage have no estimate.
     pub async fn generation_speeds(
         &self,
@@ -231,7 +362,10 @@ impl StateRuntime {
     ) -> anyhow::Result<HashMap<String, GenerationSpeedRecord>> {
         let rows = sqlx::query(
             "SELECT turn_id, output_tokens, request_duration_us, started_at, completed_at, duration_ms
-             FROM fork_generation_speeds_v1 WHERE thread_id = ?",
+             FROM (
+               SELECT * FROM fork_generation_speeds_v1
+               UNION ALL SELECT * FROM fork_ephemeral_generation_speeds_v1
+             ) WHERE thread_id = ?",
         )
         .bind(thread_id.to_string())
         .fetch_all(self.pool.as_ref())
@@ -264,6 +398,61 @@ mod tests {
     use crate::runtime::test_support::test_thread_metadata;
     use crate::runtime::test_support::unique_temp_dir;
     use codex_utils_absolute_path::test_support::PathExt;
+
+    #[tokio::test]
+    async fn generation_speed_ephemeral_metrics_need_no_thread_row_and_cleanup_is_isolated()
+    -> anyhow::Result<()> {
+        let home = unique_temp_dir();
+        let _cleanup = scopeguard::guard(home.clone(), |path| {
+            let _ = std::fs::remove_dir_all(path);
+        });
+        let db = StateRuntime::init(
+            crate::SqliteConfig::new_for_testing(home.as_path().abs()),
+            "test".into(),
+        )
+        .await?;
+        let id = ThreadId::new();
+        let normal = ThreadId::new();
+        db.upsert_thread(&test_thread_metadata(&home, normal, home.clone()))
+            .await?;
+        db.save_generation_speed(normal, "normal", 100, 1_000_000, completion())
+            .await?;
+        let writer = db.generation_speed_writer(true);
+        writer
+            .start_live_generation_speed(id, "turn", "old")
+            .await?;
+        writer
+            .start_live_generation_speed(id, "turn", "current")
+            .await?;
+        writer
+            .update_live_generation_speed(id, "turn", "old", Some(999.0))
+            .await?;
+        assert_eq!(db.live_generation_speed(id, "turn", 0).await?, None);
+        writer
+            .update_live_generation_speed(id, "turn", "current", Some(22.0))
+            .await?;
+        assert_eq!(db.live_generation_speed(id, "turn", 0).await?, Some(22.0));
+        writer
+            .save_generation_speed(id, "turn", 220, 10_000_000, completion())
+            .await?;
+        assert_eq!(
+            db.generation_speeds(id).await?["turn"].tokens_per_second(),
+            22.0
+        );
+        assert!(db.get_thread(id).await?.is_none());
+        let persisted: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM fork_generation_speeds_v1 WHERE thread_id = ?",
+        )
+        .bind(id.to_string())
+        .fetch_one(db.pool.as_ref())
+        .await?;
+        assert_eq!(persisted, 0);
+        db.clear_ephemeral_generation_speeds(id).await?;
+        assert!(db.generation_speeds(id).await?.is_empty());
+        assert_eq!(db.live_generation_speed(id, "turn", 0).await?, None);
+        assert_eq!(db.generation_speeds(normal).await?.len(), 1);
+        Ok(())
+    }
 
     #[tokio::test]
     async fn live_generation_speed_is_shared_isolated_and_rejects_old_reporters()
