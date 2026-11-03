@@ -51,11 +51,10 @@ fn enabled() -> Tui {
 }
 
 #[test]
-fn workspace_starfield_can_be_enabled_for_every_model_and_still_respects_motion_switches() {
+fn workspace_starfield_is_available_for_every_model_and_respects_motion_switches() {
     palette(|| {
         for model in ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna", "custom-model"] {
             let mut settings = enabled();
-            settings.effects.starfield_all_models = true;
             let mut animated = pane();
             animated.mark_fresh_task_for_sparkle(model, &settings);
             assert!(
@@ -330,7 +329,7 @@ fn shortcut_help_preserves_an_unused_sparkle_but_literal_question_marks_do_not()
                 "{scenario}"
             );
             let help = draw(&pane.composer, /*width*/ 80, now).0;
-            assert!(dots(&help).is_empty());
+            assert_eq!(dots(&help).is_empty(), scenario != "close");
             type_text(&mut pane, "/model");
             assert!(matches!(
                 key(&mut pane, KeyCode::Enter),
@@ -497,7 +496,7 @@ fn disconnected_sparkle_edits_are_tracked_between_renders() {
                 let mut pane = pane();
                 pane.mark_fresh_task_for_sparkle(model, &enabled());
                 let initial = draw(&pane.composer, /*width*/ 80, now).0;
-                assert_eq!(dots(&initial).is_empty(), model == "gpt-5.5");
+                assert!(!dots(&initial).is_empty(), "{model}");
                 for key in [KeyCode::Null, KeyCode::Enter, KeyCode::Tab] {
                     pane.handle_restricted_key(
                         KeyEvent::new(key, KeyModifiers::NONE),
@@ -740,7 +739,7 @@ fn history_search_preserves_a_held_sparkle_command_without_reclassifying_it() {
                     .record_local_submission(HistoryEntry::new("history prompt".into()));
                 let initial = draw(&pane.composer, /*width*/ 80, now).0;
                 let expected = draw(&pane.composer, /*width*/ 80, during).0;
-                assert_eq!(dots(&initial).is_empty(), model == "gpt-5.5");
+                assert!(!dots(&initial).is_empty(), "{model}");
                 key(&mut pane, KeyCode::Char('/'));
                 assert!(pane.composer.is_in_paste_burst());
                 assert_eq!(pane.composer.current_text(), "");
@@ -830,14 +829,14 @@ fn fresh_draft_replacement_ends_search_and_dismisses_sparkles() {
 }
 
 #[test]
-fn arbitrary_commands_preserve_a_never_used_fresh_opportunity() {
+fn arbitrary_commands_preserve_the_fresh_starfield() {
     palette(|| {
         let now = Instant::now();
         for (completion, vim) in [(false, false), (true, false), (false, true), (true, true)] {
             let mut pane = pane();
             pane.set_vim_enabled(vim);
             pane.mark_fresh_task_for_sparkle("gpt-5.5", &enabled());
-            assert!(dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
+            assert!(!dots(&draw(&pane.composer, /*width*/ 80, now).0).is_empty());
             for command in ["/status", "/diff", "/pwd"] {
                 type_text(&mut pane, command);
                 assert!(matches!(
