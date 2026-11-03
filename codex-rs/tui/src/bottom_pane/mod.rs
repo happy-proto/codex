@@ -338,7 +338,7 @@ pub(crate) struct BottomPane {
     /// Streaming may drop the row without losing its elapsed time or modal pause.
     status_timer: crate::status_indicator_widget::StatusTimer,
     workspace_status: workspace_status::WorkspaceStatus,
-    workspace_completion_speed: Option<f64>,
+    workspace_completion_line: Option<Line<'static>>,
     workspace_indicator: StatusIndicatorWidget,
     /// Unified exec session summary source.
     ///
@@ -440,7 +440,7 @@ impl BottomPane {
             inline_banner: None,
             status_timer: crate::status_indicator_widget::StatusTimer::default(),
             workspace_status: Default::default(),
-            workspace_completion_speed: None,
+            workspace_completion_line: None,
             unified_exec_footer: UnifiedExecFooter::new(),
             pending_input_preview: PendingInputPreview::new(),
             pending_thread_approvals: PendingThreadApprovals::new(),
@@ -492,7 +492,7 @@ impl BottomPane {
         if status.turn_id != self.workspace_status.turn_id
             || status.phase != workspace_status::WorkspacePhase::Completed
         {
-            self.workspace_completion_speed = None;
+            self.workspace_completion_line = None;
         }
         if status.generation_observed_at != self.workspace_status.generation_observed_at
             || status.phase != workspace_status::WorkspacePhase::Working
@@ -531,9 +531,9 @@ impl BottomPane {
                 | workspace_status::WorkspacePhase::Failed
                 | workspace_status::WorkspacePhase::Interrupted
         );
-        self.workspace_completion_speed = completion
+        self.workspace_completion_line = completion
             .filter(|_| self.workspace_status.phase == workspace_status::WorkspacePhase::Completed)
-            .and_then(crate::history_cell::FinalMessageSeparator::generation_speed);
+            .and_then(crate::history_cell::FinalMessageSeparator::status_line);
         terminal && completion.is_some()
     }
 
@@ -2631,15 +2631,11 @@ impl BottomPane {
                 } else {
                     flex.push(
                         0,
-                        RenderableItem::Owned(Box::new({
-                            let mut line = self.workspace_status.line(None, None);
-                            if let Some(speed) = self.workspace_completion_speed {
-                                line.spans.push(ratatui::text::Span::raw(format!(
-                                    " · {speed:.1} token/s"
-                                )));
-                            }
-                            line
-                        })),
+                        RenderableItem::Owned(Box::new(
+                            self.workspace_completion_line
+                                .clone()
+                                .unwrap_or_else(|| self.workspace_status.line(None, None)),
+                        )),
                     );
                 }
             } else if let Some(status) = self.status_widget() {
@@ -2932,7 +2928,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_completion_uses_final_speed_and_clears_it_for_the_next_turn() {
+    fn workspace_completion_matches_transcript_and_clears_it_for_the_next_turn() {
         let (tx, _rx) = unbounded_channel();
         let mut pane = test_pane_with_disable_paste_burst(AppEventSender::new(tx), true);
         let mut status = workspace_status::WorkspaceStatus::default();
@@ -2941,6 +2937,10 @@ mod tests {
         pane.set_workspace_status(status);
         pane.set_recent_generation_speed(Some(999.0));
         let completion = crate::history_cell::FinalMessageSeparator::new(Some(40), None)
+            .with_completed_at(
+                chrono::Local::now(),
+                crate::clock_format::ClockFormat::TwentyFourHour,
+            )
             .with_generation_speed(Some(22.0));
         assert!(pane.set_workspace_completion(Some(&completion)));
         let options = ComposerRenderOptions {
@@ -2948,20 +2948,53 @@ mod tests {
             separate_status_line: true,
             ..Default::default()
         };
-        let mut buffer = Buffer::empty(Rect::new(0, 0, 40, 12));
-        pane.as_renderable_with_options(options)
-            .render(buffer.area, &mut buffer);
-        let text = snapshot_buffer(&buffer);
-        assert!(
-            text.contains("Completed") && text.contains("22.0 token/s"),
-            "{text}"
-        );
-        assert!(!text.contains("999.0"), "{text}");
+        let expected = crate::history_cell::HistoryCell::display_lines(&completion, 100).remove(0);
+        for passive in [false, true] {
+            let options = ComposerRenderOptions { passive, ..options };
+            let mut wide = Buffer::empty(Rect::new(0, 0, 100, 12));
+            pane.as_renderable_with_options(options)
+                .render(wide.area, &mut wide);
+            let text = snapshot_buffer(&wide);
+            let row = text
+                .lines()
+                .position(|line| line.contains("Worked for"))
+                .unwrap();
+            assert_eq!(
+                text.lines().nth(row).unwrap().trim_end(),
+                expected.to_string()
+            );
+            assert!(
+                wide[(2, row as u16)]
+                    .modifier
+                    .contains(ratatui::style::Modifier::DIM)
+            );
+            assert!(!text.contains("999.0"), "{text}");
+            let mut narrow = Buffer::empty(Rect::new(0, 0, 36, 12));
+            let renderable = pane.as_renderable_with_options(options);
+            assert_eq!(
+                renderable.desired_height(36),
+                renderable.desired_height(100)
+            );
+            renderable.render(narrow.area, &mut narrow);
+            let text = snapshot_buffer(&narrow);
+            let line = text
+                .lines()
+                .find(|line| line.contains("Worked for"))
+                .unwrap();
+            assert_eq!(
+                line,
+                expected.to_string().chars().take(36).collect::<String>()
+            );
+            assert_eq!(
+                text.lines().filter(|line| line.contains("token/s")).count(),
+                0
+            );
+        }
         let mut next = workspace_status::WorkspaceStatus::default();
         next.start("next", Duration::ZERO);
         pane.set_workspace_status(next);
         assert!(!pane.set_workspace_completion(Some(&completion)));
-        assert_eq!(pane.workspace_completion_speed, None);
+        assert!(pane.workspace_completion_line.is_none());
     }
 
     #[test]
@@ -3128,7 +3161,7 @@ mod tests {
             assert_eq!(complete.desired_height(width), height);
             let text = render_snapshot(&complete, Rect::new(0, 0, width, height));
             assert!(
-                text.contains("Completed") && !text.contains("token/s"),
+                text.contains("Worked for") && !text.contains("token/s"),
                 "{text}"
             );
             drop(complete);
