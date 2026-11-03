@@ -25,6 +25,10 @@ pub struct FinalMessageSeparator {
     generation_speed: Option<f64>,
 }
 impl FinalMessageSeparator {
+    pub(crate) fn generation_speed(&self) -> Option<f64> {
+        self.generation_speed
+    }
+
     /// Creates completion metadata using the protocol turn duration when available.
     pub(crate) fn new(
         elapsed_seconds: Option<u64>,
