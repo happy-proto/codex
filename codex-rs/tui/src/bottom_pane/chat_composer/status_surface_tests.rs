@@ -1116,6 +1116,25 @@ fn slash_suggestions_take_space_before_status_expands() {
 }
 
 #[test]
+fn workspace_shared_queries_position_the_cursor_below_the_status_line() {
+    let mut composer = composer();
+    let area = Rect::new(80, 8, 40, 5);
+    let shared = Rect::new(0, 22, 120, 2);
+    composer.begin_history_search();
+    let options = composer.resolve_render_options(ComposerRenderOptions {
+        shared_footer: Some(shared),
+        separate_status_line: true,
+        ..Default::default()
+    });
+    assert_eq!(
+        composer
+            .cursor_pos_with_options(area, options)
+            .map(|(_, y)| y),
+        Some(23)
+    );
+}
+
+#[test]
 fn slash_popup_preserves_footer_and_selection_style() {
     let (tx, _rx) = unbounded_channel::<AppEvent>();
     let mut composer = ChatComposer::new(
