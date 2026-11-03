@@ -251,14 +251,25 @@ impl SidePaneLayout {
     ) {
         companion.flush_answer();
         let area = self.passive;
-        // Keep the live composer's bottom hint row blank on the inactive side.
-        let available = area.height.saturating_sub(1);
-        let composer_height = available.min(3);
-        let status_height =
-            u16::from(companion.display.status.is_some() && available > composer_height);
-        let above = available - composer_height - status_height;
-        let mut transcript = Rect {
-            height: above.saturating_sub(1),
+        let gap = ComposerGap::default();
+        let bottom = companion.bottom.parked_renderable(ComposerRenderOptions {
+            shared_footer: Some(Rect::default()),
+            passive: true,
+            separate_status_line: true,
+            composer_gap: Some(&gap),
+            max_height: Some(
+                ((u32::from(area.height) * 2 / 3) as u16)
+                    .max(8)
+                    .min(area.height),
+            ),
+            extend_composer_background_left: area.x > 0,
+            command_popup_placement: CommandPopupPlacement::Hidden,
+            ..Default::default()
+        });
+        let bottom_height = bottom.desired_height(area.width).min(area.height);
+        let above = area.height - bottom_height;
+        let transcript = Rect {
+            height: above,
             ..area
         };
         if let Some(work) = &companion.display.work {
