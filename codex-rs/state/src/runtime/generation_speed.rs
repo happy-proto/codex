@@ -79,6 +79,7 @@ pub struct GenerationSpeedWriter<'a> {
 }
 
 impl GenerationSpeedWriter<'_> {
+    // SQL identifiers below come only from these fixed names; all data uses bind parameters.
     fn final_table(&self) -> &'static str {
         if self.ephemeral {
             "fork_ephemeral_generation_speeds_v1"
@@ -188,23 +189,25 @@ impl GenerationSpeedWriter<'_> {
         // replacement claim can commit. No wall-clock ordering is needed.
         let table = self.live_table();
         let mut tx = self.runtime.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let current = sqlx::query(&format!("SELECT run_id FROM {table} WHERE thread_id = ?"))
-            .bind(thread_id.to_string())
-            .fetch_optional(&mut *tx)
-            .await?;
+        let current = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT run_id FROM {table} WHERE thread_id = ?"
+        )))
+        .bind(thread_id.to_string())
+        .fetch_optional(&mut *tx)
+        .await?;
         if let Some(row) = &current
             && row.try_get::<String, _>("run_id")? == run_id
         {
             tx.commit().await?;
             return Ok(());
         }
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO {table} (thread_id, turn_id, run_id, updated_at_ms, speed)
              VALUES (?, ?, ?, ?, NULL)
              ON CONFLICT(thread_id) DO UPDATE SET
                turn_id = excluded.turn_id, run_id = excluded.run_id,
                updated_at_ms = excluded.updated_at_ms, speed = NULL",
-        ))
+        )))
         .bind(thread_id.to_string())
         .bind(turn_id)
         .bind(run_id)
@@ -212,7 +215,7 @@ impl GenerationSpeedWriter<'_> {
         .execute(&mut *tx)
         .await?;
         if self.ephemeral {
-            sqlx::query(&format!("DELETE FROM {table} WHERE rowid NOT IN (SELECT rowid FROM {table} ORDER BY updated_at_ms DESC LIMIT 1000)"))
+            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE rowid NOT IN (SELECT rowid FROM {table} ORDER BY updated_at_ms DESC LIMIT 1000)")))
                 .execute(&mut *tx).await?;
         }
         tx.commit().await?;
@@ -229,10 +232,10 @@ impl GenerationSpeedWriter<'_> {
     ) -> anyhow::Result<()> {
         anyhow::ensure!(speed.is_none_or(|speed| speed.is_finite() && speed >= 0.0));
         let table = self.live_table();
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE {table} SET speed = ?, updated_at_ms = ?
              WHERE thread_id = ? AND turn_id = ? AND run_id = ?",
-        ))
+        )))
         .bind(speed)
         .bind(chrono::Utc::now().timestamp_millis())
         .bind(thread_id.to_string())
@@ -285,9 +288,9 @@ impl GenerationSpeedWriter<'_> {
         turn_id: &str,
     ) -> anyhow::Result<()> {
         let table = self.final_table();
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "DELETE FROM {table} WHERE thread_id = ? AND turn_id = ?"
-        ))
+        )))
         .bind(thread_id.to_string())
         .bind(turn_id)
         .execute(self.runtime.pool.as_ref())
@@ -314,7 +317,7 @@ impl GenerationSpeedWriter<'_> {
         );
         let table = self.final_table();
         let mut tx = self.runtime.pool.begin_with("BEGIN IMMEDIATE").await?;
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO {table} (thread_id, turn_id, output_tokens, request_duration_us, started_at, completed_at, duration_ms)
              VALUES (?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(thread_id, turn_id) DO UPDATE SET
@@ -323,7 +326,7 @@ impl GenerationSpeedWriter<'_> {
                started_at = excluded.started_at,
                completed_at = excluded.completed_at,
                duration_ms = excluded.duration_ms",
-        ))
+        )))
         .bind(thread_id.to_string())
         .bind(turn_id)
         .bind(output_tokens)
@@ -334,19 +337,19 @@ impl GenerationSpeedWriter<'_> {
         .execute(&mut *tx)
         .await?;
         // Old histories may omit this optional metric. Bound storage and TUI replay caches.
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "DELETE FROM {table}
              WHERE thread_id = ? AND rowid NOT IN (
                SELECT rowid FROM {table} WHERE thread_id = ?
                ORDER BY rowid DESC LIMIT 1000
              )",
-        ))
+        )))
         .bind(thread_id.to_string())
         .bind(thread_id.to_string())
         .execute(&mut *tx)
         .await?;
         if self.ephemeral {
-            sqlx::query(&format!("DELETE FROM {table} WHERE rowid NOT IN (SELECT rowid FROM {table} ORDER BY rowid DESC LIMIT 1000)"))
+            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE rowid NOT IN (SELECT rowid FROM {table} ORDER BY rowid DESC LIMIT 1000)")))
                 .execute(&mut *tx).await?;
         }
         tx.commit().await?;
