@@ -11,6 +11,8 @@
 //! Only the two base composer modes opt into fresh-thread decoration; queries and help do not.
 //! Shortcut help occupies the space above the composer and keeps its close hint on the final row.
 //! Passive transcript hints retain the shortcuts entry when it fits beside the complete hint.
+//! Docked conversations measure their composers without local footer rows; the focused composer
+//! paints the same footer presentation once into the dock's full-width shared area.
 
 use std::time::Instant;
 
@@ -70,6 +72,10 @@ pub(crate) enum CommandPopupPlacement {
 /// A borrowed presentation shared by measurement, painting, and cursor placement.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct ComposerRenderOptions<'a> {
+    /// A dock owns these full-window footer rows outside the individual pane.
+    /// An empty rectangle suppresses them on the passive composer.
+    pub(crate) shared_footer: Option<Rect>,
+    pub(crate) passive: bool,
     /// Fullscreen limits the composer independently of activity and modal views.
     pub(crate) max_height: Option<u16>,
     pub(crate) image_previews: Option<&'a crate::transcript_image::composer::ComposerImages>,
@@ -284,6 +290,9 @@ impl super::ChatComposer {
     }
 
     pub(super) fn footer_hint_height(&self, width: u16, options: ComposerRenderOptions<'_>) -> u16 {
+        if options.shared_footer.is_some() {
+            return 0;
+        }
         if self.show_warning_notice(options) || self.shortcuts_above_composer(options) {
             return 1;
         }
