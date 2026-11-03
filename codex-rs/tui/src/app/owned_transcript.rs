@@ -32,6 +32,7 @@ use ratatui::widgets::Widget;
 pub(super) struct ConversationFrame {
     inset: Option<Rect>,
     side_pane: bool,
+    shared_footer: Option<Rect>,
     /// A dialog can obscure neighboring content in the terminal's completed buffer.
     behind_dialog: Option<ratatui::buffer::Buffer>,
     caller_images: Vec<ImagePlacement>,
@@ -39,6 +40,7 @@ pub(super) struct ConversationFrame {
 
 pub(super) struct PreparedConversation {
     area: Rect,
+    shared_footer: Option<Rect>,
     transcript_width: u16,
     composer: Option<ComposerState>,
     composer_hint: Option<HyperlinkLine>,
@@ -82,7 +84,10 @@ impl PreparedConversation {
         }
         chat_widget.note_rendered_width(self.area.width);
         if let Some(position) = bottom.cursor_pos(bottom_area)
-            && self.area.contains(position.into())
+            && (self.area.contains(position.into())
+                || self
+                    .shared_footer
+                    .is_some_and(|area| area.contains(position.into())))
         {
             frame.set_cursor_style(bottom.cursor_style(bottom_area));
             frame.set_cursor_position(position);
@@ -207,6 +212,7 @@ impl App {
             None
         };
         let inset = caller_inset.or_else(|| dock.as_ref().map(|panes| panes.focused));
+        self.conversation_frame.shared_footer = dock.as_ref().map(|panes| panes.footer);
         let prepared = self.prepare_conversation(screen_size.into(), inset, &frames);
         self.conversation_frame.side_pane = dock.is_some();
         // An input refresh opens a fresh terminal buffer. Carry the outer owner's
@@ -300,6 +306,7 @@ impl App {
         }
         PreparedConversation {
             area,
+            shared_footer: self.conversation_frame.shared_footer,
             transcript_width,
             composer,
             composer_hint,
@@ -332,11 +339,14 @@ impl App {
         let mut composer_gap = (!self.chat_widget.has_active_view()
             && !self.chat_widget.is_external_writer_view())
         .then(crate::bottom_pane::ComposerGap::default);
-        let prompt_footer = self.prompt_navigation_footer(area.width.saturating_sub(/*rhs*/ 2));
+        let shared_footer = self.conversation_frame.shared_footer;
+        let footer_area = shared_footer.unwrap_or(area);
+        let prompt_footer =
+            self.prompt_navigation_footer(footer_area.width.saturating_sub(/*rhs*/ 2));
         let chat_widget = &self.chat_widget;
         let view = &mut self.transcript_view;
         let active_key = chat_widget.active_cell_transcript_key();
-        let footer_width = crate::bottom_pane::inset_footer_hint_area(area).width;
+        let footer_width = crate::bottom_pane::inset_footer_hint_area(footer_area).width;
         // Measure the composer to find the space available for transcript rows.
         // Painting those rows tells us whether newer activity is still hidden,
         // which can change the footer hint and the composer's measured height.
@@ -346,6 +356,7 @@ impl App {
             .max(8)
             .min(area.height);
         let options = |interacting| ComposerRenderOptions {
+            shared_footer,
             max_height: Some(max_composer_height),
             extend_composer_background_left: self.conversation_frame.side_pane && area.x > 0,
             overlay_top: area.top(),
@@ -396,7 +407,7 @@ impl App {
             completion_tip,
         );
         if let Some(gap) = composer_gap.as_mut() {
-            gap.needs_separator = rows_above_composer > 1
+            gap.needs_separator = shared_footer.is_none() && rows_above_composer > 1
                 // Keep the tip under the pointer when selection hints or copy feedback appear.
                 && prepared.turn_tip.is_none()
                 && chat_widget.no_modal_or_popup_active()
@@ -450,6 +461,18 @@ impl App {
                 MotionMode::from_animations_enabled(self.local_settings.tui.animations),
             );
         bottom.render(bottom_area, frame.buffer);
+        if let Some(shared) = shared_footer {
+            ratatui::widgets::Clear.render(shared, frame.buffer);
+            chat_widget.render_shared_footer(
+                shared,
+                frame.buffer,
+                ComposerRenderOptions {
+                    footer: footer.as_ref(),
+                    rendered_selection: Some(&chat_widget.rendered_selection),
+                    ..options(view.has_active_interaction())
+                },
+            );
+        }
         if let (Some(tip), Some(area)) = (completion_tip, completion_tip_area) {
             tip.render(area, frame.buffer);
         }

@@ -189,7 +189,7 @@ impl StatusIndicatorWidget {
         Some((attempt.trim(), Duration::from_secs(seconds)))
     }
 
-    fn header_at(&self, now: Instant) -> Cow<'_, str> {
+    pub(crate) fn header_at(&self, now: Instant) -> Cow<'_, str> {
         let Some((attempt, wait)) = self.retry_wait() else {
             return Cow::Borrowed(&self.header);
         };

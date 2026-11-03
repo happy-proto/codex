@@ -1015,6 +1015,13 @@ impl App {
 
         let mut pending_thread_ids = HashSet::new();
         for (thread_id, store) in channels {
+            let status = store.lock().await.workspace_status();
+            if self.chat_widget.thread_id() == Some(thread_id) {
+                self.chat_widget.set_workspace_status(status.clone());
+            }
+            if let Some(companion) = self.side_companions.get_mut(&thread_id) {
+                companion.display.bottom.set_workspace_status(status);
+            }
             if Some(thread_id) == self.active_thread_id || Some(thread_id) == side_parent_thread_id
             {
                 continue;
