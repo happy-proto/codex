@@ -138,8 +138,7 @@ async fn only_a_confirmed_empty_new_task_shows_the_sparkle() -> Result<()> {
 }
 
 #[tokio::test]
-async fn disconnected_sparkle_input_routed_by_app_consumes_the_opportunity_without_drawing()
--> Result<()> {
+async fn disconnected_sparkle_input_routed_by_app_restores_stars_after_erasing() -> Result<()> {
     for model in ["gpt-5.5", "gpt-6-astra"] {
         for edited in [false, true] {
             let (mut app, _events, _ops) = make_test_app_with_channels().await;
@@ -175,18 +174,14 @@ async fn disconnected_sparkle_input_routed_by_app_consumes_the_opportunity_witho
             app.chat_widget.set_model("gpt-6-astra");
             app.chat_widget
                 .on_sparkle_model_selected_from_picker("gpt-6-astra");
-            assert_eq!(
-                visible(&app.chat_widget),
-                !edited,
-                "{model}, edited: {edited}"
-            );
+            assert!(visible(&app.chat_widget), "{model}, edited: {edited}");
         }
     }
     Ok(())
 }
 
 #[tokio::test]
-async fn commands_can_precede_the_sparkle_but_inserted_or_typed_drafts_cannot() -> Result<()> {
+async fn clearing_commands_inserted_and_typed_drafts_restores_idle_sparkles() -> Result<()> {
     for earlier_input in [
         "",
         "commands",
@@ -270,14 +265,7 @@ async fn commands_can_precede_the_sparkle_but_inserted_or_typed_drafts_cannot() 
                 1
             );
         }
-        assert_eq!(
-            visible(&app.chat_widget),
-            matches!(
-                earlier_input,
-                "" | "commands" | "shortcut_help" | "cancel_picker"
-            ),
-            "{earlier_input}"
-        );
+        assert!(visible(&app.chat_widget), "{earlier_input}");
     }
     Ok(())
 }
@@ -342,7 +330,7 @@ async fn overlays_shortcuts_and_key_chords_leave_the_main_sparkle_untouched() ->
 
     app.handle_tui_event(&mut tui, &mut server, TuiEvent::Key(KeyCode::Esc.into()))
         .await?;
-    assert!(!visible(&app.chat_widget));
+    assert!(visible(&app.chat_widget));
     Ok(())
 }
 
@@ -635,7 +623,7 @@ fn astra_picker_xhigh_applies_on_a_bounded_stack() -> Result<()> {
 }
 
 #[tokio::test]
-async fn session_only_astra_picker_shows_stars_only_on_an_untouched_task() -> Result<()> {
+async fn session_only_astra_picker_preserves_idle_stars_after_draft_edits() -> Result<()> {
     let (mut app, mut events, _ops) = make_test_app_with_channels().await;
     app.config.model = Some("gpt-5.5".into());
     app.config.model_reasoning_effort = Some(ReasoningEffortConfig::Medium);
@@ -686,9 +674,9 @@ async fn session_only_astra_picker_shows_stars_only_on_an_untouched_task() -> Re
             .position(|line| line.contains("Ask Codex to do anything"))
             .expect("empty composer shows its placeholder");
         let composer = lines[prompt.saturating_sub(1)..=prompt + 1].join("\n");
-        assert_eq!(
+        assert!(
             composer.chars().any(|ch| "⠁⠂⠄⠈⠐⠠⡀⢀".contains(ch)),
-            scenario == "untouched"
+            "{scenario}"
         );
         assert_eq!(std::fs::read(&config_path)?, defaults.as_bytes());
         assert_eq!(
@@ -713,7 +701,7 @@ async fn session_only_astra_picker_shows_stars_only_on_an_untouched_task() -> Re
             .await?,
             0
         );
-        assert!(!visible(&app.chat_widget));
+        assert!(visible(&app.chat_widget));
     }
 
     server.shutdown().await?;
@@ -721,7 +709,7 @@ async fn session_only_astra_picker_shows_stars_only_on_an_untouched_task() -> Re
 }
 
 #[tokio::test]
-async fn a_read_only_command_can_return_to_active_stars_but_mention_ends_them() -> Result<()> {
+async fn read_only_commands_and_cleared_mentions_return_to_idle_stars() -> Result<()> {
     let (mut app, _events, _ops) = make_test_app_with_channels().await;
     app.local_settings.tui.animations = true;
     app.local_settings.tui.effects.starfield = true;
@@ -745,12 +733,12 @@ async fn a_read_only_command_can_return_to_active_stars_but_mention_ends_them() 
         .handle_key_event(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
     app.chat_widget
         .handle_key_event(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE));
-    assert!(!visible(&app.chat_widget));
+    assert!(visible(&app.chat_widget));
     Ok(())
 }
 
 #[tokio::test]
-async fn early_input_and_real_work_consume_the_sparkle() -> Result<()> {
+async fn startup_drafts_and_busy_work_hide_stars_while_cleared_input_restores_them() -> Result<()> {
     for scenario in ["untouched", "typed_then_erased", "paste", "turn", "review"] {
         let (mut app, _events, _ops) = make_test_app_with_channels().await;
         app.chat_widget.local_settings.tui.animations = true;
@@ -786,7 +774,7 @@ async fn early_input_and_real_work_consume_the_sparkle() -> Result<()> {
         }
         assert_eq!(
             visible(&app.chat_widget),
-            scenario == "untouched",
+            matches!(scenario, "untouched" | "typed_then_erased" | "review"),
             "{scenario}"
         );
     }
