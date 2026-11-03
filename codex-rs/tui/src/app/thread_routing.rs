@@ -1056,7 +1056,7 @@ impl App {
                 self.chat_widget.set_workspace_status(status.clone());
             }
             if let Some(companion) = self.side_companions.get_mut(&thread_id) {
-                companion.display.bottom.set_workspace_status(status);
+                companion.bottom.set_workspace_status(status);
             }
             if Some(thread_id) == self.active_thread_id || Some(thread_id) == side_parent_thread_id
             {
