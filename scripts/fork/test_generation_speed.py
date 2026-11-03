@@ -13,7 +13,7 @@ SCHEMA = STORAGE.with_suffix(".sql")
 
 def production_query(prefix, *, ephemeral=False):
     queries = re.findall(
-        r'sqlx::query(?:_scalar[^\n(]*)?\(\s*(?:&format!\(\s*)?"([^"]+)"',
+        r'sqlx::query(?:_scalar[^\n(]*)?\(\s*(?:sqlx::AssertSqlSafe\(format!\(\s*)?"([^"]+)"',
         STORAGE.read_text(),
     )
     for query in queries:
