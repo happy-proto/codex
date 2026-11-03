@@ -135,8 +135,9 @@ impl ChatWidget {
         &self,
         area: Rect,
         buf: &mut ratatui::buffer::Buffer,
-        options: ComposerRenderOptions<'_>,
+        mut options: ComposerRenderOptions<'_>,
     ) {
+        options.warning_count = self.warning_display_state.count;
         self.bottom_pane.render_shared_footer(area, buf, options);
     }
     pub(crate) fn prepare_composer_images(&mut self, protocol: Option<crate::pets::ImageProtocol>) {
