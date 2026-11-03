@@ -22,6 +22,95 @@ use codex_protocol::models::MessagePhase;
 use pretty_assertions::assert_eq;
 use std::path::Path;
 
+#[tokio::test]
+async fn workspace_background_voice_close_keeps_its_last_caption_through_queued_commit() {
+    let (mut app, mut events, _ops) = make_test_app_with_channels().await;
+    let source = ThreadId::new();
+    let target = ThreadId::new();
+    app.primary_thread_id = Some(source);
+    app.active_thread_id = Some(source);
+    app.chat_widget
+        .handle_thread_session_quiet(test_thread_session(source, app.config.cwd.to_path_buf()));
+    crate::chatwidget::activate_voice_for_thread(&mut app.chat_widget, source);
+    let bottom = app.chat_widget.prepare_side_composer();
+    app.pending_side_composers
+        .insert(source, side::PendingSideComposer::new(source, bottom));
+    let (replacement, _, _replacement_events, _) = make_chatwidget_manual_with_sender().await;
+    app.active_thread_id = Some(target);
+    app.replace_chat_widget(replacement);
+    app.chat_widget
+        .handle_thread_session_quiet(test_thread_session(target, app.config.cwd.to_path_buf()));
+    let pending = app.pending_side_composers.remove(&source).unwrap();
+    app.side_companions.insert(
+        source,
+        side::SideCompanion {
+            route: pending.route,
+            projection: pending.projection,
+            commit_ticks: false,
+            bottom: pending.bottom,
+            display: crate::app_event::CapturedSideDisplay {
+                active: None,
+                auxiliary: Vec::new(),
+            },
+            cells: Vec::new(),
+            view: Default::default(),
+        },
+    );
+    let foreground_cells = app.transcript_cells.len();
+    while events.try_recv().is_ok() {}
+    app.enqueue_thread_notification(
+        source,
+        ServerNotification::ThreadRealtimeTranscriptDelta(
+            codex_app_server_protocol::ThreadRealtimeTranscriptDeltaNotification {
+                thread_id: source.to_string(),
+                role: "user".into(),
+                delta: "last background caption".into(),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    app.enqueue_thread_notification(
+        source,
+        ServerNotification::ThreadRealtimeClosed(
+            codex_app_server_protocol::ThreadRealtimeClosedNotification {
+                thread_id: source.to_string(),
+                reason: Some("requested".into()),
+            },
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(app.background_voice.is_none());
+    let projection = app.side_companions[&source].projection.as_ref().unwrap();
+    assert!(
+        projection
+            .realtime_transcript_cells_for_replay()
+            .iter()
+            .any(|record| record.text == "last background caption")
+    );
+    while let Ok(event) = events.try_recv() {
+        if let AppEvent::SideProjectionEvent { route, event } = event {
+            app.handle_side_projection_event(route, *event);
+        }
+    }
+    let text = app.side_companions[&source]
+        .cells
+        .iter()
+        .flat_map(|cell| cell.transcript_lines(100))
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(text.matches("last background caption").count(), 1, "{text}");
+    assert_eq!(app.transcript_cells.len(), foreground_cells);
+    assert_eq!(app.current_displayed_thread_id(), Some(target));
+    assert!(
+        app.pending_realtime_transcript_replay[&source]
+            .iter()
+            .any(|record| record.text == "last background caption")
+    );
+}
+
 fn normalize_voice_snapshot_directory(rendered: &str, cwd: &Path) -> String {
     let cwd = cwd.display().to_string();
     let placeholder = "/tmp/project";
