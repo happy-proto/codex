@@ -199,7 +199,10 @@ impl ChatComposer {
         area: Rect,
         options: ComposerRenderOptions<'_>,
     ) -> Option<(u16, u16)> {
-        let layout = self.layout_with_options(area, options);
+        let mut layout = self.layout_with_options(area, options);
+        if let Some(shared) = options.shared_footer {
+            layout.footer = self.shared_footer_areas(shared).1;
+        }
         if let Some(footer) = options.footer.filter(|footer| footer.is_interactive) {
             let area = inset_footer_hint_area(layout.footer);
             return footer
