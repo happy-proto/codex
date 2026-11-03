@@ -301,12 +301,17 @@ pub(crate) enum CapturedSideStream {
 }
 
 /// Presentation retained alongside the transcript while its composer is inactive.
-#[derive(Debug)]
 pub(crate) struct CapturedSideDisplay {
     pub(crate) active: Option<Box<dyn HistoryCell>>,
     pub(crate) auxiliary: Vec<crate::terminal_hyperlinks::HyperlinkLine>,
-    pub(crate) draft: String,
-    pub(crate) status: Option<String>,
+    pub(crate) bottom: Box<crate::bottom_pane::BottomPane>,
+}
+
+impl std::fmt::Debug for CapturedSideDisplay {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CapturedSideDisplay")
+            .finish_non_exhaustive()
+    }
 }
 
 #[allow(clippy::large_enum_variant)]

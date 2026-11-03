@@ -3,20 +3,21 @@
 use super::App;
 use super::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
 use super::side::SideCompanion;
-use crate::bottom_pane::inset_footer_hint_area;
+use crate::bottom_pane::CommandPopupPlacement;
+use crate::bottom_pane::ComposerGap;
+use crate::bottom_pane::ComposerRenderOptions;
 use crate::custom_terminal::Frame;
-use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
+use crate::render::renderable::Renderable;
 use codex_protocol::ThreadId;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
-use ratatui::text::Text;
-use ratatui::widgets::Widget;
 
 pub(super) struct SidePaneLayout {
     pub(super) focused: Rect,
     pub(super) passive_thread: ThreadId,
+    pub(super) footer: Rect,
     passive: Rect,
     divider: u16,
 }
@@ -47,6 +48,27 @@ pub(super) fn layout(app: &App, tui: &crate::tui::Tui, area: Rect) -> Option<Sid
     if !app.side_companions.contains_key(&passive_thread) {
         return None;
     }
+    let width = area.width.saturating_sub(2);
+    let hint = app.prompt_navigation_footer(width).or_else(|| {
+        app.transcript_view.footer_with_navigation(
+            width,
+            crate::motion::MotionMode::from_animations_enabled(app.local_settings.tui.animations),
+            "esc latest",
+        )
+    });
+    let hint_height = hint
+        .as_ref()
+        .map_or(1, |footer| footer.text.height().max(1) as u16);
+    let footer_height = area.height.min(1u16.saturating_add(hint_height));
+    let footer = Rect {
+        y: area.bottom() - footer_height,
+        height: footer_height,
+        ..area
+    };
+    let area = Rect {
+        height: area.height - footer_height,
+        ..area
+    };
     let child_width = (area.width / 3).max(36);
     let [parent, child] =
         Layout::horizontal([Constraint::Fill(1), Constraint::Length(child_width)])
@@ -61,6 +83,7 @@ pub(super) fn layout(app: &App, tui: &crate::tui::Tui, area: Rect) -> Option<Sid
         focused,
         passive,
         passive_thread,
+        footer,
         divider: parent.right(),
     })
 }
@@ -74,14 +97,28 @@ impl SidePaneLayout {
                 .set_symbol("│")
                 .set_style(ratatui::style::Style::default().dim());
         }
-        // Keep the live composer's bottom hint row blank on the inactive side.
-        let available = area.height.saturating_sub(1);
-        let composer_height = available.min(3);
-        let status_height =
-            u16::from(companion.display.status.is_some() && available > composer_height);
-        let above = available - composer_height - status_height;
+        let gap = ComposerGap::default();
+        let bottom = companion
+            .display
+            .bottom
+            .parked_renderable(ComposerRenderOptions {
+                shared_footer: Some(Rect::default()),
+                passive: true,
+                separate_status_line: true,
+                composer_gap: Some(&gap),
+                max_height: Some(
+                    ((u32::from(area.height) * 2 / 3) as u16)
+                        .max(8)
+                        .min(area.height),
+                ),
+                extend_composer_background_left: area.x > 0,
+                command_popup_placement: CommandPopupPlacement::Hidden,
+                ..Default::default()
+            });
+        let bottom_height = bottom.desired_height(area.width).min(area.height);
+        let above = area.height - bottom_height;
         let transcript = Rect {
-            height: above.saturating_sub(1),
+            height: above,
             ..area
         };
         companion.view.render_parked(
@@ -97,44 +134,9 @@ impl SidePaneLayout {
 
         let composer = Rect {
             y: area.y + above,
-            height: composer_height,
+            height: bottom_height,
             ..area
         };
-        let gutter = u16::from(composer.x > self.divider);
-        frame.buffer.set_style(
-            Rect {
-                x: composer.x - gutter,
-                width: composer.width + gutter,
-                ..composer
-            },
-            crate::style::quiet_workspace_style(),
-        );
-        let inset = u16::from(composer_height > 1);
-        let draft = Text::from(format!("› {}", companion.display.draft));
-        let lines = crate::wrapping::word_wrap_lines(
-            draft.lines,
-            crate::wrapping::RtOptions::new(usize::from(composer.width))
-                .word_splitter(textwrap::WordSplitter::NoHyphenation),
-        );
-        Text::from(lines).render(
-            Rect {
-                y: composer.y + inset,
-                height: composer_height - inset,
-                ..composer
-            },
-            frame.buffer,
-        );
-        if let Some(status) = &companion.display.status {
-            let footer = inset_footer_hint_area(Rect {
-                y: composer.bottom(),
-                height: status_height,
-                ..area
-            });
-            truncate_line_with_ellipsis_if_overflow(
-                status.clone().dim().into(),
-                usize::from(footer.width),
-            )
-            .render(footer, frame.buffer);
-        }
+        bottom.render(composer, frame.buffer);
     }
 }

@@ -253,18 +253,7 @@ impl ChatWidget {
             auxiliary: self
                 .active_cell_transcript_hyperlink_lines(width)
                 .unwrap_or_default(),
-            draft: if self.bottom_pane.is_in_paste_burst() {
-                let draft = self.bottom_pane.composer_recovery_snapshot();
-                crate::bottom_pane::ChatComposer::expand_pending_pastes(
-                    &draft.text,
-                    draft.text_elements,
-                    &draft.pending_pastes,
-                )
-                .0
-            } else {
-                self.composer_text_with_pending()
-            },
-            status: self.status_line_text(),
+            bottom: self.bottom_pane.take_for_side(),
         };
         (stream, display)
     }
