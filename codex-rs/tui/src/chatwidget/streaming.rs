@@ -4,6 +4,7 @@
 //! cells, commit ticks, and interrupt deferral.
 
 use super::*;
+#[cfg(test)]
 use crate::app_event::CapturedSideDisplay;
 use crate::app_event::CapturedSideStream;
 use crate::app_event::CapturedSideWork;
@@ -205,7 +206,85 @@ impl ChatWidget {
         self.status_state.pending_status_indicator_restore = false;
     }
 
+    pub(crate) fn prepare_side_composer(&mut self) -> Box<crate::bottom_pane::BottomPane> {
+        self.flush_completed_tool_activity();
+        self.set_queue_autosend_suppressed(true);
+        self.stop_rate_limit_poller();
+        self.bottom_pane.take_for_side()
+    }
+
+    pub(crate) fn park_side_projection(
+        &mut self,
+        route: crate::app_event_sender::SideProjectionRoute,
+    ) {
+        let _ = self.app_event_tx.side_projection.set(route);
+        self.set_queue_autosend_suppressed(true);
+        self.stop_rate_limit_poller();
+    }
+
+    pub(crate) fn side_projection_route(
+        &self,
+    ) -> Option<crate::app_event_sender::SideProjectionRoute> {
+        self.app_event_tx.side_projection.get().copied()
+    }
+
+    pub(crate) fn sync_side_activity(&self, pane: &mut crate::bottom_pane::BottomPane) {
+        pane.update_workspace_activity_from(&self.bottom_pane);
+    }
+
+    pub(crate) fn has_side_stream(&self) -> bool {
+        self.stream_controller.is_some() || self.plan_stream_controller.is_some()
+    }
+
+    /// Reflow a live retained stream from source rather than its old-width committed rows.
+    pub(crate) fn side_stream_snapshot(&self) -> Option<CapturedSideStream> {
+        if let Some(controller) = &self.stream_controller {
+            let source = controller.source_snapshot();
+            let markdown = parse_assistant_markdown(&source, self.config.cwd.as_path());
+            let context = self.thread_id.and_then(|id| {
+                crate::inline_visualization::InlineVisualizationContext::from_config(
+                    &self.config,
+                    id,
+                )
+            });
+            Some(CapturedSideStream::Answer(Arc::new(
+                history_cell::AgentMarkdownCell::new_with_inline_visualizations(
+                    markdown.visible_markdown,
+                    &self.config.cwd,
+                    context,
+                )
+                .with_copy_source(Some(source)),
+            )))
+        } else if self.plan_stream_controller.is_some() {
+            Some(CapturedSideStream::Plan(Arc::new(
+                history_cell::new_proposed_plan(
+                    self.transcript.plan_delta_buffer.clone(),
+                    &self.config.cwd,
+                ),
+            )))
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn side_active_cell(&self) -> Option<&dyn HistoryCell> {
+        self.transcript.active_cell.as_deref()
+    }
+
+    pub(crate) fn side_auxiliary_lines(&self, width: u16) -> Vec<HyperlinkLine> {
+        let active = self.side_active_cell();
+        self.active_cell_hyperlink_lines_with(width, |cell, width| {
+            if active.is_some_and(|active| std::ptr::eq(cell, active)) {
+                Vec::new()
+            } else {
+                cell.transcript_hyperlink_lines(width)
+            }
+        })
+        .unwrap_or_default()
+    }
+
     /// Capture at handoff, while links and visualization directives still have the outgoing cwd.
+    #[cfg(test)]
     pub(crate) fn take_side_display(
         &mut self,
         width: u16,
