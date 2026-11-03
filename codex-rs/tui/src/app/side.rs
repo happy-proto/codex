@@ -623,6 +623,7 @@ impl App {
             pane.remove_chat(thread_id);
         }
         self.side_companions.remove(&thread_id);
+        self.pending_side_composers.remove(&thread_id);
         self.agent_navigation.remove(thread_id);
         if self.active_thread_id == Some(thread_id) {
             self.clear_active_thread().await;
