@@ -8,6 +8,10 @@ use super::sidebar::PaneFocus;
 use super::sidebar::SidebarContent;
 use super::sidebar::SidebarLayout;
 use crate::bottom_pane::render_unfocused_status;
+use crate::bottom_pane::CommandPopupPlacement;
+use crate::bottom_pane::ComposerGap;
+use crate::bottom_pane::ComposerRenderOptions;
+use crate::bottom_pane::inset_footer_hint_area;
 use crate::custom_terminal::Frame;
 use crate::legacy_core::config::edit::ConfigEdit;
 use crate::legacy_core::config::edit::ConfigEditsBuilder;
@@ -471,39 +475,10 @@ impl SidePaneLayout {
 
         let composer = Rect {
             y: area.y + above,
-            height: composer_height,
+            height: bottom_height,
             ..area
         };
-        frame
-            .buffer
-            .set_style(composer, crate::style::quiet_workspace_style());
-        let inset = u16::from(composer_height > 1);
-        let text_area = Rect::new(
-            composer.x.saturating_add(/*rhs*/ 2),
-            composer.y + inset,
-            composer.width.saturating_sub(/*rhs*/ 2),
-            composer_height - inset,
-        );
-        if !text_area.is_empty() {
-            frame.buffer[(composer.x, text_area.y)].set_symbol("›");
-            StatefulWidgetRef::render_ref(
-                &companion.display.draft.as_ref(),
-                text_area,
-                frame.buffer,
-                &mut Default::default(),
-            );
-        }
-        if let Some(status) = &companion.display.status {
-            render_unfocused_status(
-                status.clone(),
-                Rect {
-                    y: composer.bottom(),
-                    height: status_height,
-                    ..area
-                },
-                frame.buffer,
-            );
-        }
+        bottom.render(composer, frame.buffer);
     }
 }
 

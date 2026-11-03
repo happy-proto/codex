@@ -37,11 +37,11 @@ impl ChatComposer {
     }
 
     pub(super) fn has_separate_status(&self, options: ComposerRenderOptions<'_>) -> bool {
-        options.separate_status_line && self.footer.status_line_enabled
+        options.shared_footer.is_none() && options.separate_status_line && self.footer.status_line_enabled
     }
 
     pub(super) fn shows_shared_status(&self, options: ComposerRenderOptions<'_>) -> bool {
-        !options.separate_status_line
+        options.shared_footer.is_none() && !options.separate_status_line
             && options.footer.is_none()
             && self.custom_footer_height().is_none()
             && self.footer.status_line_enabled
@@ -86,6 +86,21 @@ impl ChatComposer {
             .max(1);
         cache.set(Some((width, height)));
         height
+    }
+
+    pub(super) fn shared_footer_areas(&self, area: Rect) -> (Rect, Rect) {
+        let status_height = u16::from(self.footer.status_line_enabled).min(area.height);
+        (
+            Rect {
+                height: status_height,
+                ..area
+            },
+            Rect {
+                y: area.y + status_height,
+                height: area.height - status_height,
+                ..area
+            },
+        )
     }
 
     pub(super) fn hint_footer_props(&self, options: ComposerRenderOptions<'_>) -> FooterProps {

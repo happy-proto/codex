@@ -275,6 +275,7 @@ impl ChatWidget {
                         self.bottom_pane.status_elapsed().unwrap_or_default(),
                     )
                 }),
+            bottom: self.bottom_pane.take_for_side(),
             cwd: self.config.cwd.clone(),
             visualizations,
         };
