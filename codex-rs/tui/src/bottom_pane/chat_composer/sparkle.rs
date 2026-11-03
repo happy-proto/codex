@@ -1,7 +1,7 @@
 //! One short flourish for a confirmed new task with an untouched prompt.
-//! `tui.effects.starfield_all_models` extends Astra's eligibility to every model.
+//! This fork makes the effect available to every model under the existing motion switches.
 //!
-//! Ordinary draft content ends the opportunity permanently; slash commands can still select Astra
+//! Ordinary draft content ends the opportunity permanently; slash commands can still select models
 //! if the flourish has never started. The original field fills blank composer cells without drawing
 //! over the placeholder or normal terminal cursor, and hidden frames do not schedule work. The
 //! separate field renderer only paints its buffer and has no input or scheduling state. History
@@ -85,11 +85,9 @@ impl Default for Sparkle {
 }
 
 impl BottomPane {
-    pub(crate) fn is_sparkle_model(model: &str, settings: &Tui) -> bool {
-        settings.effects.starfield_all_models
-            || model
-                .split(|ch: char| !ch.is_alphanumeric() && ch != '_')
-                .any(|part| part.eq_ignore_ascii_case("astra"))
+    pub(crate) fn is_sparkle_model(_model: &str) -> bool {
+        // Personal fork policy: every model can show the composer starfield.
+        true
     }
 
     pub(crate) fn mark_fresh_task_for_sparkle(&mut self, model: &str, settings: &Tui) {
@@ -100,7 +98,7 @@ impl BottomPane {
         ) && self.composer.sparkle.phase.get() == Phase::Unarmed
             && settings.animations
             && settings.effects.starfield
-            && Self::is_sparkle_model(model, settings)
+            && Self::is_sparkle_model(model)
         {
             self.composer.sparkle.phase.set(Phase::Waiting);
             self.request_redraw();
@@ -114,10 +112,7 @@ impl BottomPane {
     }
 
     pub(crate) fn stop_ineligible_sparkle(&self, model: &str, settings: &Tui) {
-        if !settings.animations
-            || !settings.effects.starfield
-            || !Self::is_sparkle_model(model, settings)
-        {
+        if !settings.animations || !settings.effects.starfield || !Self::is_sparkle_model(model) {
             self.composer.stop_visible_sparkle();
         }
     }
