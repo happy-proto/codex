@@ -384,11 +384,13 @@ jobs:
         run: |
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib thread_name_refresh
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib refreshed_thread_name
-      - name: 验证分栏状态、共享底栏与星光配置
-        # 分栏回归与星光开关使用同一 TUI 测试产物，避免本地重型构建。
+      - name: 验证分栏状态、共享底栏与所有模型星光
+        # 分栏和星光回归使用同一 TUI 测试产物，避免本地重型构建。
         if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
-        run: ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib workspace_ -- --test-threads=1
+        run: |
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib workspace_ -- --test-threads=1
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib sparkle -- --test-threads=1
       - name: 验证回合生成速度与本地持久化
         if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
