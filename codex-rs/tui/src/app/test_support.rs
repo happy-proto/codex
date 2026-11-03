@@ -155,6 +155,7 @@ pub(crate) async fn make_test_app() -> Box<App> {
         pane_resize: None,
         passive_link_drag: None,
         sidebar_press: None,
+        pending_side_composers: HashMap::new(),
         abandoned_side_threads: HashSet::new(),
         active_thread_id: None,
         primary_thread_id: None,
