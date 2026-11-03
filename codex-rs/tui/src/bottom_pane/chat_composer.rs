@@ -4434,7 +4434,7 @@ impl ChatComposer {
             .map(str::to_string)
     }
 
-    fn set_has_focus(&mut self, has_focus: bool) {
+    pub(super) fn set_has_focus(&mut self, has_focus: bool) {
         self.has_focus = has_focus;
     }
 
@@ -4653,69 +4653,19 @@ impl ChatComposer {
 }
 
 impl ChatComposer {
-    pub(crate) fn render_with_mask(&self, area: Rect, buf: &mut Buffer, mask_char: Option<char>) {
-        self.render_with_options(area, buf, mask_char, ComposerRenderOptions::default());
-    }
-
-    pub(crate) fn render_with_options(
+    fn render_footer_rows(
         &self,
-        area: Rect,
+        footer_rect: Rect,
+        popup_rect: Rect,
         buf: &mut Buffer,
-        mask_char: Option<char>,
         options: ComposerRenderOptions<'_>,
     ) {
-        let ComposerLayout {
-            status,
-            composer: composer_rect,
-            remote_images: remote_images_rect,
-            thumbnails,
-            textarea: textarea_rect,
-            popup: popup_rect,
-            footer: footer_rect,
-        } = self.layout_with_options(area, options);
-        self.render_status_surface(status, buf, options);
-        if self.popups.active.is_above_composer()
-            && options.command_popup_placement != CommandPopupPlacement::Hidden
-        {
-            let popup_rect = if options.command_popup_placement == CommandPopupPlacement::Overlay {
-                let rows_above_composer = composer_rect
-                    .y
-                    .saturating_sub(options.overlay_top.max(buf.area.y));
-                let height = self
-                    .popups
-                    .active
-                    .required_height(composer_rect.width, /*footer_total_height*/ 0)
-                    .min(rows_above_composer);
-                // Command and unified mention menus can render in a single row.
-                let height = if matches!(
-                    self.popups.active,
-                    ActivePopup::Command(_) | ActivePopup::MentionV2(_)
-                ) || height > 2
-                {
-                    height
-                } else {
-                    0
-                };
-                Rect::new(
-                    composer_rect.x,
-                    composer_rect.y - height,
-                    composer_rect.width,
-                    height,
-                )
-            } else {
-                popup_rect
-            };
-            // Overlay rows must erase both glyphs and styles from the transcript underneath.
-            ratatui::widgets::Clear.render(popup_rect, buf);
-            match &self.popups.active {
-                ActivePopup::Command(popup) => popup.render_ref(popup_rect, buf),
-                ActivePopup::MentionV2(popup) => popup.render_ref(popup_rect, buf),
-                ActivePopup::File(popup) => popup.render_ref(popup_rect, buf),
-                ActivePopup::Skill(popup) => popup.render_ref(popup_rect, buf),
-                ActivePopup::None => {
-                    unreachable!("only suggestion menus use above-composer placement")
-                }
+        if footer_rect.is_empty() {
+            if self.shortcuts_above_composer(options) {
+                let props = self.hint_footer_props(options);
+                super::shortcut_overlay::render(&props, inset_footer_hint_area(popup_rect), buf);
             }
+            return;
         }
         let transcript_hint_area = inset_footer_hint_area(footer_rect);
         let passive = self.passive_hints(options);
@@ -4841,6 +4791,90 @@ impl ChatComposer {
         if let Some((warning_area, line)) = warning_notice {
             line.render(warning_area, buf);
         }
+    }
+
+    pub(super) fn render_shared_footer(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        mut options: ComposerRenderOptions<'_>,
+    ) {
+        options.separate_status_line = true;
+        let (status, hints) = self.shared_footer_areas(area);
+        self.render_status_surface(status, buf, options);
+        self.render_footer_rows(hints, Rect::default(), buf, options);
+        if let Some(selection) = options.rendered_selection {
+            let mut selection = selection.borrow_mut();
+            selection.register(status, false);
+            selection.register(hints, false);
+        }
+    }
+
+    pub(crate) fn render_with_mask(&self, area: Rect, buf: &mut Buffer, mask_char: Option<char>) {
+        self.render_with_options(area, buf, mask_char, ComposerRenderOptions::default());
+    }
+
+    pub(crate) fn render_with_options(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        mask_char: Option<char>,
+        options: ComposerRenderOptions<'_>,
+    ) {
+        let ComposerLayout {
+            status,
+            composer: composer_rect,
+            remote_images: remote_images_rect,
+            thumbnails,
+            textarea: textarea_rect,
+            popup: popup_rect,
+            footer: footer_rect,
+        } = self.layout_with_options(area, options);
+        self.render_status_surface(status, buf, options);
+        if self.popups.active.is_above_composer()
+            && options.command_popup_placement != CommandPopupPlacement::Hidden
+        {
+            let popup_rect = if options.command_popup_placement == CommandPopupPlacement::Overlay {
+                let rows_above_composer = composer_rect
+                    .y
+                    .saturating_sub(options.overlay_top.max(buf.area.y));
+                let height = self
+                    .popups
+                    .active
+                    .required_height(composer_rect.width, /*footer_total_height*/ 0)
+                    .min(rows_above_composer);
+                // Command and unified mention menus can render in a single row.
+                let height = if matches!(
+                    self.popups.active,
+                    ActivePopup::Command(_) | ActivePopup::MentionV2(_)
+                ) || height > 2
+                {
+                    height
+                } else {
+                    0
+                };
+                Rect::new(
+                    composer_rect.x,
+                    composer_rect.y - height,
+                    composer_rect.width,
+                    height,
+                )
+            } else {
+                popup_rect
+            };
+            // Overlay rows must erase both glyphs and styles from the transcript underneath.
+            ratatui::widgets::Clear.render(popup_rect, buf);
+            match &self.popups.active {
+                ActivePopup::Command(popup) => popup.render_ref(popup_rect, buf),
+                ActivePopup::MentionV2(popup) => popup.render_ref(popup_rect, buf),
+                ActivePopup::File(popup) => popup.render_ref(popup_rect, buf),
+                ActivePopup::Skill(popup) => popup.render_ref(popup_rect, buf),
+                ActivePopup::None => {
+                    unreachable!("only suggestion menus use above-composer placement")
+                }
+            }
+        }
+        self.render_footer_rows(footer_rect, popup_rect, buf, options);
         if let Some(selection) = options.rendered_selection
             && !self.popup_active()
             && options.footer.is_none_or(|footer| !footer.is_interactive)
