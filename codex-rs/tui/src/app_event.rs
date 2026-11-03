@@ -1338,6 +1338,10 @@ pub(crate) enum AppEvent {
     FollowTranscript,
 
     InsertHistoryCell(Box<dyn HistoryCell>),
+    SideProjectionEvent {
+        route: crate::app_event_sender::SideProjectionRoute,
+        event: Box<AppEvent>,
+    },
     /// FIFO barrier after the completed turn's history insertions.
     TurnTipReady {
         thread_id: ThreadId,
