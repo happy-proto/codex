@@ -251,6 +251,7 @@ impl ThreadEventStore {
         match notification.as_ref() {
             ServerNotification::TurnStarted(n) => {
                 self.update_workspace_turn(&n.turn);
+                self.workspace_status.restart_generation_observation();
             }
             ServerNotification::TurnCompleted(n) => {
                 if self
