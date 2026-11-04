@@ -1,5 +1,6 @@
 use super::sanitize_user_agent;
 use super::*;
+use codex_http_client::OutboundProxyPolicy;
 use core_test_support::skip_if_no_network;
 use pretty_assertions::assert_eq;
 use std::io;
