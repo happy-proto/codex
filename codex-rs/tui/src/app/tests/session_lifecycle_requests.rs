@@ -4614,7 +4614,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
     let params = &forks[0];
     assert_eq!(params["threadId"], serde_json::json!(original.to_string()));
     assert_eq!(params["cwd"], serde_json::json!(trusted));
-    assert_eq!(params["approvalsReviewer"].as_str(), Some("auto_review"));
+    assert!(params["approvalsReviewer"].is_null());
     assert_eq!(params["developerInstructions"], "destination policy");
     assert_eq!(params["deferGoalContinuation"], serde_json::json!(true));
     assert_eq!(&params["runtimeWorkspaceRoots"], &json!([trusted]));
