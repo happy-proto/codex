@@ -5136,6 +5136,16 @@ async fn change_directory_scenario() -> Result<()> {
     app.agent_navigation.upsert(
         child, /*agent_nickname*/ None, /*agent_role*/ None, /*is_closed*/ false,
     );
+    // Forks inherit the server's reviewer, so persist the same explicit choice there.
+    assert!(
+        server
+            .thread_settings_update(codex_app_server_protocol::ThreadSettingsUpdateParams {
+                thread_id: original.to_string(),
+                approvals_reviewer: Some(codex_app_server_protocol::ApprovalsReviewer::AutoReview),
+                ..Default::default()
+            })
+            .await?
+    );
     app.set_approvals_reviewer_in_app_and_widget(ApprovalsReviewer::AutoReview);
     app.runtime_approvals_reviewer_override = Some(ApprovalsReviewer::AutoReview);
     app.runtime_permission_profile_override =
