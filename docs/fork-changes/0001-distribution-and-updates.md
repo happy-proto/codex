@@ -18,6 +18,8 @@
 **Breaking change：维护工具不再支持 Python 3.14 及更早版本的裸 `python3` 执行。**
 维护者安装 uv 后直接执行 `scripts/fork/<工具>.py`，或使用 `uv run --script scripts/fork/<工具>.py`；
 最终用户的 Shell 安装入口及其系统依赖不变，不要求安装 uv 或 Python 3.15。
+构建及 Rust 测试任务先移除 runner 镜像预装且不参与本项目构建的 Android、.NET SDK，
+并记录清理前后的磁盘空间，避免低可用容量的镜像在恢复缓存和编译时耗尽磁盘。
 两个平台均在 `ubuntu-24.04` 构建。macOS 目标为 `aarch64-apple-darwin`，
 由 cargo-zigbuild、Zig 和校验摘要的 macOS SDK 链接，使用 rcodesign 添加 ad-hoc
 hardened runtime 签名并保留上游 entitlements。打包前检查 ARM64 架构和重复动态库加载命令，
