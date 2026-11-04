@@ -27,6 +27,9 @@ openai_proxy_url = "http://127.0.0.1:7897"
 - `login/src/auth/default_client.rs` 与 `http-client/src/route_aware_client_pool.rs`：显式路由不进入旧的默认代理或自定义 CA 回退分支。
 - `cli/src/doctor.rs`：Responses WebSocket 检查使用同一模型网络工厂；普通 HTTP 可达性检查仍遵循普通网络配置。
 
+模型请求及 WebSocket 诊断将模型网络工厂传入上游的 provider 请求解析流程，
+保留运行时认证、账户路由和禁止重定向策略；不绕过解析流程直接构造传输。
+
 定向测试覆盖代理优先级、工厂隔离、无效配置、凭据脱敏、HTTP 请求实际抵达代理，以及公开 WebSocket 连接器经 HTTP/HTTPS CONNECT 建立 TLS 握手：
 
 ```sh
