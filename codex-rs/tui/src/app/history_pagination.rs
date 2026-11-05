@@ -234,7 +234,7 @@ impl App {
         if self.chat_widget.thread_id() != Some(thread_id)
             && let Some(pane) = self.side_companions.get_mut(&thread_id)
         {
-            for index in hidden_transcript_indices(&pane.cells, persisted_user_cells) {
+            for index in hidden_transcript_indices(&pane.cells, persisted_user_cells, hidden_item_ids) {
                 pane.splice_older_cells(index..index + 1, Vec::new());
                 pane.view.restart_search();
             }
