@@ -24,7 +24,6 @@ use crossterm::event::MouseEventKind::Up;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Rect;
-use ratatui::style::Stylize;
 
 const GAP: u16 = 1;
 
