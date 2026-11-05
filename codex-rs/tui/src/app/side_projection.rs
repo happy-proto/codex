@@ -37,13 +37,18 @@ impl App {
             widget.handle_server_notification(notification.clone(), None);
             widget.sync_side_activity(&mut companion.bottom);
             if let ServerNotification::ItemCompleted(completed) = notification
-                && matches!(completed.item, ThreadItemPayload::CommandExecution { .. })
+                && matches!(
+                    completed.item.payload,
+                    ThreadItemPayload::CommandExecution { .. }
+                )
             {
                 // Follow already queued history inserts. The widget defers exec ends while an
                 // answer streams, but the parked command must stop looking active immediately.
                 self.app_event_tx.send(AppEvent::SideProjectionEvent {
                     route: companion.route,
-                    event: Box::new(AppEvent::SideCommandCompleted(completed.item.clone())),
+                    event: Box::new(AppEvent::SideCommandCompleted(
+                        completed.item.payload.clone(),
+                    )),
                 });
             }
         }
