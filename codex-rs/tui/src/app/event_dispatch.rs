@@ -970,14 +970,11 @@ impl App {
                         bottom.set_workspace_status(channel.store.lock().await.workspace_status());
                     }
                     self.transcript_view.sync_history_tail(&self.transcript_cells);
-                    let mut answer = None;
                     if let Some(stream) = stream {
                         let cells = &mut self.transcript_cells;
                         let (start, replacement): (_, Arc<dyn HistoryCell>) = match stream {
-                            CapturedSideStream::Answer { cell, item } => {
-                                let start = trailing_run_start::<history_cell::AgentMessageCell>(cells);
-                                answer = item.map(|item| super::side_companion::SideAnswer::new(item, start));
-                                (start, cell)
+                            CapturedSideStream::Answer(cell) => {
+                                (trailing_run_start::<history_cell::AgentMessageCell>(cells), cell)
                             }
                             CapturedSideStream::Plan(cell) => {
                                 (trailing_run_start::<history_cell::ProposedPlanStreamCell>(cells), cell)
@@ -995,10 +992,8 @@ impl App {
                         commit_ticks,
                         bottom,
                         display,
-                        parked_tail: self.transcript_cells.len(),
                         cells: std::mem::take(&mut self.transcript_cells),
                         view: std::mem::take(&mut self.transcript_view),
-                        answer,
                     });
                 }
             }
