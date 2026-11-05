@@ -5110,16 +5110,6 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
     app.agent_navigation.upsert(
         child, /*agent_nickname*/ None, /*agent_role*/ None, /*is_closed*/ false,
     );
-    // Forks inherit the server's reviewer, so persist the same explicit choice there.
-    assert!(
-        server
-            .thread_settings_update(codex_app_server_protocol::ThreadSettingsUpdateParams {
-                thread_id: original.to_string(),
-                approvals_reviewer: Some(codex_app_server_protocol::ApprovalsReviewer::AutoReview),
-                ..Default::default()
-            })
-            .await?
-    );
     app.set_approvals_reviewer_in_app_and_widget(ApprovalsReviewer::AutoReview);
     app.runtime_approvals_reviewer_override = Some(ApprovalsReviewer::AutoReview);
     app.runtime_permission_profile_override =
@@ -5201,7 +5191,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
     let params = &forks[0];
     assert_eq!(params["threadId"], serde_json::json!(original.to_string()));
     assert_eq!(params["cwd"], serde_json::json!(trusted));
-    assert!(params["approvalsReviewer"].is_null());
+    assert_eq!(params["approvalsReviewer"].as_str(), Some("auto_review"));
     assert_eq!(params["developerInstructions"], "destination policy");
     assert_eq!(params["deferGoalContinuation"], serde_json::json!(true));
     assert_eq!(&params["runtimeWorkspaceRoots"], &json!([trusted]));
