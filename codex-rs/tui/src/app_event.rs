@@ -1271,6 +1271,8 @@ pub(crate) enum AppEvent {
     FollowTranscript,
 
     InsertHistoryCell(Box<dyn HistoryCell>),
+    // A pane-local history revision, carried only inside SideProjectionEvent.
+    SideCommandCompleted(codex_app_server_protocol::ThreadItemPayload),
     SideProjectionEvent {
         route: crate::app_event_sender::SideProjectionRoute,
         event: Box<AppEvent>,

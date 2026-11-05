@@ -1089,6 +1089,7 @@ impl App {
                 self.handle_side_projection_event(route, *event);
                 tui.frame_requester().schedule_frame();
             }
+            AppEvent::SideCommandCompleted(_) => {}
             AppEvent::TurnTipReady { thread_id, turn_id } => {
                 self.turn_tips.ready(thread_id, &turn_id, self.transcript_cells.last());
                 tui.frame_requester().schedule_frame();
