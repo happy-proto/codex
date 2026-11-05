@@ -335,6 +335,7 @@ async fn generation_speed_recovery_clears_pre_crash_statistics() -> anyhow::Resu
         .recover_turn_if_idle(codex_core::RecoverTurnRequest {
             turn_id: "recovered-turn".into(),
             thread_settings: Default::default(),
+            prompt_cache_ttl: None,
             trace: None,
             cyber_access_program: None,
         })
