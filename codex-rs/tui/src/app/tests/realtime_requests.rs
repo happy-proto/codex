@@ -49,6 +49,7 @@ async fn workspace_background_voice_close_keeps_its_last_caption_through_queued_
             commit_ticks: false,
             bottom: pending.bottom,
             display: crate::app_event::CapturedSideDisplay {
+                rendered_completion_turn_ids: Default::default(),
                 active: None,
                 auxiliary: Vec::new(),
             },

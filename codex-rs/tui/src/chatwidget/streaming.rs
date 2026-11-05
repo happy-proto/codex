@@ -7,7 +7,6 @@ use super::*;
 #[cfg(test)]
 use crate::app_event::CapturedSideDisplay;
 use crate::app_event::CapturedSideStream;
-use crate::app_event::CapturedSideWork;
 use crate::markdown_render::ListSpacing;
 
 fn streamed_message_matches_completed(streamed: &str, completed: &str) -> bool {
@@ -302,23 +301,22 @@ impl ChatWidget {
         Box<crate::bottom_pane::BottomPane>,
     ) {
         self.flush_completed_tool_activity();
-        let visualizations = self.thread_id.and_then(|id| {
-            crate::inline_visualization::InlineVisualizationContext::from_config(&self.config, id)
-        });
         let stream = if let Some(controller) = &self.stream_controller {
             let source = controller.source_snapshot();
             let markdown = parse_assistant_markdown(&source, self.config.cwd.as_path());
-            let cell = history_cell::AgentMarkdownCell::from_parsed_message(
+            let context = self.thread_id.and_then(|id| {
+                crate::inline_visualization::InlineVisualizationContext::from_config(
+                    &self.config,
+                    id,
+                )
+            });
+            let cell = history_cell::AgentMarkdownCell::new_with_inline_visualizations(
                 markdown.visible_markdown,
-                source,
                 &self.config.cwd,
-                visualizations.clone(),
-                &[],
-            );
-            Some(CapturedSideStream::Answer {
-                cell: Arc::new(cell),
-                item: self.transcript.active_streamed_agent_message.clone(),
-            })
+                context,
+            )
+            .with_copy_source(Some(source));
+            Some(CapturedSideStream::Answer(Arc::new(cell)))
         } else if self.plan_stream_controller.is_some() {
             Some(CapturedSideStream::Plan(Arc::new(
                 history_cell::new_proposed_plan(
@@ -333,7 +331,7 @@ impl ChatWidget {
             .transcript
             .take_active_cell()
             .filter(|cell| match &stream {
-                Some(CapturedSideStream::Answer { .. }) => {
+                Some(CapturedSideStream::Answer(_)) => {
                     !cell.as_any().is::<history_cell::StreamingAgentTailCell>()
                 }
                 Some(CapturedSideStream::Plan(_)) => {
@@ -342,31 +340,11 @@ impl ChatWidget {
                 None => true,
             });
         let display = CapturedSideDisplay {
-            rendered_completion_turn_ids: self.turn_lifecycle.rendered_completion_turn_ids.clone(),
+            rendered_completion_turn_ids: Default::default(),
             active,
-            last_completed_agent_message: self.transcript.last_completed_agent_message.clone(),
             auxiliary: self
                 .active_cell_transcript_hyperlink_lines(width)
                 .unwrap_or_default(),
-            draft: {
-                let snapshot = self.bottom_pane.composer_recovery_snapshot();
-                let mut draft = Box::new(crate::bottom_pane::TextArea::new());
-                draft.set_text_with_elements(&snapshot.text, &snapshot.text_elements);
-                draft
-            },
-            status: self.status_line_text(),
-            work: self
-                .last_turn_id()
-                .filter(|_| self.is_agent_turn_running())
-                .map(|turn_id| {
-                    CapturedSideWork::new(
-                        turn_id.to_owned(),
-                        self.new_status_indicator(),
-                        self.bottom_pane.status_elapsed().unwrap_or_default(),
-                    )
-                }),
-            cwd: self.config.cwd.clone(),
-            visualizations,
         };
         (stream, display, self.bottom_pane.take_for_side())
     }
