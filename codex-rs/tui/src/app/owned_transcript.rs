@@ -269,7 +269,6 @@ impl App {
                     frame,
                     self.divider_drag,
                     divider_hovered,
-                    &frames,
                 );
             }
             self.paint_centered_dialog(frame);

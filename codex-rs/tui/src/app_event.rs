@@ -297,10 +297,7 @@ pub(crate) struct AgentPickerThreadRefresh {
 /// Source-backed replacement for the outgoing widget's width-bound streaming rows.
 #[derive(Debug)]
 pub(crate) enum CapturedSideStream {
-    Answer {
-        cell: Arc<crate::history_cell::AgentMarkdownCell>,
-        item: Option<(String, String)>,
-    },
+    Answer(Arc<crate::history_cell::AgentMarkdownCell>),
     Plan(Arc<crate::history_cell::ProposedPlanCell>),
 }
 
@@ -310,37 +307,6 @@ pub(crate) struct CapturedSideDisplay {
     pub(crate) rendered_completion_turn_ids: std::collections::HashSet<String>,
     pub(crate) active: Option<Box<dyn HistoryCell>>,
     pub(crate) auxiliary: Vec<crate::terminal_hyperlinks::HyperlinkLine>,
-    pub(crate) draft: Box<crate::bottom_pane::TextArea>,
-    pub(crate) status: Option<String>,
-    pub(crate) work: Option<CapturedSideWork>,
-    pub(crate) last_completed_agent_message: Option<(String, String)>,
-    pub(crate) cwd: AbsolutePathBuf,
-    pub(crate) visualizations: Option<crate::inline_visualization::InlineVisualizationContext>,
-}
-
-/// The inactive composer keeps counting from the time already spent in the active pane.
-#[derive(Debug)]
-pub(crate) struct CapturedSideWork {
-    pub(crate) turn_id: String,
-    pub(crate) row: Box<crate::status_indicator_widget::StatusIndicatorWidget>,
-    pub(crate) timer: crate::status_indicator_widget::StatusTimer,
-}
-
-impl CapturedSideWork {
-    pub(crate) fn new(
-        turn_id: String,
-        mut row: crate::status_indicator_widget::StatusIndicatorWidget,
-        elapsed: Duration,
-    ) -> Self {
-        let mut timer = crate::status_indicator_widget::StatusTimer::default();
-        timer.reset(elapsed);
-        row.set_interrupt_hint_visible(/*visible*/ false);
-        Self {
-            turn_id,
-            row: Box::new(row),
-            timer,
-        }
-    }
 }
 
 #[allow(clippy::large_enum_variant)]
