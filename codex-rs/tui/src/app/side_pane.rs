@@ -6,13 +6,10 @@ use super::side::SideCompanion;
 use crate::bottom_pane::CommandPopupPlacement;
 use crate::bottom_pane::ComposerGap;
 use crate::bottom_pane::ComposerRenderOptions;
-use crate::bottom_pane::inset_footer_hint_area;
 use crate::custom_terminal::Frame;
 use crate::legacy_core::config::edit::ConfigEdit;
 use crate::legacy_core::config::edit::ConfigEditsBuilder;
-use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
 use crate::render::renderable::Renderable;
-use crate::tui::FrameRequester;
 use crate::tui::Tui;
 use crate::tui::TuiEvent;
 use codex_protocol::ThreadId;
@@ -28,9 +25,6 @@ use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
-use ratatui::widgets::StatefulWidgetRef;
-use ratatui::widgets::Widget;
-use std::time::Duration;
 
 const GAP: u16 = 1;
 
@@ -120,6 +114,7 @@ fn split_layout(app: &App, tui: &Tui, area: Rect) -> Option<SidePaneLayout> {
     if !app.side_companions.contains_key(&passive_thread) {
         return None;
     }
+    let screen = area;
     let width = area.width.saturating_sub(2);
     let hint = app.prompt_navigation_footer(width).or_else(|| {
         app.transcript_view.footer_with_navigation(
@@ -145,7 +140,7 @@ fn split_layout(app: &App, tui: &Tui, area: Rect) -> Option<SidePaneLayout> {
         .divider_drag
         .filter(|drag| {
             !drag.guide_only
-                && drag.screen == area
+                && drag.screen == screen
                 && drag.passive_thread == passive_thread
                 && app.conversation_focus_available(tui)
         })
@@ -414,7 +409,6 @@ impl SidePaneLayout {
         frame: &mut Frame<'_>,
         drag: Option<DividerDrag>,
         highlight_divider: bool,
-        frames: &FrameRequester,
     ) {
         let area = self.passive;
         let completion = companion.cells.last().and_then(|cell| {
@@ -436,7 +430,6 @@ impl SidePaneLayout {
                     .max(8)
                     .min(area.height),
             ),
-            extend_composer_background_left: area.x > 0,
             command_popup_placement: CommandPopupPlacement::Hidden,
             ..Default::default()
         });

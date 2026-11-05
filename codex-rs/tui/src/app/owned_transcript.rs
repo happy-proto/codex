@@ -270,7 +270,6 @@ impl App {
                     frame,
                     self.divider_drag,
                     highlight_divider,
-                    &frames,
                 );
             }
             self.paint_centered_dialog(frame);
