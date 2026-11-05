@@ -23,7 +23,7 @@ parent-29
   New activity · esc latest
 
 100 columns, reopened
-parent-24                                                      │ Side chat  ×                    +
+parent-24                                                      │child-24
                                                                │
 parent-25                                                      │child-25
                                                                │
@@ -33,17 +33,17 @@ parent-27                                                      │child-27
                                                                │
 parent-28                                                      │child-28
                                                                │
-parent-29                                                      │child-29
                                                                │
+  Worked for <1s                                               │• Ready
                                                                │
                                                                │
 › parent draft-                                                │› child draft!
                                                                │
-  GPT-6.2-Sol default                                          │  GPT-6.2-Sol default · Agent
-                                                               │
+  GPT-6.2-Sol default · Agent
+                                                Side from main thread · ⌃/ to switch · ⌃c to close
 
 99 columns, reopened
- Side chat            ×                                                                         +
+child-24
 
 child-25
 

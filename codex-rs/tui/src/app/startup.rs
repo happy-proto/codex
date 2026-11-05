@@ -1615,18 +1615,15 @@ See the Codex keymap documentation for supported actions and examples."
                 }
                 let thread_name_poll_deadline = app.thread_name_poll_deadline();
                 let control = select! {
-<<<<<<< HEAD
                     // Leave the previous frame visible and let other app work run between batches.
                     Some(transition) = std::future::ready(app.pending_input_drain), if app.pending_input_drain.is_some() => {
                         app.finish_thread_input_drain(tui, transition);
                         AppRunControl::Continue
                     }
-=======
                 _ = generation_speed_poll.tick(), if app.has_live_generation_speed_target() => {
                     app.refresh_live_generation_speed();
                     AppRunControl::Continue
                 }
->>>>>>> c4dc0dad21 (fix(tui): preserve native activity feedback in docked panes)
                     result = async {
                         match app.daemon_restart.as_mut() {
                             Some(task) => task.await,
