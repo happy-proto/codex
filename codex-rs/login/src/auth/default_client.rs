@@ -296,9 +296,7 @@ fn create_client_for_route_with_builder(
             } else {
                 pool.with_direct_proxy()
             };
-        } else if legacy_fallback
-            && http_client_factory.uses_transport_default_proxy()
-        {
+        } else if legacy_fallback && http_client_factory.uses_transport_default_proxy() {
             pool = pool.with_legacy_custom_ca_fallback();
         }
         return Ok(pool.into_client());
