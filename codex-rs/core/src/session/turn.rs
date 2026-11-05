@@ -131,6 +131,7 @@ use codex_skills::build_skill_name_counts;
 use codex_skills::collect_explicit_skill_mentions;
 use codex_skills::tool_kind_for_path;
 use codex_skills_extension::HostSkillPrompts;
+use codex_skills_extension::HostSkillsSnapshot;
 use codex_skills_extension::InjectedHostSkillPrompts;
 use codex_skills_extension::validate_required_skills;
 use codex_thread_store::PersistContext;
@@ -1325,8 +1326,11 @@ async fn build_explicit_skill_injections(
         turn_context.originator.clone(),
         Some(turn_context.turn_metadata_state.clone()),
     );
-    let environments = step_context.environments();
-    let skills_snapshot = sess.host_skills_for_step(turn_context, &environments).await;
+    let Some(skills_snapshot) =
+        HostSkillsSnapshot::for_step(&step_context.extension_data, &turn_context.extension_data)
+    else {
+        return (Vec::new(), HashSet::new());
+    };
     let skills_outcome = skills_snapshot.outcome();
     let connector_slug_counts = build_connector_slug_counts(available_connectors);
     let skill_name_counts_lower =

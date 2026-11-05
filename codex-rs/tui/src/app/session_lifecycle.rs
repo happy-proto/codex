@@ -847,6 +847,7 @@ impl App {
                 thread_id: old,
                 stream: None,
                 display: crate::app_event::CapturedSideDisplay {
+                    rendered_completion_turn_ids: Default::default(),
                     active: None,
                     auxiliary: Vec::new(),
                 },
