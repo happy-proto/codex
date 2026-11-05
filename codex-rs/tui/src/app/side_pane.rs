@@ -10,12 +10,10 @@ use super::sidebar::SidebarLayout;
 use crate::bottom_pane::CommandPopupPlacement;
 use crate::bottom_pane::ComposerGap;
 use crate::bottom_pane::ComposerRenderOptions;
-use crate::bottom_pane::inset_footer_hint_area;
 use crate::custom_terminal::Frame;
 use crate::legacy_core::config::edit::ConfigEdit;
 use crate::legacy_core::config::edit::ConfigEditsBuilder;
 use crate::render::renderable::Renderable;
-use crate::tui::FrameRequester;
 use crate::tui::Tui;
 use crate::tui::TuiEvent;
 use codex_protocol::ThreadId;
@@ -468,7 +466,6 @@ impl SidePaneLayout {
                     .max(8)
                     .min(area.height),
             ),
-            extend_composer_background_left: area.x > 0,
             command_popup_placement: CommandPopupPlacement::Hidden,
             ..Default::default()
         });
