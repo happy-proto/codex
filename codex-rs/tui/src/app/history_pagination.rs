@@ -274,12 +274,16 @@ impl App {
                     self.side_companions.get_mut(&thread_id)
                     && self.chat_widget.thread_id() != Some(thread_id)
                 {
-                    history_cell::FinalMessageSeparator::from_turn_once(
-                        turn,
-                        &mut pane.display.rendered_completion_turn_ids,
-                        /*fallback_elapsed*/ None,
-                        /*fallback_completed_at*/ None,
-                    )
+                    if let Some(projection) = pane.projection.as_mut() {
+                        projection.completion_cell(turn, Some(ReplayKind::ResumeInitialMessages))
+                    } else {
+                        history_cell::FinalMessageSeparator::from_turn_once(
+                            turn,
+                            &mut pane.display.rendered_completion_turn_ids,
+                            /*fallback_elapsed*/ None,
+                            /*fallback_completed_at*/ None,
+                        )
+                    }
                 } else {
                     self.chat_widget
                         .completion_cell(turn, Some(ReplayKind::ResumeInitialMessages))
