@@ -278,7 +278,6 @@ mod server_version_notice;
 mod session_lifecycle;
 mod session_picker;
 mod side;
-mod side_companion;
 mod side_focus;
 mod side_pane;
 mod sidebar;
@@ -318,10 +317,10 @@ use self::loaded_threads::find_loaded_subagent_threads_for_primary;
 use self::pending_interactive_replay::PendingInteractiveReplayState;
 pub(crate) use self::platform_actions::WindowsSandboxHost;
 use self::platform_actions::*;
+use self::side::SideCompanion;
 use self::side::SideParentStatus;
 use self::side::SideParentStatusChange;
 use self::side::SideThreadState;
-use self::side_companion::SideCompanion;
 use self::startup_prompts::*;
 use self::thread_events::*;
 
@@ -1119,10 +1118,9 @@ impl App {
                     .side_companions
                     .get_mut(&current.passive_thread)
                     .and_then(|pane| {
-                        let draft = &mut pane.display.draft;
-                        draft
-                            .handle_mouse(*press, Default::default())
-                            .then(|| draft.cursor())
+                        pane.bottom
+                            .handle_composer_mouse(*press)
+                            .then(|| pane.bottom.composer_cursor())
                     });
                 if let Err(err) = self.toggle_side_conversation(tui, app_server).await {
                     self.chat_widget.add_error_message(err.to_string());
