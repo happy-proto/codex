@@ -5270,6 +5270,34 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         1,
         "{finished}"
     );
+    app.enqueue_thread_notification(
+        parent,
+        ServerNotification::ItemCompleted(
+            codex_app_server_protocol::ItemCompletedNotification::new(
+                parent.to_string(),
+                turn.into(),
+                ThreadItemPayload::AgentMessage {
+                    id: "after-command".into(),
+                    text: "Command finished.".into(),
+                    phase: None,
+                    memory_citation: None,
+                    delivery: None,
+                    questions: None,
+                },
+                None,
+                0,
+            ),
+        ),
+    )
+    .await?;
+    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
+    let settled = side_frame(&mut app, &mut tui, size)?;
+    assert_eq!(
+        settled.matches("echo sidebar-check").count(),
+        1,
+        "{settled}"
+    );
+    assert_eq!(settled.matches("Command finished.").count(), 1, "{settled}");
     // Check feedback after capturing the layout snapshots and before the clipboard toast appears.
     app.select_agent_thread(&mut tui, &mut app_server, side_thread_id)
         .await?;
