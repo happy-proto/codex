@@ -36,6 +36,16 @@ impl App {
             // Sender scoping and queue suppression provide the controller boundary.
             widget.handle_server_notification(notification.clone(), None);
             widget.sync_side_activity(&mut companion.bottom);
+            if let ServerNotification::ItemCompleted(completed) = notification
+                && matches!(completed.item, ThreadItemPayload::CommandExecution { .. })
+            {
+                // Follow already queued history inserts. The widget defers exec ends while an
+                // answer streams, but the parked command must stop looking active immediately.
+                self.app_event_tx.send(AppEvent::SideProjectionEvent {
+                    route: companion.route,
+                    event: Box::new(AppEvent::SideCommandCompleted(completed.item.clone())),
+                });
+            }
         }
     }
 
@@ -72,7 +82,68 @@ impl App {
         let mut consolidated = false;
         match event {
             AppEvent::InsertHistoryCell(cell) => {
+                if let Some(exec) = cell.as_any().downcast_ref::<crate::exec_cell::ExecCell>()
+                    && !exec.is_active()
+                    && exec.iter_calls().all(|call| {
+                        companion.cells.iter().any(|existing| {
+                            existing
+                                .as_any()
+                                .downcast_ref::<crate::exec_cell::ExecCell>()
+                                .is_some_and(|existing| {
+                                    existing.iter_calls().any(|known| {
+                                        known.call_id == call.call_id && known.output.is_some()
+                                    })
+                                })
+                        })
+                    })
+                {
+                    // The stream's deferred exec end has caught up with its live revision.
+                    return;
+                }
                 companion.cells.push(Arc::from(cell));
+            }
+            AppEvent::SideCommandCompleted(ThreadItemPayload::CommandExecution {
+                id,
+                status,
+                source,
+                aggregated_output,
+                exit_code,
+                duration_ms,
+                ..
+            }) => {
+                if let Some((index, exec)) =
+                    companion
+                        .cells
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .find_map(|(index, cell)| {
+                            let exec =
+                                cell.as_any().downcast_ref::<crate::exec_cell::ExecCell>()?;
+                            exec.iter_calls()
+                                .any(|call| call.call_id == id)
+                                .then(|| (index, exec.clone()))
+                        })
+                {
+                    let mut exec = exec;
+                    exec.complete_call(
+                        &id,
+                        crate::exec_cell::CommandOutput::from_execution(
+                            status,
+                            exit_code,
+                            source,
+                            aggregated_output,
+                        ),
+                        std::time::Duration::from_millis(
+                            duration_ms.unwrap_or_default().max(0) as u64
+                        ),
+                    );
+                    let cell: Arc<dyn HistoryCell> = Arc::new(exec);
+                    companion
+                        .view
+                        .replace_range(&companion.cells, index..index + 1, &cell);
+                    companion.cells[index] = cell;
+                }
             }
             AppEvent::ConsolidateAgentMessage {
                 source,
