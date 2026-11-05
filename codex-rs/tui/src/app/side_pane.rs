@@ -28,8 +28,6 @@ use crossterm::event::MouseEventKind::Up;
 use ratatui::layout::Constraint;
 use ratatui::layout::Layout;
 use ratatui::layout::Rect;
-use ratatui::widgets::StatefulWidgetRef;
-use std::time::Duration;
 
 pub(super) const GAP: u16 = 1;
 pub(super) const MIN_SPLIT_WIDTH: u16 = 100;

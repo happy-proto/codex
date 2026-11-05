@@ -11,7 +11,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 use crate::inline_visualization::InlineVisualizationContext;
