@@ -4144,7 +4144,15 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         }
         side_frame(&mut app, &mut tui, wide)?;
         assert!(!app.key_chord_matcher.is_pending());
-        let columns: Vec<_> = (0..wide.height).map(|y| divider_at(&tui, y)).collect();
+        let footer = side_pane::layout(&app, &tui, wide.into())
+            .expect("side pane layout")
+            .footer;
+        let columns: Vec<_> = (0..footer.y).map(|y| divider_at(&tui, y)).collect();
+        for y in footer.y..wide.height {
+            assert!(
+                (0..wide.width).all(|x| tui.terminal.previous_buffer()[(x, y)].symbol() != "│")
+            );
+        }
         previews.push(*columns.iter().min().unwrap());
         assert_eq!(std::fs::read(&path).ok(), before);
         if let Some(area) = image {
@@ -4320,6 +4328,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     assert_eq!(app.current_displayed_thread_id(), Some(side_thread_id));
     let delta = agent_message_delta_notification(parent, turn, "reply", "while unfocused");
     app.enqueue_thread_notification(parent, delta).await?;
+    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     let streaming = side_frame(&mut app, &mut tui, size)?;
     let item = ThreadItemPayload::AgentMessage {
         moderation: None,
@@ -4343,6 +4352,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         }),
     )
     .await?;
+    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     let completed = side_frame(&mut app, &mut tui, size)?;
     // Normalize the changing timer while preserving any shortcut hint.
     let visible_turn = |frame: &str| {
@@ -4437,6 +4447,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
         ),
     )
     .await?;
+    drain_app_events(&mut app, &mut tui, &mut app_server, &mut app_event_rx).await?;
     let finished = side_frame(&mut app, &mut tui, size)?;
     let (_, after_command) = finished
         .split_once("Ran echo sidebar-check")
