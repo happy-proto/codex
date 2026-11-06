@@ -30,16 +30,16 @@ parent-26                                                                       
                                                                                                                                                                                                      │
 parent-27                                                                                                                                                                                            │
                                                                                                                                                                                                      │
-parent-28                                                                                                                                                                                            │
                                                                                                                                                                                                      │
-parent-29                                                                                                                                                                                            │
+  Worked for <1s                                                                                                                                                                                     │
                                                                                                                                                                                                      │
-                                                                                                                                                                                                     │
-                                                                                                                                                                                                     │
-› xparent draft-!                                                                                                                                                                                    │› xchild draft!
+                                                                                                                                                                                                     │• Working (<elapsed> • esc to interrupt)
+› xparent draft-!                                                                                                                                                                                    │
   second line                                                                                                                                                                                        │
-  GPT-6.1-Sol default                                                                                                                                                                                │  GPT-6.1-Sol default · Agent
-                                                                                                                                                                                                     │  tab to queue message                            Side from main thread · ⌃/ to switch · ⌃c to close
+  last line                                                                                                                                                                                          │› xchild draft!
+                                                                                                                                                                                                     │
+  GPT-6.1-Sol default · Agent
+  tab to queue message                                                                                                                                                                                                                                  Side from main thread · ⌃/ to switch · ⌃c to close
 Equalized
 parent-24                                                                                          │ Side chat×                                                                                      +
                                                                                                    │• unfinished answer
@@ -49,13 +49,13 @@ parent-26                                                                       
                                                                                                    │
 parent-27                                                                                          │
                                                                                                    │
-parent-28                                                                                          │
                                                                                                    │
-parent-29                                                                                          │
+  Worked for <1s                                                                                   │
                                                                                                    │
-                                                                                                   │
-                                                                                                   │
-› xparent draft-!                                                                                  │› xchild draft!
+                                                                                                   │• Working (<elapsed> • esc to interrupt)
+› xparent draft-!                                                                                  │
   second line                                                                                      │
-  GPT-6.1-Sol default                                                                              │  GPT-6.1-Sol default · Agent
-                                                                                                   │  tab to queue message                          Side from main thread · ⌃/ to switch · ⌃c to close
+  last line                                                                                        │› xchild draft!
+                                                                                                   │
+  GPT-6.1-Sol default · Agent
+  tab to queue message                                                                                                                              Side from main thread · ⌃/ to switch · ⌃c to close
