@@ -756,7 +756,13 @@ impl Session {
             regular_output.is_some() && turn_context.terminal_error.lock().await.is_none();
         let finishing = CancellationToken::new();
         let finish_recording = finishing.clone().drop_guard();
-        let (turn_state, unadmitted_task, mut pending_input, outcome_handoff, generation_speed_reporter) = {
+        let (
+            turn_state,
+            unadmitted_task,
+            mut pending_input,
+            outcome_handoff,
+            generation_speed_reporter,
+        ) = {
             let mut active = self.active_turn.lock().await;
             let active_turn = active.as_mut()?;
             if !Arc::ptr_eq(&active_turn.task.as_ref()?.turn_context, &turn_context) {
