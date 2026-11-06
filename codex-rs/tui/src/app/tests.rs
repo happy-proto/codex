@@ -4048,7 +4048,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     }
     let zoom = KeyEvent::from(KeyCode::Char('z'));
     // The synthetic live turn starts at the epoch; keep wall-clock time out of snapshots.
-    let elapsed = regex::Regex::new(r"Working \([^•\n]* •")?;
+    let elapsed = regex_lite::Regex::new(r"Working \([^•\n]* •")?;
     let keyboard_frame = |frame: String| {
         elapsed
             .replace_all(&frame, "Working (<elapsed> •")
