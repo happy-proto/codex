@@ -4785,10 +4785,9 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     let resizing = side_frame(&mut app, &mut tui, even)?;
     let hint = resizing
         .lines()
-        .filter_map(|row| row.split_once('│'))
-        .map(|(main, _)| main.trim())
-        .find(|main| main.starts_with("Resize"));
-    insta::assert_snapshot!(hint.expect("resize hint in main pane"), @"Resize · ←/h →/l · Shift+←/→ 10 cols · Enter/Esc done");
+        .map(str::trim)
+        .find(|row| row.starts_with("Resize"));
+    insta::assert_snapshot!(hint.expect("resize hint in shared footer"), @"Resize · ←/h →/l · Shift+←/→ 10 cols · Enter/Esc done");
     let divider_bold = |tui: &tui::Tui| {
         let cell = &tui.terminal.previous_buffer()[(divider_at(tui, 4), 4)];
         cell.modifier.contains(ratatui::style::Modifier::BOLD)
