@@ -20,8 +20,10 @@ async fn pair() -> Result<(Box<App>, tui::Tui, ThreadId, ThreadId)> {
     let side = ThreadId::new();
     app.primary_thread_id = Some(main);
     app.side_threads.insert(side, SideThreadState::new(main));
-    app.sidebars.entry(Some(main)).or_default().chat_ready(side);
-    app.sidebars.get_mut(&Some(main)).unwrap().focus = Some(sidebar::PaneFocus::Main);
+    app.sidebars.entry(Some(main)).or_default().show(
+        sidebar::SidebarContent::Chat(side),
+        sidebar::PaneFocus::Main,
+    );
     app.chat_widget
         .handle_thread_session(test_thread_session(side, app.config.cwd.to_path_buf()));
     app.chat_widget.insert_str("side draft\nsecond side line");
