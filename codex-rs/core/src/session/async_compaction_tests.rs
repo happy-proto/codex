@@ -161,7 +161,7 @@ async fn cancelled_turn_skips_launch_but_preserves_existing_work(trigger: Compac
         phase,
         &turn_cancellation,
         &status,
-        (Some("routing".to_string()), auth),
+        (Some("routing".to_string()), auth.clone()),
     )
     .await;
     // Wait for client publication before exercising either ready-result consumer.
@@ -314,7 +314,7 @@ async fn failed_background_compaction_retries_after_backoff(failures: usize) {
         CompactionPhase::MidTurn,
         &cancellation,
         &status,
-        (Some("routing".to_string()), auth),
+        (Some("routing".to_string()), auth.clone()),
     )
     .await;
     wait_for_background_compaction_for_test(&sess).await;
@@ -337,7 +337,7 @@ async fn failed_background_compaction_retries_after_backoff(failures: usize) {
             CompactionPhase::MidTurn,
             &cancellation,
             &status,
-            (Some("routing".to_string()), auth),
+            (Some("routing".to_string()), auth.clone()),
         )
         .await;
         tokio::time::resume();
@@ -358,7 +358,7 @@ async fn failed_background_compaction_retries_after_backoff(failures: usize) {
             CompactionPhase::MidTurn,
             &cancelled,
             &status,
-            (Some("routing".to_string()), auth),
+            (Some("routing".to_string()), auth.clone()),
         )
         .await;
         tokio::time::resume();
@@ -376,7 +376,7 @@ async fn failed_background_compaction_retries_after_backoff(failures: usize) {
             CompactionPhase::MidTurn,
             &cancellation,
             &status,
-            (Some("routing".to_string()), auth),
+            (Some("routing".to_string()), auth.clone()),
         )
         .await;
         tokio::time::resume();
@@ -398,7 +398,7 @@ async fn failed_background_compaction_retries_after_backoff(failures: usize) {
         CompactionPhase::MidTurn,
         &cancellation,
         &status,
-        (Some("routing".to_string()), auth),
+        (Some("routing".to_string()), auth.clone()),
     )
     .await;
     wait_for_background_compaction_for_test(&sess).await;
