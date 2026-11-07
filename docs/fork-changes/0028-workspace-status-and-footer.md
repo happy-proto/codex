@@ -41,7 +41,7 @@ side 使用临时会话的独立数值指标通道，保留不创建对话历史
 
 ## 入口与维护约束
 
-- `tui/src/app/side_pane.rs`：分栏及共享底栏几何，未聚焦侧绘制。
+- `tui/src/app/side_pane.rs`：保留上游多会话侧栏和标签布局，在对话分栏内预留共享底栏，未聚焦侧绘制。
 - `tui/src/app/owned_transcript.rs`：聚焦侧布局及共享底栏绘制。
 - `tui/src/app/thread_events.rs`、`thread_routing.rs`：线程状态、计时和后台更新。
 - `tui/src/app/side_projection.rs`、`app_event_sender.rs`：后台展示投影、历史事件路由与隔离。
