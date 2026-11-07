@@ -305,7 +305,7 @@ async fn failed_background_compaction_retries_after_backoff(failures: usize) {
     .expect("record usage");
     let status = super::super::context_window::context_window_token_status(&sess, &turn).await;
     let world_state = Arc::new(WorldState::default());
-    let auth = sess.services.model_client.auth_owner_generation();
+    let auth = sess.services.model_client.auth_owner();
     maybe_start(
         &sess,
         &step,
