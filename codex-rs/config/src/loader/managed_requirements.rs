@@ -20,9 +20,8 @@ use codex_utils_absolute_path::AbsolutePathBuf;
 use std::io;
 use std::path::Path;
 
-/// Loads current managed requirements without reading system defaults, user or
-/// project settings, or thread-provided configuration. Legacy managed config
-/// remains a requirements source.
+/// Loads current managed requirements. Only cloud policy selection is read from
+/// base user settings; other user defaults and project settings do not apply.
 pub async fn load_managed_requirements_state(
     fs: &dyn ExecutorFileSystem,
     codex_home: &Path,
@@ -38,7 +37,18 @@ pub async fn load_managed_requirements_state(
     }
 
     let mut bundle_requirements = Vec::new();
-    if let Some(bundle) = cloud_config_bundle.get().await.map_err(io::Error::other)? {
+    if let Some(mut bundle) = cloud_config_bundle.get().await.map_err(io::Error::other)? {
+        let user_file =
+            AbsolutePathBuf::resolve_path_against_base(crate::CONFIG_TOML_FILE, codex_home);
+        let user_layer = super::load_user_config_layer(
+            fs,
+            &user_file,
+            None,
+            overrides.ignore_user_config,
+            strict_config,
+        )
+        .await?;
+        super::cloud_policy_selection(&user_layer.config, &[])?.apply(&mut bundle);
         let base_dir = AbsolutePathBuf::from_absolute_path(codex_home)?;
         bundle_requirements = bundle
             .requirements_toml

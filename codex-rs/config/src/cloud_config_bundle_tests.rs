@@ -328,3 +328,69 @@ allowed_sandbox_modes = ["read-only"]
         }
     );
 }
+
+#[test]
+fn cloud_policy_selection_is_opt_in_and_preserves_unselected_fragments() {
+    use crate::config_toml::IgnoreCloudConfig;
+    let ids = [
+        "workspace-model-policy",
+        "rbac-fast-mode",
+        "rbac-ultrafast-mode",
+        "rbac-computer-history",
+        "unrelated-policy",
+    ];
+    let bundle = CloudConfigBundle {
+        config_toml: CloudConfigTomlBundle {
+            enterprise_managed: ids
+                .iter()
+                .map(|id| CloudConfigFragment {
+                    id: id.to_string(),
+                    name: "Example policy".into(),
+                    contents: String::new(),
+                })
+                .collect(),
+        },
+        requirements_toml: CloudRequirementsTomlBundle {
+            enterprise_managed: ids
+                .iter()
+                .map(|id| CloudRequirementsFragment {
+                    id: id.to_string(),
+                    name: "Example policy".into(),
+                    contents: String::new(),
+                })
+                .collect(),
+        },
+    };
+    let mut unchanged = bundle.clone();
+    IgnoreCloudConfig::default().apply(&mut unchanged);
+    assert_eq!(unchanged, bundle);
+    for (key, ignored) in [
+        ("models", ids[0]),
+        ("fast_mode", ids[1]),
+        ("ultrafast_mode", ids[2]),
+        ("chronicle", ids[3]),
+    ] {
+        let selection: IgnoreCloudConfig = toml::from_str(&format!("{key} = true")).unwrap();
+        let mut filtered = bundle.clone();
+        selection.apply(&mut filtered);
+        let expected: Vec<_> = ids.iter().copied().filter(|id| *id != ignored).collect();
+        assert_eq!(
+            filtered
+                .config_toml
+                .enterprise_managed
+                .iter()
+                .map(|f| f.id.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+        assert_eq!(
+            filtered
+                .requirements_toml
+                .enterprise_managed
+                .iter()
+                .map(|f| f.id.as_str())
+                .collect::<Vec<_>>(),
+            expected
+        );
+    }
+}
