@@ -1086,7 +1086,7 @@ impl App {
             if let Some(current) = side_pane::layout(self, tui, size.into())
                 && current.passive_thread == painted.passive_thread
                 && let Some(peer) = self.current_displayed_thread_id()
-                && painted.passive.union(painted.focused) == Rect::from(size)
+                && painted == &current
             {
                 let painted_area = painted.passive;
                 if let Some(url) = self.transcript_link_at(*press) {
