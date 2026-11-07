@@ -2742,6 +2742,33 @@
       },
       "type": "object"
     },
+    "IgnoreCloudConfig": {
+      "additionalProperties": false,
+      "description": "Select cloud policy fragments to ignore.",
+      "properties": {
+        "chronicle": {
+          "default": false,
+          "description": "Ignore the Computer History access policy.",
+          "type": "boolean"
+        },
+        "fast_mode": {
+          "default": false,
+          "description": "Ignore the Fast mode access policy.",
+          "type": "boolean"
+        },
+        "models": {
+          "default": false,
+          "description": "Ignore the workspace model policy, including new-thread effort and service tier.",
+          "type": "boolean"
+        },
+        "ultrafast_mode": {
+          "default": false,
+          "description": "Ignore the Ultra Fast mode access policy.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "KeybindingsSpec": {
       "anyOf": [
         {
@@ -8728,6 +8755,14 @@
         }
       ],
       "description": "Lifecycle hooks configured inline in TOML plus user-level overrides."
+    },
+    "ignore_cloud_config": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/IgnoreCloudConfig"
+        }
+      ],
+      "description": "Select cloud policy fragments to ignore. Only user configuration and CLI overrides apply."
     },
     "include_apps_instructions": {
       "description": "Whether to inject the `<apps_instructions>` developer block.",

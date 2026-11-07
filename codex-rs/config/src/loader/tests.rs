@@ -1366,3 +1366,75 @@ fn otel_headers_helper_interval_must_be_positive() {
         900000
     );
 }
+
+#[test]
+fn cloud_policy_selection_uses_user_config_and_explicit_cli_overrides() {
+    let user = toml::from_str("[ignore_cloud_config]\nmodels = true\nchronicle = true").unwrap();
+    let selected = cloud_policy_selection(
+        &user,
+        &[(
+            "ignore_cloud_config.models".into(),
+            TomlValue::Boolean(false),
+        )],
+    )
+    .unwrap();
+    assert!(!selected.models);
+    assert!(selected.chronicle);
+    assert!(!selected.fast_mode);
+    assert!(!selected.ultrafast_mode);
+    assert!(
+        cloud_policy_selection(
+            &toml::from_str("[ignore_cloud_config]\nunknown = true").unwrap(),
+            &[]
+        )
+        .is_err()
+    );
+}
+
+#[tokio::test]
+async fn cloud_policy_selection_applies_to_full_and_policy_only_loads() {
+    let tmp = tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join(CONFIG_TOML_FILE),
+        "[ignore_cloud_config]\nchronicle = true\n",
+    )
+    .unwrap();
+    let bundle = crate::CloudConfigBundle {
+        requirements_toml: crate::CloudRequirementsTomlBundle {
+            enterprise_managed: vec![
+                crate::CloudRequirementsFragment {
+                    id: "rbac-computer-history".into(),
+                    name: "Example history policy".into(),
+                    contents: "[features]\nchronicle = false".into(),
+                },
+                crate::CloudRequirementsFragment {
+                    id: "unrelated-policy".into(),
+                    name: "Example feature policy".into(),
+                    contents: "[features]\nfast_mode = false".into(),
+                },
+            ],
+        },
+        ..Default::default()
+    };
+    let options = ConfigLoadOptions {
+        loader_overrides: LoaderOverrides::without_managed_config_for_tests(),
+        strict_config: false,
+        cloud_config_bundle: crate::CloudConfigBundleLoader::new(async move { Ok(Some(bundle)) }),
+    };
+    let stack = load_config_layers_state(
+        &TestFileSystem,
+        tmp.path(),
+        None,
+        &[],
+        options.clone(),
+        &crate::NoopThreadConfigLoader,
+    )
+    .await
+    .unwrap();
+    let expected: ConfigRequirementsToml = toml::from_str("[features]\nfast_mode = false").unwrap();
+    assert_eq!(stack.requirements_toml(), &expected);
+    let policy_only = load_managed_requirements_state(&TestFileSystem, tmp.path(), options)
+        .await
+        .unwrap();
+    assert_eq!(policy_only, expected);
+}
