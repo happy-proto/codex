@@ -14,6 +14,8 @@ fn workspace_events_remain_send_with_parked_composers() {
 async fn pair() -> Result<(Box<App>, tui::Tui, ThreadId, ThreadId)> {
     let mut app = make_test_app().await;
     enable_side_retention(&mut app)?;
+    // These assertions inspect settled task status, not the sidebar opening animation.
+    app.local_settings.tui.animations = false;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tui.set_owned_screen(true)?;
     let main = ThreadId::new();
