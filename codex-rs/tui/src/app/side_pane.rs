@@ -151,7 +151,7 @@ pub(super) fn pair_layout(
             "esc latest",
         )
     });
-    let height = area.height.min(
+    let height = area.height.saturating_sub(1).min(
         1 + hint
             .as_ref()
             .map_or(1, |footer| footer.text.height().max(1) as u16),
