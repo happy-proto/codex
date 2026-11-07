@@ -210,11 +210,18 @@ pub async fn load_config_layers_state(
     let mut cloud_config_binding = None;
     let mut applied_config_server = None;
 
+    let base_user_file = AbsolutePathBuf::resolve_path_against_base(CONFIG_TOML_FILE, codex_home);
+    let base_user_layer =
+        load_user_config_layer(fs, &base_user_file, None, ignore_user_config, strict_config)
+            .await?;
+    let ignore_cloud_config = cloud_policy_selection(&base_user_layer.config, cli_overrides)?;
+
     if !overrides.ignore_managed_requirements {
         let snapshot = cloud_config_bundle.get_snapshot().await;
         cloud_config_binding = snapshot.binding;
         applied_config_server = snapshot.config_server;
-        if let Some(bundle) = snapshot.bundle.map_err(io::Error::other)? {
+        if let Some(mut bundle) = snapshot.bundle.map_err(io::Error::other)? {
+            ignore_cloud_config.apply(&mut bundle);
             let cloud_config_base_dir = AbsolutePathBuf::from_absolute_path(codex_home)?;
             let bundle_layers = if strict_config {
                 CloudConfigBundleLayers::from_bundle_strict_config(bundle, &cloud_config_base_dir)?
@@ -294,15 +301,6 @@ pub async fn load_config_layers_state(
     // profile config as a second user layer on top so the profile only needs to
     // contain overrides.
     let active_user_file = overrides.user_config_path(codex_home)?;
-    let base_user_file = AbsolutePathBuf::resolve_path_against_base(CONFIG_TOML_FILE, codex_home);
-    let base_user_layer = load_user_config_layer(
-        fs,
-        &base_user_file,
-        /*profile*/ None,
-        ignore_user_config,
-        strict_config,
-    )
-    .await?;
     if let Some(active_user_profile) = active_user_profile.as_ref()
         && let Some(base_user_config) = base_user_layer.config.as_table()
     {
@@ -545,6 +543,24 @@ pub async fn load_config_layers_state(
         &requirements_layers,
     ));
     Ok(config_layer_stack.with_startup_warnings(startup_warnings))
+}
+
+fn cloud_policy_selection(
+    user_config: &TomlValue,
+    cli_overrides: &[(String, TomlValue)],
+) -> io::Result<crate::config_toml::IgnoreCloudConfig> {
+    let mut config = user_config.clone();
+    merge_toml_values(&mut config, &build_cli_overrides_layer(cli_overrides));
+    config
+        .get("ignore_cloud_config")
+        .cloned()
+        .map(|value| {
+            value
+                .try_into()
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+        })
+        .transpose()
+        .map(Option::unwrap_or_default)
 }
 
 async fn load_user_config_layer(

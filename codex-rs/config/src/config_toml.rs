@@ -161,10 +161,46 @@ pub struct FeatureToggleToml {
     pub enabled: Option<bool>,
 }
 
+/// Select cloud policy fragments to ignore.
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct IgnoreCloudConfig {
+    /// Ignore the workspace model policy, including new-thread effort and service tier.
+    pub models: bool,
+    /// Ignore the Fast mode access policy.
+    pub fast_mode: bool,
+    /// Ignore the Ultra Fast mode access policy.
+    pub ultrafast_mode: bool,
+    /// Ignore the Computer History access policy.
+    pub chronicle: bool,
+}
+
+impl IgnoreCloudConfig {
+    pub(crate) fn apply(&self, bundle: &mut crate::CloudConfigBundle) {
+        let keep = |id: &str| !match id {
+            "workspace-model-policy" => self.models,
+            "rbac-fast-mode" => self.fast_mode,
+            "rbac-ultrafast-mode" => self.ultrafast_mode,
+            "rbac-computer-history" => self.chronicle,
+            _ => false,
+        };
+        bundle
+            .config_toml
+            .enterprise_managed
+            .retain(|fragment| keep(&fragment.id));
+        bundle
+            .requirements_toml
+            .enterprise_managed
+            .retain(|fragment| keep(&fragment.id));
+    }
+}
+
 /// Base config deserialized from ~/.codex/config.toml.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConfigToml {
+    /// Select cloud policy fragments to ignore. Only user configuration and CLI overrides apply.
+    pub ignore_cloud_config: Option<IgnoreCloudConfig>,
     /// Optional override of model selection.
     pub model: Option<String>,
     /// Default Daybreak preference for new threads and non-interactive turns.
