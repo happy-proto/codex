@@ -33,7 +33,7 @@ parent-27                                                                       
                                                                                                                                                                                                      │
   Worked for <1s                                                                                                                                                                                     │
                                                                                                                                                                                                      │
-                                                                                                                                                                                                     │• Working (<elapsed> • esc to interrupt)
+                                                                                                                                                                                                     │Working (<elapsed> • esc to interrupt)
 › xparent draft-!                                                                                                                                                                                    │
   second line                                                                                                                                                                                        │
   last line                                                                                                                                                                                          │› xchild draft!
@@ -52,7 +52,7 @@ parent-27                                                                       
                                                                                                    │
   Worked for <1s                                                                                   │
                                                                                                    │
-                                                                                                   │• Working (<elapsed> • esc to interrupt)
+                                                                                                   │Working (<elapsed> • esc to interrupt)
 › xparent draft-!                                                                                  │
   second line                                                                                      │
   last line                                                                                        │› xchild draft!
