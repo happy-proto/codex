@@ -312,6 +312,7 @@ async fn workspace_retained_projection_stream_and_history_stay_on_the_background
                     memory_citation: None,
                     delivery: None,
                     questions: None,
+                    moderation: None,
                 },
                 None,
                 0,
