@@ -48,7 +48,11 @@ pub(super) async fn try_submit_user_turn(
     let original_active = app.active_turn_id_for_thread(thread_id).await;
     let mut active = original_active.clone();
     let additional_context = app
-        .first_turn_title_context(app_server, thread_id, app.chat_widget.config_ref().ephemeral)
+        .first_turn_title_context(
+            app_server,
+            thread_id,
+            app.chat_widget.config_ref().ephemeral,
+        )
         .await;
     let preflight = |model: &str| {
         let enabled = app.chat_widget.daybreak_enabled
