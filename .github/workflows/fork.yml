@@ -348,6 +348,14 @@ jobs:
         if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-app-server-daemon --lib settings::tests
+      - name: 验证 CLI 参数、快照、功能列表与配置状态
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: |
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-config --lib cloud_policy_selection
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --lib
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test completion
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test features features_list_
       - name: 验证 rollout 列表、分页与历史保留
         if: ${{ matrix.profile == 'ci-test' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
