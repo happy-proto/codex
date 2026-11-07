@@ -98,6 +98,9 @@ pub(super) async fn try_submit_user_turn(
                 .restore_rejected_user_message(client_user_message_id, message);
         }
         Err(UserMessageSubmissionFailure::Rejected(error)) => {
+            if app.recover_transport_error(&error) {
+                return Ok(true);
+            }
             if error
                 .downcast_ref::<UnsupportedLegacyPermissionProfile>()
                 .is_some()
