@@ -5291,6 +5291,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
                     memory_citation: None,
                     delivery: None,
                     questions: None,
+                    moderation: None,
                 },
                 None,
                 0,
