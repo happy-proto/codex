@@ -11,6 +11,7 @@ TUI 原先只恢复传输错误，这类拒绝会沿请求错误路径传播并�
 ## 实现
 
 公共连接恢复入口将关停拒绝与传输错误一起交给已有重连流程。
+用户消息提交的回执拒绝分支也使用该入口，在恢复前保留草稿与待确认消息。
 复用上游错误识别函数：优先检查结构化 reason；仅在没有 data 时兼容旧版精确消息。
 其它 JSON-RPC 错误不触发该恢复，内嵌 app-server 仍不执行外部连接重连。
 
@@ -20,6 +21,7 @@ TUI 原先只恢复传输错误，这类拒绝会沿请求错误路径传播并�
 ## 代码入口
 
 - [公共恢复与重连](../../codex-rs/tui/src/app/reconnect.rs)
+- [用户消息提交回执](../../codex-rs/tui/src/app/user_turn_submission.rs)
 - [关停错误识别](../../codex-rs/tui/src/app_server_session.rs)
 - [回归测试](../../codex-rs/tui/src/app/tests/disconnect_tests.rs)
 - [fork CI](../../.github/workflows/fork.yml)
