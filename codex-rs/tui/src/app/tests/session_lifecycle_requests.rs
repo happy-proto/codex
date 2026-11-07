@@ -48,13 +48,13 @@ use tokio_tungstenite::tungstenite::error::ProtocolError;
 async fn cloud_skips_skills_refresh_and_ignores_stale_local_result() -> Result<()> {
     use futures::FutureExt;
 
-    let (mut app, mut events, mut ops) = make_test_app_with_channels().await;
+    let (mut app, mut events, _ops) = make_test_app_with_channels().await;
     let id = ThreadId::new();
     let cwd = app.config.cwd.to_path_buf();
     app.enqueue_primary_thread_session(test_thread_session(id, cwd.clone()), Vec::new())
         .await?;
-    let refresh = std::iter::from_fn(|| ops.try_recv().ok())
-        .find(|op| matches!(op, Op::ListSkills { .. }))
+    let refresh = std::iter::from_fn(|| events.try_recv().ok())
+        .find(|event| matches!(event, AppEvent::RefreshSessionSkills { .. }))
         .expect("session configuration queues a skills refresh");
 
     let (client, mut commands, _events) =
@@ -67,7 +67,7 @@ async fn cloud_skips_skills_refresh_and_ignores_stale_local_result() -> Result<(
     let mut tui = crate::tui::test_support::make_test_tui()?;
     while events.try_recv().is_ok() {}
     for event in [
-        AppEvent::CodexOp(refresh),
+        refresh,
         AppEvent::SkillsListLoaded {
             cwd,
             result: Err("stale local skills refresh".into()),
