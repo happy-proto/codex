@@ -27,6 +27,7 @@
 
 - [thread_title_instructions.rs](../../codex-rs/tui/src/thread_title_instructions.rs)：首轮提示词及应用上下文。
 - [user_turn_submission.rs](../../codex-rs/tui/src/app/user_turn_submission.rs)：首次用户 turn 提交时附带上下文。
+- [user_message_submission.rs](../../codex-rs/tui/src/app_server_session/user_message_submission.rs)：统一消息提交流程通过 `TurnStartSettings` 透传上下文，仅新 turn 使用；保留提交回执、未确认草稿及 steer 行为。
 - [app_server_session.rs](../../codex-rs/tui/src/app_server_session.rs)：通过既有协议转发上下文，公共指令保持不变。
 - [dynamic_tools.rs](../../codex-rs/tui/src/dynamic_tools.rs)：初次命名的已有名称检查。
 - [dynamic_tools_tests.rs](../../codex-rs/tui/src/dynamic_tools_tests.rs)：真实内嵌 app-server 配合模拟模型，验证独立消息紧靠用户输入、首轮等待工具结果时名称已持久化；覆盖重复命名和手动名称优先。

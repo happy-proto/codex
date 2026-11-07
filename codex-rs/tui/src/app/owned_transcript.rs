@@ -280,17 +280,12 @@ impl App {
         {
             pane.sync_agent_rows(&self.agent_navigation);
         }
-        let full_area: Rect = screen_size.into();
-        let initial_layout = sidebar::paint_layout(self, tui, full_area);
-        let shared_footer = if matches!(initial_layout, Some(sidebar::SidebarLayout::Chat(_))) {
-            let width = full_area.width.saturating_sub(2);
-            let hint = self.prompt_navigation_footer(width).or_else(|| self.transcript_view.footer_with_navigation(width, MotionMode::from_animations_enabled(self.local_settings.tui.animations), "esc latest"));
-            let height = full_area.height.min(1 + hint.as_ref().map_or(1, |footer| footer.text.height().max(1) as u16));
-            Some(Rect { y: full_area.bottom() - height, height, ..full_area })
-        } else { None };
-        let layout_area = Rect { height: full_area.height - shared_footer.map_or(0, |footer| footer.height), ..full_area };
-        let layout = sidebar::paint_layout(self, tui, layout_area);
-        self.conversation_frame.shared_footer = shared_footer;
+        
+        let layout = sidebar::paint_layout(self, tui, screen_size.into());
+        self.conversation_frame.shared_footer = match &layout {
+            Some(sidebar::SidebarLayout::Chat(panes)) => Some(panes.footer),
+            _ => None,
+        };
         let displayed = self.current_displayed_thread_id();
         let chat = match displayed.and_then(|id| self.side_pair_key(id)) {
             Some(child) if Some(child) == displayed => TabState::Active,
@@ -403,7 +398,6 @@ impl App {
                             self.background_voice.as_deref(),
                             frame,
                             self.local_settings.tui.collapse_turn_details,
-                            &frames,
                             watch_only,
                         );
                     }
@@ -628,7 +622,7 @@ impl App {
             }
             self.conversation_frame.sidebar_targets = std::mem::take(&mut sidebar_targets);
             if let Some(divider) = divider {
-                side_pane::paint_divider(frame, divider.x, self.divider_drag, highlight_divider);
+                side_pane::paint_divider(frame, divider, self.divider_drag, highlight_divider);
             }
             self.conversation_frame.close_buttons = Default::default();
             if let Some(close) = self.sidebar().and_then(|pane| pane.close.as_ref()) {
