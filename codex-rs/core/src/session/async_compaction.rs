@@ -306,7 +306,7 @@ pub(crate) async fn wait_for_pending(
                 history_changed = attempt.history_version != state.history.history_version(),
                 model_changed = attempt.model_slug != model.slug,
                 compaction_hash_changed = attempt.compaction_hash != model.comp_hash,
-                auth_changed = attempt.auth_owner_generation != sess.services.model_client.auth_owner_generation(),
+                auth_changed = attempt.auth_owner != sess.services.model_client.auth_owner(),
                 "前台压缩丢弃不兼容的后台尝试");
             return None;
         }
