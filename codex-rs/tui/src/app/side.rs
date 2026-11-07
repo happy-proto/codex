@@ -983,7 +983,38 @@ impl App {
                 if !enter {
                     self.side_companions
                         .entry(child_thread_id)
-                        .or_insert_with(|| SideCompanion::empty(forked.session.cwd.clone()));
+                        .or_insert_with(|| SideCompanion {
+                            route: crate::app_event_sender::SideProjectionRoute {
+                                thread_id: child_thread_id,
+                                generation: uuid::Uuid::new_v4(),
+                            },
+                            projection: None,
+                            commit_ticks: false,
+                            bottom: Box::new(crate::bottom_pane::BottomPane::new(
+                                crate::bottom_pane::BottomPaneParams {
+                                    app_event_tx: self.app_event_tx.clone(),
+                                    frame_requester: tui.frame_requester(),
+                                    has_input_focus: false,
+                                    enhanced_keys_supported: self.enhanced_keys_supported,
+                                    placeholder_text: String::new(),
+                                    disable_paste_burst: self
+                                        .local_settings
+                                        .tui
+                                        .disable_paste_burst
+                                        .unwrap_or(false),
+                                    animations_enabled: self.local_settings.tui.animations,
+                                    effects: self.local_settings.tui.effects,
+                                    skills: None,
+                                },
+                            )),
+                            display: crate::app_event::CapturedSideDisplay {
+                                rendered_completion_turn_ids: Default::default(),
+                                active: None,
+                                auxiliary: Vec::new(),
+                            },
+                            cells: Vec::new(),
+                            view: Default::default(),
+                        });
                 }
                 let channel = self.ensure_thread_channel(child_thread_id);
                 channel.backend_id = Some(app_server.backend_id());
