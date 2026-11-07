@@ -88,6 +88,7 @@ pub(super) struct SidePaneLayout {
     pub(super) passive: Rect,
     pub(super) divider: u16,
     pub(super) tab_strip: Rect,
+    pub(super) footer: Rect,
 }
 
 /// The settled chat split used to check pointer events against the last painted frame.
@@ -136,6 +137,38 @@ pub(super) fn pair_layout(
     }
     let active = app.current_displayed_thread_id()?;
     let side = app.side_threads.get(&child)?;
+    let area = Rect::new(
+        parent.x,
+        parent.y,
+        sidebar.right() - parent.x,
+        parent.height,
+    );
+    let width = area.width.saturating_sub(2);
+    let hint = app.prompt_navigation_footer(width).or_else(|| {
+        app.transcript_view.footer_with_navigation(
+            width,
+            crate::motion::MotionMode::from_animations_enabled(app.local_settings.tui.animations),
+            "esc latest",
+        )
+    });
+    let height = area.height.min(
+        1 + hint
+            .as_ref()
+            .map_or(1, |footer| footer.text.height().max(1) as u16),
+    );
+    let footer = Rect {
+        y: area.bottom() - height,
+        height,
+        ..area
+    };
+    let parent = Rect {
+        height: parent.height - height,
+        ..parent
+    };
+    let sidebar = Rect {
+        height: sidebar.height.saturating_sub(height),
+        ..sidebar
+    };
     let [tab_strip, sidebar] = tab_and_body(sidebar);
     let (focused, passive, passive_thread) = if active == child {
         (sidebar, parent, side.parent_thread_id)
@@ -150,6 +183,7 @@ pub(super) fn pair_layout(
         passive,
         passive_thread,
         tab_strip,
+        footer,
         divider: parent.right(),
     })
 }
@@ -442,7 +476,6 @@ impl SidePaneLayout {
         voice: Option<&crate::chatwidget::ChatWidget>,
         frame: &mut Frame<'_>,
         collapse_turn_details: bool,
-        frames: &FrameRequester,
     ) {
         let area = self.passive;
         let completion = companion.cells.last().and_then(|cell| {
@@ -542,30 +575,32 @@ impl SidePaneLayout {
 
 pub(super) fn paint_divider(
     frame: &mut Frame<'_>,
-    divider: u16,
+    divider: Rect,
     drag: Option<DividerDrag>,
     highlight_divider: bool,
 ) {
     // Draw after both panes registered their images. Clearing a guide to the left
     // of retained pixels can erase the rest of that terminal row.
-    let guide = drag.filter(|drag| drag.guide_only).map_or(divider, |drag| {
-        drag.screen.right()
-            - drag.percent().map_or(drag.initial_width, |p| {
-                preferred_width(drag.screen.width, Some(p))
-            })
-            - GAP
-    });
+    let guide = drag
+        .filter(|drag| drag.guide_only)
+        .map_or(divider.x, |drag| {
+            drag.screen.right()
+                - drag.percent().map_or(drag.initial_width, |p| {
+                    preferred_width(drag.screen.width, Some(p))
+                })
+                - GAP
+        });
     let style = if highlight_divider || drag.is_some() {
         crate::style::accent_style()
     } else {
         ratatui::style::Style::default().dim()
     };
-    for y in frame.area().y..frame.area().bottom() {
-        let x = if guide != divider
+    for y in divider.y..divider.bottom() {
+        let x = if guide != divider.x
             && frame.image_placements.iter().any(|image| {
                 (image.area.y..image.area.bottom()).contains(&y) && guide < image.area.right()
             }) {
-            divider
+            divider.x
         } else {
             guide
         };
