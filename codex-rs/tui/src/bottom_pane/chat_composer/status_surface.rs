@@ -51,7 +51,7 @@ impl ChatComposer {
         })
     }
 
-    pub(super) fn shared_status_height(&self, width: u16) -> u16 {
+    pub(crate) fn shared_status_height(&self, width: u16) -> u16 {
         if !self.footer.status_line_enabled {
             return 0;
         }
