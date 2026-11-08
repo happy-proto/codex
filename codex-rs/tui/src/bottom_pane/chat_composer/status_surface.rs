@@ -78,6 +78,35 @@ impl ChatComposer {
         }
     }
 
+    pub(super) fn shared_status_height(&self, width: u16) -> u16 {
+        if !self.footer.status_line_enabled {
+            return 0;
+        }
+        self.status_surface_height(
+            width,
+            MAX_FOOTER_ROWS,
+            ComposerRenderOptions {
+                separate_status_line: true,
+                ..Default::default()
+            },
+        )
+    }
+
+    pub(super) fn shared_footer_areas(&self, area: Rect) -> (Rect, Rect) {
+        let status_height = self.shared_status_height(area.width).min(area.height);
+        (
+            Rect {
+                height: status_height,
+                ..area
+            },
+            Rect {
+                y: area.y + status_height,
+                height: area.height - status_height,
+                ..area
+            },
+        )
+    }
+
     pub(super) fn hint_footer_props(&self) -> FooterProps {
         let mut props = self.footer_props();
         if props.status_line_enabled {

@@ -542,6 +542,10 @@ impl BottomPane {
         self.renderable_for_views(options, &[])
     }
 
+    pub(crate) fn shared_status_height(&self, width: u16) -> u16 {
+        self.composer.shared_status_height(width)
+    }
+
     pub(crate) fn render_shared_footer(
         &self,
         area: Rect,
