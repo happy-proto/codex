@@ -1512,7 +1512,6 @@ async fn guardian_refresh_validates_fallback_after_merging_retained_layers() {
     );
 }
 
-; /^>>>>>>> /d
 #[test]
 fn cloud_policy_selection_uses_user_config_and_explicit_cli_overrides() {
     let user = toml::from_str("[ignore_cloud_config]\nmodels = true\nchronicle = true").unwrap();
@@ -1583,5 +1582,4 @@ async fn cloud_policy_selection_applies_to_full_and_policy_only_loads() {
         .await
         .unwrap();
     assert_eq!(policy_only, expected);
->>>>>>> e13e142ad0 (feat(config): support selective cloud policy overrides)
 }
