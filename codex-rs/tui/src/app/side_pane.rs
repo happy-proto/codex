@@ -152,7 +152,7 @@ pub(super) fn pair_layout(
         )
     });
     let height = area.height.saturating_sub(1).min(
-        app.chat_widget.shared_status_height(area.width)
+        app.chat_widget.shared_status_height(area.width).max(1)
             + hint
                 .as_ref()
                 .map_or(1, |footer| footer.text.height().max(1) as u16),
