@@ -794,3 +794,22 @@ fn activity_shortcut_help_follows_runtime_binding() {
     }
     insta::assert_snapshot!(snapshots.join("\n---\n"));
 }
+
+#[test]
+fn workspace_shared_footer_preserves_multiline_extension_status() {
+    let mut composer = composer();
+    let tree: crate::ui_tree::UiTree = r#""one\ntwo\nthree""#.parse().unwrap();
+    composer.set_status_line(Some(FooterContent::from(tree)));
+    let shared = Rect::new(0, 0, 80, 4);
+    let (status, hints) = composer.shared_footer_areas(shared);
+    assert_eq!(status.height, 3);
+    assert_eq!(hints.height, 1);
+    let mut buf = Buffer::empty(shared);
+    composer.render_shared_footer(shared, &mut buf, ComposerRenderOptions::default());
+    for (row, expected) in ["one", "two", "three"].iter().enumerate() {
+        let text = (0..shared.width)
+            .map(|x| buf[(x, row as u16)].symbol())
+            .collect::<String>();
+        assert!(text.contains(expected), "{text}");
+    }
+}
