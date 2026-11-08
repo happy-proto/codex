@@ -286,6 +286,7 @@ mod sidebar_document;
 pub(crate) mod sidebar_loading;
 mod side_projection;
 mod sidebar;
+mod sidebar_close;
 mod startup;
 pub(crate) mod startup_bootstrap;
 mod startup_prompts;
