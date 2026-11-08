@@ -37,9 +37,7 @@ impl ChatComposer {
     }
 
     pub(super) fn has_separate_status(&self, options: ComposerRenderOptions<'_>) -> bool {
-        options.shared_footer.is_none()
-            && options.separate_status_line
-            && self.footer.status_line_enabled
+        options.separate_status_line && self.footer.status_line_enabled
     }
 
     pub(super) fn shows_shared_status(&self, options: ComposerRenderOptions<'_>) -> bool {
@@ -56,7 +54,7 @@ impl ChatComposer {
         width: u16,
         options: ComposerRenderOptions<'_>,
     ) -> u16 {
-        if self.has_separate_status(options) {
+        if options.shared_footer.is_none() && self.has_separate_status(options) {
             self.status_line_height(width, options)
         } else {
             0
