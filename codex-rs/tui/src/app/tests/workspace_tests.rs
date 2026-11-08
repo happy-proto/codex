@@ -169,7 +169,8 @@ async fn workspace_footer_spans_the_divider_and_resizes_on_short_screens() -> Re
     for (width, height) in [(120, 24), (100, 10), (150, 6), (80, 12), (120, 24)] {
         let text = side_frame(&mut app, &mut tui, Size::new(width, height))?;
         if width >= 100 {
-            let lines = text.lines().collect::<Vec<_>>();
+            let lines = text.split('\n').collect::<Vec<_>>();
+            assert_eq!(lines.len(), usize::from(height), "{text}");
             assert!(
                 lines[..lines.len() - 2]
                     .iter()
