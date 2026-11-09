@@ -1059,6 +1059,64 @@ fn web_link_labels_have_a_visible_underline_snapshot() {
 }
 
 #[test]
+#[cfg(unix)]
+fn explicit_file_link_keeps_osc8_across_wrapped_rows() {
+    let lines = render_markdown_lines_with_width_and_cwd(
+        "[source.rs:696](/workspace/codex/src/a%20long%20file.rs:696)",
+        Some(16),
+        Some(Path::new("/workspace/codex")),
+    );
+    let linked: Vec<_> = lines
+        .iter()
+        .filter(|line| !line.hyperlinks.is_empty())
+        .collect();
+    assert!(linked.len() > 1, "file link must survive physical wrapping");
+    for line in linked {
+        for link in &line.hyperlinks {
+            assert_eq!(
+                link.terminal_destination().as_deref(),
+                Some("file:///workspace/codex/src/a%20long%20file.rs")
+            );
+        }
+        let output: String = crate::terminal_hyperlinks::decorate_spans(line)
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect();
+        assert!(output.contains("\x1b]8;;file:///workspace/codex/src/a%20long%20file.rs\x07"));
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn explicit_file_link_keeps_osc8_in_tables() {
+    for width in [20, 120] {
+        let lines = render_markdown_lines_with_width_and_cwd(
+            "| File |\n| --- |\n| [`source`](./src/file.rs#L12C3) |",
+            Some(width),
+            Some(Path::new("/workspace")),
+        );
+        let links: Vec<_> = lines.iter().flat_map(|line| &line.hyperlinks).collect();
+        assert!(!links.is_empty());
+        assert!(
+            links
+                .iter()
+                .all(|link| link.terminal_destination().as_deref()
+                    == Some("file:///workspace/src/file.rs"))
+        );
+    }
+}
+
+#[test]
+fn bare_file_paths_remain_plain_text() {
+    let lines = render_markdown_lines_with_width_and_cwd(
+        "plain /workspace/file.rs and `/workspace/other.rs`",
+        Some(16),
+        Some(Path::new("/workspace")),
+    );
+    assert!(lines.iter().all(|line| line.hyperlinks.is_empty()));
+}
+
+#[test]
 fn file_link_preserves_label_and_decodes_fallback_destination() {
     let text = render_markdown_text_for_cwd(
         "[/Users/example/code/codex/codex-rs/tui/src/My%20File.rs](/Users/example/code/codex/codex-rs/tui/src/My%20File.rs)",
