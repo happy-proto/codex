@@ -171,6 +171,8 @@ jobs:
         id: package
         env:
           PACKAGE_TARGET: ${{ matrix.target }}
+          CODEX_MACOS_SIGNING_P12_BASE64: ${{ matrix.target == 'aarch64-apple-darwin' && secrets.CODEX_MACOS_SIGNING_P12_BASE64 || '' }}
+          CODEX_MACOS_SIGNING_P12_PASSWORD: ${{ matrix.target == 'aarch64-apple-darwin' && secrets.CODEX_MACOS_SIGNING_P12_PASSWORD || '' }}
         run: scripts/fork/build_observer.py --output fork-sccache/progress.ndjson -- scripts/fork/release.py build --target "$PACKAGE_TARGET"
       - name: 验证 Linux CLI 目录与发布版本
         if: matrix.target == 'x86_64-unknown-linux-gnu'

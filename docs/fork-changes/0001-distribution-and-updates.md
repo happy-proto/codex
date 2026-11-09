@@ -21,11 +21,29 @@
 构建及 Rust 测试任务先移除 runner 镜像预装且不参与本项目构建的 Android、.NET SDK，
 并记录清理前后的磁盘空间，避免低可用容量的镜像在恢复缓存和编译时耗尽磁盘。
 两个平台均在 `ubuntu-24.04` 构建。macOS 目标为 `aarch64-apple-darwin`，
-由 cargo-zigbuild、Zig 和校验摘要的 macOS SDK 链接，使用 rcodesign 添加 ad-hoc
+由 cargo-zigbuild、Zig 和校验摘要的 macOS SDK 链接，使用 rcodesign 添加固定自签名
 hardened runtime 签名并保留上游 entitlements。打包前检查 ARM64 架构和重复动态库加载命令，
 签名后计算归档摘要；Linux 包在 CI 执行运行与安装契约验收。
 macOS 包的真实运行验收使用目标系统，不能以 Linux 静态校验替代；工具链和 SDK 更新后
 需验证 CLI、code-mode host、app-server、V8 工具调用和终端会话行为。
+签名身份为专用 RSA-4096 / SHA-256 证书 `DCjanus Codex Fork Code Signing`，
+公钥证书位于 [fork-certificate.pem](../../.github/scripts/macos-signing/fork-certificate.pem)，有效期至 2036 年 11 月。
+CLI 和 daemon 使用同一个 `bin/codex`，固定 identifier 为 `com.dcjanus.codex`；
+其它三个程序分别使用 `com.dcjanus.codex-code-mode-host`、`com.dcjanus.codex-exec-server` 和 `com.dcjanus.rg`。
+designated requirement 由 identifier 与固定证书组成，不再依赖随构建变化的 cdhash。
+这不等于 Apple 公证、Gatekeeper 信任，也不保证首次访问 Keychain 无需授权；
+从 ad-hoc 迁移时可能需要重新授权，Keychain 的 partition 限制及两台 Mac 的跨版本授权仍须实测。
+签名不替代 CLI 在授权等待期间保持可用的修复。
+
+原件保存在 1Password Private vault 的 `Codex Fork macOS Code Signing` 条目，包含加密私钥、
+公开证书、现代 AES-256 加密的 PKCS#12 包及随机密码；不复用其它软件的签名身份。
+CI 使用仓库 Secrets `CODEX_MACOS_SIGNING_P12_BASE64` 与 `CODEX_MACOS_SIGNING_P12_PASSWORD`。
+rcodesign 0.29 无法直接读取该 PKCS#12 加密格式，因此由 OpenSSL 在权限 0700 的临时目录解包，
+以 PEM 签名，成功或异常退出均清理临时目录；密码不放进命令参数。
+缺少 Secrets、解包失败或签名失败均停止发布，不回退到 ad-hoc。
+自签名产物不请求 Apple 时间戳；到期或轮换证书时更新公开证书和两项 Secrets，
+并重新验证 Keychain 授权，不承诺旧证书授权自动迁移。恢复时从 1Password 取回同一身份，
+不要重新生成证书代替丢失的 CI 配置。
 版本使用上游 alpha 加 `.fork.N`，不覆盖已发布版本；平台包和 SHA-256 由 `fork-release.json` 描述。
 发布后仅按发布时间保留最新 10 个已发布版本及其 tag，不设时间窗口。
 draft 不占名额；清理遗留 draft 和没有 Release 的孤立 fork tag，不影响上游 tag。
@@ -69,7 +87,7 @@ Rust 编译由 Cargo 通过 sccache 的 GitHub Actions 后端缓存，按编译�
 默认分支迁移到 `main` 后删除旧 `fork` 分支；旧版 CLI 内置的分支安装 URL 随之失效，
 需使用 README 中的 `main` 安装命令更新一次，之后继续使用 `codex update`。
 根 README 只保留使用入口，[上游英文说明](../upstream-readme.md) 独立保存；同步上游时更新该说明并核对相对链接。
-同步时核对上游 package builder、资源布局、签名和更新入口。macOS 包为 ad-hoc 签名，Linux 包依赖 glibc。
+同步时核对上游 package builder、资源布局、签名和更新入口。macOS 包为固定自签名，Linux 包依赖 glibc。
 完整包包含上游 `0.166.0-alpha.6` 恢复分发的独立 `bin/codex-exec-server`，
 与其它自有二进制一起检查架构、签名并执行发布 smoke；CLI 仍支持 `codex exec-server`。
 macOS 使用 CLI、code-mode host 各自的上游 entitlements 交叉签名；升级 Zig、SDK 或签名工具时保留真实运行验收。
