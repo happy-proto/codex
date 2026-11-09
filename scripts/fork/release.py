@@ -8,6 +8,7 @@
 # ///
 """构建、验收和发布基于上游 alpha 的个人 fork。"""
 
+import base64
 import hashlib
 import json
 import os
@@ -211,6 +212,69 @@ def initialize_app_server(cli, env, expected_version):
                 stream.close()
 
 
+def sign_macos(package):
+    """使用固定证书和各程序的固定 identifier 签名，不回退到 ad-hoc。"""
+    encoded = os.environ.get("CODEX_MACOS_SIGNING_P12_BASE64")
+    password = os.environ.get("CODEX_MACOS_SIGNING_P12_PASSWORD")
+    if not encoded or not password:
+        raise ValueError(
+            "macOS signing requires CODEX_MACOS_SIGNING_P12_BASE64 and CODEX_MACOS_SIGNING_P12_PASSWORD"
+        )
+    with tempfile.TemporaryDirectory(prefix="codex-signing-") as directory:
+        directory = Path(directory)
+        identity = directory / "identity.p12"
+        password_file = directory / "password"
+        pem = directory / "identity.pem"
+        identity.write_bytes(base64.b64decode(encoded, validate=True))
+        password_file.write_text(password)
+        # rcodesign 0.29 不支持现代 PKCS#12 加密；只在私有临时目录解包。
+        run(
+            "openssl",
+            "pkcs12",
+            "-in",
+            str(identity),
+            "-passin",
+            f"file:{password_file}",
+            "-noenc",
+            "-out",
+            str(pem),
+        )
+        run(
+            "openssl",
+            "verify",
+            "-CAfile",
+            str(ROOT / ".github/scripts/macos-signing/fork-certificate.pem"),
+            str(pem),
+        )
+        for relative in [
+            "bin/codex",
+            "bin/codex-code-mode-host",
+            "bin/codex-exec-server",
+            "codex-path/rg",
+        ]:
+            binary = package / relative
+            args = [
+                "rcodesign",
+                "sign",
+                "--pem-file",
+                str(pem),
+                "--timestamp-url",
+                "none",
+                "--binary-identifier",
+                f"com.dcjanus.{binary.name}",
+                "--code-signature-flags",
+                "runtime",
+            ]
+            entitlements = (
+                ROOT
+                / ".github/scripts/macos-signing"
+                / f"{binary.name}.entitlements.plist"
+            )
+            if entitlements.exists():
+                args.extend(["--entitlements-xml-path", str(entitlements)])
+            run(*args, str(binary))
+
+
 def build(target=TARGET):
     metadata = plan(target)
     dist = ROOT / "fork-dist"
@@ -249,22 +313,7 @@ def build(target=TARGET):
                 )
             ),
         )
-        for relative in [
-            "bin/codex",
-            "bin/codex-code-mode-host",
-            "bin/codex-exec-server",
-            "codex-path/rg",
-        ]:
-            binary = package / relative
-            args = ["rcodesign", "sign", "--code-signature-flags", "runtime"]
-            entitlements = (
-                ROOT
-                / ".github/scripts/macos-signing"
-                / f"{binary.name}.entitlements.plist"
-            )
-            if entitlements.exists():
-                args.extend(["--entitlements-xml-path", str(entitlements)])
-            run(*args, str(binary))
+        sign_macos(package)
     else:
         smoke(package)
     archive = archive_package(package, dist)
