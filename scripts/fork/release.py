@@ -489,7 +489,7 @@ def publish():
         f"- 上游提交：openai/codex@{metadata['upstream_commit']}\n"
         f"- Fork 源提交：{source}\n\n"
         "每个上游 alpha 独立递增 fork.N；每次发布使用独立 Release 和固定平台包名。"
-        "包摘要见 fork-release.json。macOS 采用 ad-hoc 签名，未经 Apple 公证。"
+        "包摘要见 fork-release.json。macOS 采用固定自签名代码身份，未经 Apple 公证。"
         f"通过 `codex update` 手动更新。仅保留最新 {RELEASES_TO_KEEP} 个已发布版本及其 tag。\n"
     )
     run(
