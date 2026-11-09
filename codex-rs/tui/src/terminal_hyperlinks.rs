@@ -51,6 +51,7 @@ pub(crate) struct TerminalHyperlink {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DestinationKind {
     Web,
+    LocalFile,
     /// A generated visualization, validated workspace artifact, or locally viewed image.
     TrustedFile,
 }
@@ -98,6 +99,14 @@ impl TrustedWorkspaceFile {
 }
 
 impl TerminalHyperlink {
+    pub(crate) fn local_file(columns: Range<usize>, destination: &Url) -> Self {
+        Self {
+            columns,
+            destination: destination.to_string(),
+            destination_kind: DestinationKind::LocalFile,
+        }
+    }
+
     pub(crate) fn web(columns: Range<usize>, destination: String) -> Self {
         Self {
             columns,
@@ -169,7 +178,9 @@ impl TerminalHyperlink {
     pub(crate) fn terminal_destination(&self) -> Option<String> {
         match self.destination_kind {
             DestinationKind::Web => web_destination(&self.destination),
-            DestinationKind::TrustedFile => trusted_file_destination(&self.destination),
+            DestinationKind::TrustedFile | DestinationKind::LocalFile => {
+                trusted_file_destination(&self.destination)
+            }
         }
     }
 }
