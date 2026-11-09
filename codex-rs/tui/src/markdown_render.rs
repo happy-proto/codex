@@ -102,6 +102,7 @@ pub(crate) use inline_directives::followup_labels;
 pub(crate) use list_spacing::ListSpacing;
 use list_spacing::UniformList;
 use local_links::is_local_path_like_link;
+use local_links::local_link_url;
 use local_links::render_local_link_target;
 pub(crate) use streaming::StreamingMarkdownRender;
 pub(crate) use streaming::render_streaming_markdown_lines_with_width_and_cwd;
@@ -2438,7 +2439,11 @@ impl<'a, 'policy> Writer<'a, 'policy> {
                             .zip(link.local_label_inline)
                         {
                             let previous = std::mem::replace(&mut self.copy_inline, inline);
-                            self.push_span_to_table_cell(label_span);
+                            if local_link_url(&link.destination, self.cwd.as_deref()).is_some() {
+                                self.push_link_target(label_span, &link.destination, link.source);
+                            } else {
+                                self.push_span_to_table_cell(label_span);
+                            }
                             self.copy_inline = previous;
                         }
                         self.push_span_to_table_cell(" (".into());
@@ -2460,7 +2465,11 @@ impl<'a, 'policy> Writer<'a, 'policy> {
                             .zip(link.local_label_inline)
                         {
                             let previous = std::mem::replace(&mut self.copy_inline, inline);
-                            self.push_span(label_span);
+                            if local_link_url(&link.destination, self.cwd.as_deref()).is_some() {
+                                self.push_link_target(label_span, &link.destination, link.source);
+                            } else {
+                                self.push_span(label_span);
+                            }
                             self.copy_inline = previous;
                         }
                         self.push_span(" (".into());
@@ -2493,12 +2502,17 @@ impl<'a, 'policy> Writer<'a, 'policy> {
 
     fn push_link_target(&mut self, span: Span<'static>, destination: &str, source: usize) {
         let mut target = HyperlinkLine::default();
-        if let Some(link) = sidebar_file_link(destination) {
+        if let Some(link) = local_links::sidebar_file_link(destination) {
             let width = span_width(&span);
             target.line.push_span(span);
-            target
-                .hyperlinks
-                .push(TerminalHyperlink::document(0..width, link));
+            let terminal_file = if preferences::document_links_enabled() {
+                None
+            } else {
+                local_link_url(destination, self.cwd.as_deref())
+            };
+            target.hyperlinks.push(
+                TerminalHyperlink::document(0..width, link).with_terminal_file(terminal_file),
+            );
         } else {
             target.push_span(span, Some(destination));
         }

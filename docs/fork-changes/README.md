@@ -33,6 +33,7 @@
 | 0025 | [分栏任务状态与共享底栏](0025-workspace-status-and-footer.md) |
 | 0026 | [为所有模型开启输入框星光](0026-all-model-composer-stars.md) |
 | 0027 | [按项忽略 Cloud config](0027-ignore-cloud-config.md) |
+| 0028 | [Markdown 文件终端链接](0028-markdown-file-hyperlinks.md) |
 | 0031 | [内置会话管理 skill](0031-session-skill.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。

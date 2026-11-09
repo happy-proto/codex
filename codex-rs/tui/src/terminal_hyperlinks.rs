@@ -49,7 +49,8 @@ pub(crate) struct TerminalHyperlink {
     pub(crate) columns: Range<usize>,
     pub(crate) destination: String,
     destination_kind: DestinationKind,
-    /// Source offset identifying one Markdown link occurrence across wrapped rows.
+    terminal_file_destination: Option<String>,
+    /// Byte offset of an explicit Markdown link, preserved through wrapping.
     pub(crate) markdown_source: Option<usize>,
 }
 
@@ -59,6 +60,7 @@ impl PartialEq for TerminalHyperlink {
         self.columns == other.columns
             && self.destination == other.destination
             && self.destination_kind == other.destination_kind
+            && self.terminal_file_destination == other.terminal_file_destination
     }
 }
 
@@ -150,6 +152,7 @@ impl TerminalHyperlink {
             destination,
             destination_kind: DestinationKind::Web,
             markdown_source: None,
+            terminal_file_destination: None,
         }
     }
 
@@ -192,6 +195,7 @@ impl TerminalHyperlink {
             destination: url.into(),
             destination_kind: DestinationKind::TrustedFile,
             markdown_source: None,
+            terminal_file_destination: None,
         })
     }
 
@@ -204,6 +208,7 @@ impl TerminalHyperlink {
             destination: file.0.to_string(),
             destination_kind: DestinationKind::TrustedFile,
             markdown_source: None,
+            terminal_file_destination: None,
         }
     }
 
@@ -213,6 +218,7 @@ impl TerminalHyperlink {
             destination: id.to_string(),
             destination_kind: DestinationKind::Agent(id),
             markdown_source: None,
+            terminal_file_destination: None,
         }
     }
 
@@ -229,7 +235,13 @@ impl TerminalHyperlink {
             destination: link.path,
             destination_kind: DestinationKind::Document(link.location),
             markdown_source: None,
+            terminal_file_destination: None,
         }
+    }
+
+    pub(crate) fn with_terminal_file(mut self, destination: Option<Url>) -> Self {
+        self.terminal_file_destination = destination.map(|url| url.to_string());
+        self
     }
 
     pub(crate) fn is_document(&self) -> bool {
@@ -253,6 +265,7 @@ impl TerminalHyperlink {
             destination: self.destination.clone(),
             destination_kind: self.destination_kind,
             markdown_source: self.markdown_source,
+            terminal_file_destination: self.terminal_file_destination.clone(),
         }
     }
 
@@ -274,7 +287,11 @@ impl TerminalHyperlink {
 
     pub(crate) fn terminal_destination(&self) -> Option<String> {
         match self.destination_kind {
-            DestinationKind::Document(_) | DestinationKind::Agent(_) => None,
+            DestinationKind::Agent(_) => None,
+            DestinationKind::Document(_) => self
+                .terminal_file_destination
+                .as_deref()
+                .and_then(trusted_file_destination),
             DestinationKind::Web => web_destination(&self.destination),
             DestinationKind::TrustedFile => trusted_file_destination(&self.destination),
         }
