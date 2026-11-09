@@ -1,9 +1,7 @@
 //! Local file-link destination parsing and display for Markdown transcripts.
 //!
-//! Local Markdown links preserve their labels. Since ordinary file destinations have no trusted
-//! navigation capability, the renderer also displays their target, shortening absolute paths
-//! relative to the session working directory when possible. This module only formats destinations;
-//! it does not resolve files or infer execution-host paths from the frontend filesystem.
+//! Local Markdown links preserve their labels and display targets. Explicit native file targets
+//! also carry OSC 8 destinations, resolved lexically against the session working directory.
 
 use codex_utils_path_uri::PathUri;
 use codex_utils_string::normalize_markdown_hash_location_suffix;
@@ -51,6 +49,30 @@ pub(super) fn render_local_link_target(dest_url: &str, cwd: Option<&Path>) -> Op
         rendered.push_str(&location_suffix);
     }
     Some(rendered)
+}
+
+/// Line locations remain visible text; they must not become part of the file name.
+pub(super) fn local_link_url(dest_url: &str, cwd: Option<&Path>) -> Option<Url> {
+    if dest_url.chars().any(char::is_control) {
+        return None;
+    }
+    let (path, _) = parse_local_link_target(dest_url)?;
+    if path.chars().any(char::is_control)
+        || cfg!(unix)
+            && (path.starts_with("//")
+                || matches!(path.as_bytes(), [drive, b':', b'/', ..] if drive.is_ascii_alphabetic()))
+    {
+        return None;
+    }
+    let path = Path::new(&path);
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else if let Ok(relative) = path.strip_prefix("~") {
+        dirs::home_dir()?.join(relative)
+    } else {
+        cwd?.join(path)
+    };
+    Url::from_file_path(absolute).ok()
 }
 
 /// Split a local-link destination into `(normalized_path_text, location_suffix)`.
