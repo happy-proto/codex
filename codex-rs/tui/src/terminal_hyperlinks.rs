@@ -75,6 +75,7 @@ impl std::fmt::Debug for TerminalHyperlink {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DestinationKind {
     Web,
+    LocalFile,
     /// A generated visualization, validated workspace artifact, or locally viewed image.
     TrustedFile,
     /// A local document target used only by an enabled workspace transcript.
@@ -139,6 +140,14 @@ impl TrustedWorkspaceFile {
 }
 
 impl TerminalHyperlink {
+    pub(crate) fn local_file(columns: Range<usize>, destination: &Url) -> Self {
+        Self {
+            columns,
+            destination: destination.to_string(),
+            destination_kind: DestinationKind::LocalFile,
+        }
+    }
+
     pub(crate) fn web(columns: Range<usize>, destination: String) -> Self {
         Self {
             columns,
@@ -248,7 +257,9 @@ impl TerminalHyperlink {
         match self.destination_kind {
             DestinationKind::Document(_) => None,
             DestinationKind::Web => web_destination(&self.destination),
-            DestinationKind::TrustedFile => trusted_file_destination(&self.destination),
+            DestinationKind::TrustedFile | DestinationKind::LocalFile => {
+                trusted_file_destination(&self.destination)
+            }
         }
     }
 }
