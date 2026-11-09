@@ -324,6 +324,10 @@ class PublicationTests(unittest.TestCase):
 
             def run(*args, **kwargs):
                 calls.append(args)
+                if args[:3] == ("gh", "release", "edit"):
+                    notes = Path(args[args.index("--notes-file") + 1]).read_text()
+                    self.assertIn("固定自签名", notes)
+                    self.assertNotIn("ad-hoc", notes)
                 if args[:3] == ("gh", "release", "download"):
                     destination = Path(args[args.index("--dir") + 1])
                     (destination / metadata["asset"]).write_bytes(archive)
