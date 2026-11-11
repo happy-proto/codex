@@ -487,10 +487,12 @@ async fn traverse_flat_paths(
 ) -> io::Result<ThreadsPage> {
     match sort_key {
         ThreadSortKey::CreatedAt => {
-            traverse_flat_paths_created(root, page_size, anchor, config, provider_matcher, state_db).await
+            traverse_flat_paths_created(root, page_size, anchor, config, provider_matcher, state_db)
+                .await
         }
         ThreadSortKey::UpdatedAt | ThreadSortKey::RecencyAt => {
-            traverse_flat_paths_updated(root, page_size, anchor, config, provider_matcher, state_db).await
+            traverse_flat_paths_updated(root, page_size, anchor, config, provider_matcher, state_db)
+                .await
         }
     }
 }
