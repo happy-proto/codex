@@ -19,6 +19,7 @@ use codex_analytics::CompactionPhase;
 use codex_features::Feature;
 use codex_model_provider::RemoteCompactionSupport;
 use codex_otel::auth_storage::AuthStorageOriginator;
+use codex_protocol::error::CodexErr;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
@@ -43,6 +44,19 @@ pub(crate) struct AsyncCompactionState {
     result: Option<oneshot::Receiver<Box<BackgroundCompactionCandidate>>>,
     tasks: TaskTracker,
     shutdown_cancellation: CancellationToken,
+}
+
+fn failure_retry_deadline(error: &CodexErr, failures: u32) -> Option<tokio::time::Instant> {
+    // Reuse upstream error classification; checkpoint retries retain their own capped backoff.
+    error.retry_delay(1)?;
+    let exponent = failures.saturating_sub(1).min(6);
+    let delay = Duration::from_secs((1_u64 << exponent).min(60));
+    Some(
+        error
+            .retry_after()
+            .map(|advice| advice.deadline())
+            .unwrap_or_else(|| tokio::time::Instant::now() + delay),
+    )
 }
 
 pub(super) fn enabled(turn_context: &TurnContext) -> bool {
@@ -219,10 +233,11 @@ pub(super) async fn maybe_start(
                         let async_state = &mut state.async_compaction;
                         async_state.consecutive_failures =
                             async_state.consecutive_failures.saturating_add(1);
-                        let exponent = async_state.consecutive_failures.saturating_sub(1).min(6);
-                        let delay = Duration::from_secs((1_u64 << exponent).min(60));
-                        async_state.retry_after = Some(tokio::time::Instant::now() + delay);
-                        Some(delay)
+                        async_state.retry_after =
+                            failure_retry_deadline(&error, async_state.consecutive_failures);
+                        async_state.retry_after.map(|deadline| {
+                            deadline.saturating_duration_since(tokio::time::Instant::now())
+                        })
                     }
                 };
                 info!(
