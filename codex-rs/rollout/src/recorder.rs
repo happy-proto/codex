@@ -46,7 +46,6 @@ use super::list::ThreadSortKey;
 use super::list::ThreadsPage;
 use super::list::get_threads;
 use super::list::get_threads_in_root_with_state_db;
-use super::list::parse_cursor;
 use super::list::parse_timestamp_uuid_from_filename;
 use super::metadata;
 use super::ordinal::RolloutOrdinalState;
