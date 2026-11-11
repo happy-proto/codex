@@ -551,9 +551,14 @@ async fn collect_compaction_output(
     );
 
     if compaction_count != 1 {
-        return Err(CodexErr::Fatal(format!(
+        let message = format!(
             "remote compaction v2 expected exactly one compaction output item, got {compaction_count} from {output_item_count} output items"
-        )));
+        );
+        // A speculative request may recover at a later checkpoint without failing the turn.
+        return Err(match request_kind {
+            CompactionRequestKind::Background(_) => CodexErr::Stream(message),
+            CompactionRequestKind::Foreground => CodexErr::Fatal(message),
+        });
     }
 
     let Some(compaction_output) = compaction_output else {
@@ -1675,6 +1680,23 @@ mod tests {
                 additional_budget_units: 42.0,
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn foreground_compaction_missing_output_remains_terminal() {
+        let (sess, turn, _) = crate::session::tests::make_session_and_context_with_rx().await;
+        let stream = response_stream(vec![Ok(ResponseEvent::Completed {
+            response_id: "resp-compact".into(),
+            token_usage: None,
+            usage_metadata: None,
+            end_turn: Some(true),
+        })]);
+        let error =
+            collect_compaction_output(&sess, &turn, stream, CompactionRequestKind::Foreground)
+                .await
+                .err()
+                .expect("missing compaction output");
+        assert!(matches!(error.details(), CodexErrorDetails::Fatal(_)));
     }
 
     #[tokio::test]
