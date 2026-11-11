@@ -1810,13 +1810,13 @@ async fn list_threads_uses_selected_rollout_before_filtering_and_pagination() ->
             }
             let created = chrono::Utc.with_ymd_and_hms(2025, 1, 3, 9, 0, 0).unwrap();
             // SQLite 仍可指向未压缩路径，由压缩层解析物理 sibling。
-            let mut builder = codex_state::ThreadMetadataBuilder::new(
+            let builder = codex_state::ThreadMetadataBuilder::new(
                 thread_id,
                 selected.clone(),
                 created,
                 SessionSource::Cli,
-            );
-            builder.model_provider = Some(config.model_provider_id.clone());
+            )
+            .with_model_provider(Some(config.model_provider_id.clone()));
             let mut metadata = builder.build(&config.model_provider_id);
             metadata.first_user_message = Some("Hello from user".to_string());
             metadata.preview = metadata.first_user_message.clone();
@@ -1846,6 +1846,7 @@ async fn list_threads_uses_selected_rollout_before_filtering_and_pagination() ->
                             },
                             ThreadListRepairMode::ScanAndRepair,
                             None,
+                            /*include_attached_threads*/ false,
                         )
                         .await?;
                         assert_eq!(page.items.len(), expected_len);
@@ -1907,6 +1908,7 @@ async fn list_threads_uses_selected_rollout_before_filtering_and_pagination() ->
                     },
                     ThreadListRepairMode::ScanAndRepair,
                     None,
+                    /*include_attached_threads*/ false,
                 )
                 .await?;
                 assert_eq!(page.items.len(), 2);
