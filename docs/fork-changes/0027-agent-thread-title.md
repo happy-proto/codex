@@ -35,3 +35,6 @@
 
 定向测试通过 [fork CI](../../.github/workflows/fork.yml) 的 `thread_title` 过滤器执行。
 同步上游时关注新建会话的指令合并、任务工具注册和名称通知；不修改 app-server 协议。
+
+`turn/start` 同时保留上游 Cloud 模型与推理强度选择；首轮命名上下文仍只用于本地会话，
+不能因为追加上下文参数而丢弃 Cloud 选择或改变服务端管理的设置归属。
