@@ -15,6 +15,54 @@ use codex_protocol::protocol::TokenUsage;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
 
+#[test]
+fn background_failure_retry_follows_error_policy_and_server_deadlines() {
+    use codex_http_client::RetryAfter;
+    use codex_protocol::error::CodexErrorDetails;
+
+    let advice = RetryAfter::from_delay(Duration::from_secs(120)).expect("retry advice");
+    for error in [
+        CodexErr::InvalidRequest("invalid input".into()),
+        CodexErr::TurnAborted,
+        CodexErr::Fatal("fatal".into()),
+        CodexErr::new(CodexErrorDetails::InferenceHookDenied {
+            message: "denied".into(),
+        }),
+        CodexErr::new(CodexErrorDetails::ContentPolicyViolation {
+            message: "denied".into(),
+            status: None,
+        }),
+        CodexErr::ServerOverloaded,
+        CodexErr::new(CodexErrorDetails::PolicyCapacityUnavailable),
+    ] {
+        assert_eq!(failure_retry_deadline(&error, 1), None, "{error}");
+        let expected = match error.details() {
+            CodexErrorDetails::ServerOverloaded | CodexErrorDetails::PolicyCapacityUnavailable => {
+                Some(advice.deadline())
+            }
+            _ => None,
+        };
+        assert_eq!(
+            failure_retry_deadline(&error.with_retry_after(advice), 1),
+            expected,
+        );
+    }
+    for seconds in [0, 2, 120] {
+        let advice = RetryAfter::from_delay(Duration::from_secs(seconds)).expect("retry advice");
+        assert_eq!(
+            failure_retry_deadline(&CodexErr::Timeout.with_retry_after(advice), 8),
+            Some(advice.deadline()),
+        );
+    }
+    for (failures, seconds) in [(1, 1), (2, 2), (7, 60), (8, 60)] {
+        let before = tokio::time::Instant::now();
+        let deadline = failure_retry_deadline(&CodexErr::Timeout, failures).expect("retryable");
+        let after = tokio::time::Instant::now();
+        assert!(deadline >= before + Duration::from_secs(seconds));
+        assert!(deadline <= after + Duration::from_secs(seconds));
+    }
+}
+
 #[test_case::test_case(CompactionTrigger::Auto; "optional ready adoption")]
 #[test_case::test_case(CompactionTrigger::Manual; "manual ready reuse")]
 #[tokio::test]
@@ -243,11 +291,12 @@ async fn root_only_controls_child_eligibility(root_only: bool) {
     }
 }
 
-#[test_case::test_case(1; "transient failure")]
-#[test_case::test_case(3; "consecutive failures back off")]
-#[test_case::test_case(8; "persistent failures cap backoff")]
+#[test_case::test_case(1, false; "transient failure")]
+#[test_case::test_case(3, false; "consecutive failures back off")]
+#[test_case::test_case(8, false; "persistent failures cap backoff")]
+#[test_case::test_case(1, true; "terminal failure stays deduplicated until history changes")]
 #[tokio::test]
-async fn failed_background_compaction_retries_after_backoff(failures: usize) {
+async fn failed_background_compaction_retries_after_backoff(failures: usize, terminal: bool) {
     let server = responses::start_mock_server().await;
     let mut provider = codex_model_provider_info::built_in_model_providers(None)["openai"].clone();
     provider.base_url = Some(format!("{}/v1", server.uri()));
@@ -278,9 +327,16 @@ async fn failed_background_compaction_retries_after_backoff(failures: usize) {
         }}),
         responses::ev_completed("recovered"),
     ]);
-    let mut bodies = vec![invalid; failures];
-    bodies.push(valid);
-    let request = responses::mount_sse_sequence(&server, bodies).await;
+    let failure = if terminal {
+        wiremock::ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "error": {"type": "invalid_request_error", "message": "invalid compact input"}
+        }))
+    } else {
+        responses::sse_response(invalid)
+    };
+    let mut templates = vec![failure; failures];
+    templates.push(responses::sse_response(valid));
+    let request = responses::mount_response_sequence(&server, templates).await;
     let cancellation = CancellationToken::new();
     let step = sess
         .capture_step_context(Arc::clone(&turn), &cancellation)
@@ -291,7 +347,7 @@ async fn failed_background_compaction_retries_after_backoff(failures: usize) {
         "content": [{"type": "input_text", "text": "original turn"}]
     }))
     .expect("user message");
-    sess.replace_history(vec![original], None).await;
+    sess.replace_history(vec![original.clone()], None).await;
     sess.update_token_usage_info(
         &turn,
         Some(&TokenUsage {
@@ -317,6 +373,51 @@ async fn failed_background_compaction_retries_after_backoff(failures: usize) {
     )
     .await;
     wait_for_background_compaction_for_test(&sess).await;
+    if terminal {
+        assert!(take_ready(&sess, &turn).await.is_none());
+        for _ in 0..2 {
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(120)).await;
+            maybe_start(
+                &sess,
+                &step,
+                &world_state,
+                CompactionPhase::MidTurn,
+                &cancellation,
+                &status,
+                (Some("routing".to_string()), auth.clone()),
+            )
+            .await;
+            tokio::time::resume();
+            wait_for_background_compaction_for_test(&sess).await;
+            assert_eq!(request.requests().len(), 1, "terminal error must not retry");
+        }
+        let changed: ResponseItem = serde_json::from_value(serde_json::json!({
+            "type": "message", "role": "user",
+            "content": [{"type": "input_text", "text": "changed history"}]
+        }))
+        .expect("user message");
+        sess.replace_history(vec![original, changed], None).await;
+        maybe_start(
+            &sess,
+            &step,
+            &world_state,
+            CompactionPhase::MidTurn,
+            &cancellation,
+            &status,
+            (Some("routing".to_string()), auth),
+        )
+        .await;
+        wait_for_background_compaction_for_test(&sess).await;
+        assert_eq!(
+            request.requests().len(),
+            2,
+            "new history may start a new attempt"
+        );
+        assert!(take_ready(&sess, &turn).await.is_some());
+        shutdown(&sess).await;
+        return;
+    }
     for (index, delay) in [1, 2, 4, 8, 16, 32, 60, 60]
         .into_iter()
         .take(failures)
