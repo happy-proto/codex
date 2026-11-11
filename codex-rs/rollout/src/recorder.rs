@@ -1567,7 +1567,10 @@ async fn list_threads_from_files_desc(
         });
     }
 
-    list_threads_from_files_desc_unfiltered(state_db, codex_home, page_size, cursor, sort_key, config).await
+    list_threads_from_files_desc_unfiltered(
+        state_db, codex_home, page_size, cursor, sort_key, config,
+    )
+    .await
 }
 
 async fn list_threads_from_files_desc_unfiltered(

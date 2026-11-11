@@ -24,7 +24,7 @@ struct McpServerProcess {
 impl McpServerProcess {
     fn observe_running(pid: String) -> anyhow::Result<Self> {
         let process = cfg_select! {
-            unix => { Self { pid } }
+            unix => Self { pid },
             windows => {{
                 use std::io;
                 use std::num::NonZeroU32;
@@ -88,7 +88,9 @@ impl McpServerProcess {
                     WAIT_OBJECT_0 => Ok(false),
                     WAIT_FAILED => Err(io::Error::last_os_error())
                         .with_context(|| format!("failed to wait for MCP server process {pid}")),
-                    result => anyhow::bail!("unexpected wait result {result} for MCP server process {pid}"),
+                    result => anyhow::bail!(
+                        "unexpected wait result {result} for MCP server process {pid}"
+                    ),
                 }
             }}
         }
