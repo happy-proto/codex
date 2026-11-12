@@ -4662,7 +4662,7 @@ impl ChatComposer {
     ) {
         if footer_rect.is_empty() {
             if self.shortcuts_above_composer(options) {
-                let props = self.hint_footer_props(options);
+                let props = self.hint_footer_props();
                 super::shortcut_overlay::render(&props, inset_footer_hint_area(popup_rect), buf);
             }
             return;
