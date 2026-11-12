@@ -42,6 +42,9 @@ impl ChatComposer {
         mut bounds: Size,
         options: ComposerRenderOptions<'_>,
     ) -> u16 {
+        if options.shared_footer.is_some() {
+            return 0;
+        }
         let focus = options.status_line_focus();
         if focus == StatusLineFocus::Focused && self.active_status_transition().is_some() {
             bounds.height = bounds.height.min(1);
