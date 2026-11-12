@@ -1259,6 +1259,15 @@ fn workspace_shared_footer_preserves_multiline_extension_status() {
     let tree: crate::ui_tree::UiTree = r#""one\ntwo\nthree""#.parse().unwrap();
     composer.set_status_line(Some(FooterContent::from(tree)));
     let shared = Rect::new(0, 0, 80, 4);
+    let layout = composer.layout_with_options(
+        Rect::new(0, 0, 40, 8),
+        ComposerRenderOptions {
+            shared_footer: Some(shared),
+            ..Default::default()
+        },
+    );
+    assert_eq!(layout.status.height, 0);
+    assert_eq!(layout.footer.height, 0);
     let (status, hints) = composer.shared_footer_areas(shared);
     assert_eq!(status.height, 3);
     assert_eq!(hints.height, 1);
