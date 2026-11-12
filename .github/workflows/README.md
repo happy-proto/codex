@@ -2,12 +2,11 @@
 
 `fork.yml` 在 Ubuntu 上执行脚本检查和 Rust 回归测试，并行构建 Linux AMD64、macOS ARM 完整包。
 Linux 使用原生 Cargo，macOS 使用 cargo-zigbuild、Zig 和固定摘要的 SDK 交叉编译，
-由 rcodesign 使用固定自签名证书、固定 identifier 添加 hardened runtime 签名和上游 entitlements。工具链升级需验证
+由 rcodesign 添加 ad-hoc hardened runtime 签名并保留上游 entitlements。工具链升级需验证
 ARM64 架构、动态依赖、签名和目标系统上的实际运行。
 
-macOS 构建需要仓库 Secrets `CODEX_MACOS_SIGNING_P12_BASE64` 和
-`CODEX_MACOS_SIGNING_P12_PASSWORD`，缺失或签名失败时停止发布，不回退到 ad-hoc。
-证书与恢复方式见 [分发说明](../../docs/fork-changes/0001-distribution-and-updates.md)。
+macOS 签名不使用证书或签名 Secrets；签名失败仍停止发布。
+签名边界见 [分发说明](../../docs/fork-changes/0001-distribution-and-updates.md)。
 
 推送 `main` 后，两个平台构建及 Rust 测试全部成功才发布。发布脚本校验源码仍为默认分支头，
 聚合平台摘要，上传后下载复核，再公开不可变 Release，保留最新十个已发布 fork 版本。
