@@ -14,8 +14,8 @@
 ## 安装
 
 支持 macOS Apple Silicon 和 Linux AMD64（glibc）。
-Linux 需要 Python 3、flock、tar 和 xz；macOS 包采用固定的自签名代码签名身份。
-首次访问 Keychain 可能需要授权；该签名不提供 Apple 公证或 Gatekeeper 信任。
+Linux 需要 Python 3、flock、tar 和 xz；macOS 包采用 ad-hoc 签名。
+访问 Keychain 可能需要授权，更新版本后也可能再次请求；该签名不提供 Apple 公证或 Gatekeeper 信任。
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/happy-proto/codex/main/scripts/fork/install.sh | sh

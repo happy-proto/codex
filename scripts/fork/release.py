@@ -8,7 +8,6 @@
 # ///
 """构建、验收和发布基于上游 alpha 的个人 fork。"""
 
-import base64
 import hashlib
 import json
 import os
@@ -213,66 +212,26 @@ def initialize_app_server(cli, env, expected_version):
 
 
 def sign_macos(package):
-    """使用固定证书和各程序的固定 identifier 签名，不回退到 ad-hoc。"""
-    encoded = os.environ.get("CODEX_MACOS_SIGNING_P12_BASE64")
-    password = os.environ.get("CODEX_MACOS_SIGNING_P12_PASSWORD")
-    if not encoded or not password:
-        raise ValueError(
-            "macOS signing requires CODEX_MACOS_SIGNING_P12_BASE64 and CODEX_MACOS_SIGNING_P12_PASSWORD"
+    """使用 ad-hoc 签名，保留 hardened runtime 和上游 entitlements。"""
+    for relative in [
+        "bin/codex",
+        "bin/codex-code-mode-host",
+        "bin/codex-exec-server",
+        "codex-path/rg",
+    ]:
+        binary = package / relative
+        args = [
+            "rcodesign",
+            "sign",
+            "--code-signature-flags",
+            "runtime",
+        ]
+        entitlements = (
+            ROOT / ".github/scripts/macos-signing" / f"{binary.name}.entitlements.plist"
         )
-    with tempfile.TemporaryDirectory(prefix="codex-signing-") as directory:
-        directory = Path(directory)
-        identity = directory / "identity.p12"
-        password_file = directory / "password"
-        pem = directory / "identity.pem"
-        identity.write_bytes(base64.b64decode(encoded, validate=True))
-        password_file.write_text(password)
-        # rcodesign 0.29 不支持现代 PKCS#12 加密；只在私有临时目录解包。
-        run(
-            "openssl",
-            "pkcs12",
-            "-in",
-            str(identity),
-            "-passin",
-            f"file:{password_file}",
-            "-noenc",
-            "-out",
-            str(pem),
-        )
-        run(
-            "openssl",
-            "verify",
-            "-CAfile",
-            str(ROOT / ".github/scripts/macos-signing/fork-certificate.pem"),
-            str(pem),
-        )
-        for relative in [
-            "bin/codex",
-            "bin/codex-code-mode-host",
-            "bin/codex-exec-server",
-            "codex-path/rg",
-        ]:
-            binary = package / relative
-            args = [
-                "rcodesign",
-                "sign",
-                "--pem-file",
-                str(pem),
-                "--timestamp-url",
-                "none",
-                "--binary-identifier",
-                f"com.dcjanus.{binary.name}",
-                "--code-signature-flags",
-                "runtime",
-            ]
-            entitlements = (
-                ROOT
-                / ".github/scripts/macos-signing"
-                / f"{binary.name}.entitlements.plist"
-            )
-            if entitlements.exists():
-                args.extend(["--entitlements-xml-path", str(entitlements)])
-            run(*args, str(binary))
+        if entitlements.exists():
+            args.extend(["--entitlements-xml-path", str(entitlements)])
+        run(*args, str(binary))
 
 
 def build(target=TARGET):
@@ -489,7 +448,7 @@ def publish():
         f"- 上游提交：openai/codex@{metadata['upstream_commit']}\n"
         f"- Fork 源提交：{source}\n\n"
         "每个上游 alpha 独立递增 fork.N；每次发布使用独立 Release 和固定平台包名。"
-        "包摘要见 fork-release.json。macOS 采用固定自签名代码身份，未经 Apple 公证。"
+        "包摘要见 fork-release.json。macOS 采用 ad-hoc 签名，未经 Apple 公证。"
         f"通过 `codex update` 手动更新。仅保留最新 {RELEASES_TO_KEEP} 个已发布版本及其 tag。\n"
     )
     run(
