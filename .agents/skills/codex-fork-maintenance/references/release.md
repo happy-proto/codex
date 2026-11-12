@@ -15,7 +15,7 @@ draft 不占名额；清理遗留 draft 和没有 Release 的孤立 fork tag，�
 
 构建复用上游完整 package builder，包含 CLI、code-mode host 和 rg 等必要资源。
 从上游 `0.163.0-alpha.1` 起不再附带补丁 zsh，签名、验收和安装检查遵循当前上游布局。
-macOS 使用固定自签名证书和 identifier，保留上游 entitlements；不配置官方 Azure、R2、npm、WinGet 或网站发布设施。
+macOS 使用无需证书的 ad-hoc 签名，保留上游 entitlements；不配置官方 Azure、R2、npm、WinGet 或网站发布设施。
 下载 CI/Release 产物做隔离安装与轻量运行验收。
 发布构建使用 release 优化、关闭跨 crate Thin LTO；`lto=false` 仍可能包含单 crate 优化。
 测试与产物构建并行；测试保留 release 条件编译及关闭 debug assertions，禁用测试优化以控制编译成本。
@@ -23,7 +23,7 @@ Core 集成测试沿用上游 `ci-test` profile，保留测试所需的 debug as
 skill 集成测试串行运行，避免线程本地 tracing 捕获受并行用例干扰。
 通用脚本检查、Rust 测试和完整包构建全部使用 Linux x64 runner，两个平台包通过 matrix 并行构建。
 Linux 包原生构建并执行安装、CLI 与 app-server 验收；macOS ARM 包使用 cargo-zigbuild、Zig 和 SDK
-交叉编译，检查架构与重复动态库依赖，再用 rcodesign 添加固定自签名和上游 entitlements。
+交叉编译，检查架构与重复动态库依赖，再用 rcodesign 添加 ad-hoc 签名和上游 entitlements。
 macOS 包的真实运行验收需在 Mac 执行，工具链或 SDK 升级后验证完整主路径；静态校验不等于运行通过。
 分析耗时时读取各 job 的日志和 `fork-build-timings-*`、`fork-test-timings-*` artifact，
 用 Cargo 报告区分 crate 编译和并发等待，不把日志末尾的整段耗时直接归为链接。
