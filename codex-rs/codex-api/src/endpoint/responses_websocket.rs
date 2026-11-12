@@ -875,7 +875,6 @@ async fn run_websocket_response_stream(
     let mut interrupt_request = interrupt.clone().fuse();
     let mut interruption = None;
     let mut response_id = None;
-    let mut received_text = false;
     let mut awaiting_interrupt_ack = false;
     loop {
         let poll_start = Instant::now();
@@ -924,7 +923,6 @@ async fn run_websocket_response_stream(
 
         match message {
             Message::Text(text) => {
-                received_text = true;
                 let event = serde_json::from_str::<ResponsesStreamEvent>(&text);
                 let kind = event.as_ref().ok().map(ResponsesStreamEvent::kind);
                 if let Some(t) = telemetry.as_ref() {
