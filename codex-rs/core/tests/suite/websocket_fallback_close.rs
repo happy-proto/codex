@@ -1,4 +1,4 @@
-//! Test which WebSocket closes switch the session to HTTP.
+//! 验证声明的消息上限触发 HTTP 回退，实际 1009 关闭则终止重发。
 
 use anyhow::Result;
 use core_test_support::responses;
@@ -36,11 +36,11 @@ enum Rejection {
 }
 
 #[test_case::test_case(Rejection::AdvertisedLimit, 0, 1; "advertised_limit_skips_websocket_upload")]
-#[test_case::test_case(Rejection::Oversized, 1, 1; "size_rejection_before_any_text")]
-#[test_case::test_case(Rejection::OversizedWarmup, 0, 1; "size_rejection_during_prewarm")]
-#[test_case::test_case(Rejection::AfterModelMetadata, 2, 0; "size_close_after_model_metadata")]
-#[test_case::test_case(Rejection::AfterRateLimits, 2, 0; "size_close_after_rate_limits")]
-#[test_case::test_case(Rejection::AfterResponseCreated, 2, 0; "size_close_after_response_created")]
+#[test_case::test_case(Rejection::Oversized, 1, 0; "size_rejection_before_any_text")]
+#[test_case::test_case(Rejection::OversizedWarmup, 1, 0; "size_rejection_during_prewarm")]
+#[test_case::test_case(Rejection::AfterModelMetadata, 1, 0; "size_close_after_model_metadata")]
+#[test_case::test_case(Rejection::AfterRateLimits, 1, 0; "size_close_after_rate_limits")]
+#[test_case::test_case(Rejection::AfterResponseCreated, 1, 0; "size_close_after_response_created")]
 #[test_case::test_case(Rejection::GoingAway, 2, 0; "ordinary_close")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retry_transport(
