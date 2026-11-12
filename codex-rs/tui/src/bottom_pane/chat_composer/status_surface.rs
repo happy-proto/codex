@@ -42,6 +42,9 @@ impl ChatComposer {
         available: u16,
         options: ComposerRenderOptions<'_>,
     ) -> u16 {
+        if options.shared_footer.is_some() {
+            return 0;
+        }
         // The unfocused composer paints only the raw status, as one dim line.
         let (available, status) = if options.unfocused {
             let raw = self
