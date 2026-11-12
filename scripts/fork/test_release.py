@@ -1,4 +1,3 @@
-import base64
 import hashlib
 import json
 import os
@@ -326,8 +325,8 @@ class PublicationTests(unittest.TestCase):
                 calls.append(args)
                 if args[:3] == ("gh", "release", "edit"):
                     notes = Path(args[args.index("--notes-file") + 1]).read_text()
-                    self.assertIn("固定自签名", notes)
-                    self.assertNotIn("ad-hoc", notes)
+                    self.assertIn("ad-hoc", notes)
+                    self.assertNotIn("固定自签名", notes)
                 if args[:3] == ("gh", "release", "download"):
                     destination = Path(args[args.index("--dir") + 1])
                     (destination / metadata["asset"]).write_bytes(archive)
@@ -474,75 +473,27 @@ class PublicationTests(unittest.TestCase):
 
 
 class MacosSigningTests(unittest.TestCase):
-    def test_missing_credentials_never_falls_back_to_adhoc(self):
+    def test_adhoc_signing_needs_no_credentials_and_signs_all_binaries(self):
         with (
             mock.patch.dict(os.environ, {}, clear=True),
-            self.assertRaisesRegex(ValueError, "CODEX_MACOS_SIGNING"),
+            mock.patch.object(release, "run") as command,
         ):
             release.sign_macos(Path("package"))
-
-    def test_stable_identity_entitlements_and_private_material_cleanup(self):
-        private_paths = []
-        signing_calls = []
-
-        def command(*args):
-            if args[:2] == ("openssl", "pkcs12"):
-                p12 = Path(args[args.index("-in") + 1])
-                password = Path(args[args.index("-passin") + 1].removeprefix("file:"))
-                self.assertEqual(p12.read_bytes(), b"test identity")
-                self.assertEqual(password.read_text(), "test password")
-                self.assertEqual(p12.parent.stat().st_mode & 0o777, 0o700)
-                private_paths.append(p12.parent)
-            elif args[0] == "rcodesign":
-                signing_calls.append(args)
-                self.assertIn("--pem-file", args)
-                self.assertNotIn("test password", args)
-
-        with (
-            tempfile.TemporaryDirectory() as directory,
-            mock.patch.dict(
-                os.environ,
-                {
-                    "CODEX_MACOS_SIGNING_P12_BASE64": base64.b64encode(
-                        b"test identity"
-                    ).decode(),
-                    "CODEX_MACOS_SIGNING_P12_PASSWORD": "test password",
-                },
-            ),
-            mock.patch.object(release, "run", side_effect=command),
-        ):
-            package = Path(directory)
-            release.sign_macos(package)
-        self.assertEqual(len(signing_calls), 4)
-        identifiers = {
-            args[args.index("--binary-identifier") + 1] for args in signing_calls
-        }
+        self.assertEqual(command.call_count, 4)
         self.assertEqual(
-            identifiers,
-            {
-                "com.dcjanus.codex",
-                "com.dcjanus.codex-code-mode-host",
-                "com.dcjanus.codex-exec-server",
-                "com.dcjanus.rg",
-            },
+            {Path(call.args[-1]).name for call in command.call_args_list},
+            {"codex", "codex-code-mode-host", "codex-exec-server", "rg"},
         )
-        self.assertTrue(all(not path.exists() for path in private_paths))
+        for call in command.call_args_list:
+            self.assertEqual(
+                call.args[:4],
+                ("rcodesign", "sign", "--code-signature-flags", "runtime"),
+            )
+            self.assertNotIn("--pem-file", call.args)
+            self.assertNotIn("--binary-identifier", call.args)
 
 
 class PackageBuildTests(unittest.TestCase):
-    def setUp(self):
-        patcher = mock.patch.dict(
-            os.environ,
-            {
-                "CODEX_MACOS_SIGNING_P12_BASE64": base64.b64encode(
-                    b"test identity"
-                ).decode(),
-                "CODEX_MACOS_SIGNING_P12_PASSWORD": "test password",
-            },
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
     def test_macos_signing_follows_current_upstream_package_layout(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -573,12 +524,6 @@ class PackageBuildTests(unittest.TestCase):
             command.assert_any_call(
                 "rcodesign",
                 "sign",
-                "--pem-file",
-                mock.ANY,
-                "--timestamp-url",
-                "none",
-                "--binary-identifier",
-                "com.dcjanus.codex-code-mode-host",
                 "--code-signature-flags",
                 "runtime",
                 "--entitlements-xml-path",
@@ -592,12 +537,6 @@ class PackageBuildTests(unittest.TestCase):
             command.assert_any_call(
                 "rcodesign",
                 "sign",
-                "--pem-file",
-                mock.ANY,
-                "--timestamp-url",
-                "none",
-                "--binary-identifier",
-                "com.dcjanus.codex-exec-server",
                 "--code-signature-flags",
                 "runtime",
                 str(dist / "package/bin/codex-exec-server"),
