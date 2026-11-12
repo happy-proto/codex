@@ -2,6 +2,7 @@
 //! Measurement, rendering, and cursor placement share the same reserved status rectangle.
 //! Shortcut help grows above the input, preserving status and close rows below it even when clipped.
 
+use super::composer_layout::MAX_FOOTER_ROWS;
 use super::*;
 
 use std::borrow::Cow;

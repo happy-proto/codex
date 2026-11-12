@@ -26,7 +26,6 @@ pub(crate) use chat_composer::TranscriptFooter;
 pub(crate) use composer_gap::ComposerGap;
 pub(crate) use footer::footer_hint_items_line;
 pub(crate) use footer::inset_footer_hint_area;
-pub(crate) use footer::render_unfocused_status;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 

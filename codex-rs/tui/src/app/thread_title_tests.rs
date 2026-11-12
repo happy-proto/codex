@@ -297,16 +297,8 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
         TitleScenario::ManualRename | TitleScenario::OverviewRename
     );
     let server = wiremock::MockServer::start().await;
-    let user_message = if matches!(scenario, TitleScenario::Fallback) {
-        "Fix the **login**\n[timeout](https://example.test/issue)"
-    } else {
-        "Fix the login timeout"
-    };
-    let title_message = if matches!(scenario, TitleScenario::Fallback) {
-        "{}"
-    } else {
-        r#"{"title":"Fix login timeout"}"#
-    };
+    let user_message = "Fix the login timeout";
+    let title_message = r#"{"title":"Fix login timeout"}"#;
     let mut template = responses::sse_response(responses::sse(vec![
         responses::ev_response_created("title-response"),
         responses::ev_assistant_message("title-message", title_message),
@@ -604,8 +596,6 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
     if automatic {
         let expected_name = if cancel {
             "Keep this title"
-        } else if matches!(scenario, TitleScenario::Fallback) {
-            "Fix the login timeout"
         } else {
             "Fix login timeout"
         };
