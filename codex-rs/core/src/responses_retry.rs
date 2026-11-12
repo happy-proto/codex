@@ -167,6 +167,9 @@ pub(crate) async fn handle_response_stream_error(
             }),
         )
         .await;
+    }
+    // Another request can already have switched this session to HTTP.
+    if switched || requires_http_fallback {
         // Changing transport must not bypass the server's retry deadline.
         if let Some(retry_after) = retry_after {
             sess.notify_stream_error(
@@ -180,9 +183,6 @@ pub(crate) async fn handle_response_stream_error(
             .await;
             tokio::time::sleep_until(retry_after.deadline()).await;
         }
-    }
-    // Another request can already have switched this session to HTTP.
-    if switched || requires_http_fallback {
         retry_state.retries = 0;
         return Ok(());
     }
