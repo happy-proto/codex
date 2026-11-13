@@ -170,3 +170,38 @@ impl FileSearch {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::task_mentions::TaskMention;
+
+    #[test]
+    fn sessions_filter_searches_and_preserves_thread_selection() {
+        let tasks = [TaskMention {
+            thread_id: "01900000-0000-7000-8000-000000000001".into(),
+            title: "Review migration".into(),
+            cwd: "/workspace/project".into(),
+            snippet: "database schema".into(),
+        }];
+        let candidates = super::super::search_catalog::build_search_catalog(None, None, &tasks);
+        let expected = candidates[0].selection.clone();
+        let mut popup = Popup::new(candidates, "");
+        popup.previous_search_mode();
+        assert_eq!(popup.search_mode, SearchMode::Sessions);
+        assert_eq!(popup.selected(), Some(expected.clone()));
+
+        for query in ["migration", "project", "schema"] {
+            popup.set_query(query);
+            assert_eq!(popup.selected(), Some(expected.clone()));
+        }
+        popup.set_query("unrelated");
+        assert_eq!(popup.selected(), None);
+        popup.set_query("");
+        assert_eq!(popup.selected(), Some(expected.clone()));
+        popup.previous_search_mode();
+        assert_eq!(popup.selected(), None);
+        popup.next_search_mode();
+        assert_eq!(popup.selected(), Some(expected));
+    }
+}

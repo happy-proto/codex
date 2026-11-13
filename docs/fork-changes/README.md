@@ -37,6 +37,7 @@
 | 0029 | [为所有模型开启输入框星光](0029-all-model-composer-stars.md) |
 | 0030 | [按项忽略 Cloud config](0030-ignore-cloud-config.md) |
 | 0031 | [Markdown 文件终端链接](0031-markdown-file-hyperlinks.md) |
+| 0032 | [@ 菜单的会话筛选](0032-at-session-filter.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 同步上游使用独立的 [上游同步 skill](../../.agents/skills/codex-upstream-sync/SKILL.md)。
