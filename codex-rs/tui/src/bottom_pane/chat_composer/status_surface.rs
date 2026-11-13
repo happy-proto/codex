@@ -60,8 +60,7 @@ impl ChatComposer {
             return 0;
         }
         self.status_surface_height(
-            width,
-            MAX_FOOTER_ROWS,
+            inset_footer_hint_area(Rect::new(0, 0, width, MAX_FOOTER_ROWS)).as_size(),
             ComposerRenderOptions {
                 separate_status_line: true,
                 ..Default::default()
