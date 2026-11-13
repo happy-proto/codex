@@ -1278,7 +1278,7 @@ fn activity_shortcut_help_follows_runtime_binding() {
 fn workspace_shared_footer_preserves_multiline_extension_status() {
     let mut composer = composer();
     let tree: crate::ui_tree::UiTree = r#""one\ntwo\nthree""#.parse().unwrap();
-    composer.set_status_line(Some(FooterContent::from(tree)));
+    composer.set_status_line(Some(StatusLine::from(tree)));
     let shared = Rect::new(0, 0, 80, 4);
     let layout = composer.layout_with_options(
         Rect::new(0, 0, 40, 8),
