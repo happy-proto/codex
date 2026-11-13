@@ -1481,6 +1481,7 @@ mod tests {
             response_id: "resp-compact".into(),
             token_usage: None,
             usage_metadata: None,
+            reasoning_removals: None,
             end_turn: Some(true),
         })]);
         let error =
