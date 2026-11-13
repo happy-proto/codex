@@ -2,9 +2,10 @@
 //! Measurement, rendering, and cursor placement share the same reserved status rectangle.
 //! Shortcut help grows above the input, preserving status and close rows below it even when clipped.
 
-use super::composer_layout::MAX_FOOTER_ROWS;
 use super::*;
 use ratatui::layout::Size;
+
+const MAX_SHARED_STATUS_ROWS: u16 = 4;
 
 impl ChatComposer {
     pub(crate) fn set_status_line(&mut self, status_line: Option<StatusLine>) -> bool {
@@ -60,7 +61,7 @@ impl ChatComposer {
             return 0;
         }
         self.status_surface_height(
-            inset_footer_hint_area(Rect::new(0, 0, width, MAX_FOOTER_ROWS)).as_size(),
+            inset_footer_hint_area(Rect::new(0, 0, width, MAX_SHARED_STATUS_ROWS)).as_size(),
             ComposerRenderOptions {
                 separate_status_line: true,
                 ..Default::default()
