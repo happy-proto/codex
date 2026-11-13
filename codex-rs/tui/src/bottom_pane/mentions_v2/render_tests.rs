@@ -163,6 +163,23 @@ fn filesystem_columns_use_terminal_cell_widths() {
 }
 
 #[test]
+fn sessions_tab_stays_visible_at_narrow_widths() {
+    for width in [30, 40, 80] {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, width, POPUP_HEIGHT));
+        render_popup(
+            buffer.area,
+            &mut buffer,
+            &[],
+            &ScrollState::new(),
+            "no matches",
+            SearchMode::Sessions,
+            "",
+        );
+        assert!(text(&buffer).contains("Sessions"));
+    }
+}
+
+#[test]
 fn long_mentions_leave_room_for_distinguishing_parent_paths() {
     let mut rows = rows();
     rows[0].display_name = "Long off-screen plugin name ".repeat(/*n*/ 16);
