@@ -5,7 +5,7 @@ expression: text(&buffer)
   Mentions
   Files, directories, plugins, skills and tasks
 
-   All Results   Filesystem Only   Plugins
+   All Results   Filesystem Only   Plugins   Sessions
 
   new-query
 
