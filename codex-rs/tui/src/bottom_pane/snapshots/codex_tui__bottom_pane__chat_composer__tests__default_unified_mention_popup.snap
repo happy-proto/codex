@@ -4,7 +4,7 @@ assertion_line: 5328
 expression: terminal.backend()
 ---
 "  Mentions                                                                                          "
-"   All Results   Filesystem Only   Plugins                                                          "
+"   All Results   Filesystem Only   Plugins   Sessions                                               "
 "  sa                                                                                                "
 "› Sample Plugin   Plugin with skills and an MCP server                                        Plugin"
 "  enter/tab insert · esc close · ↑/↓ select · ←/→ filter                                            "
