@@ -4803,6 +4803,7 @@ impl ChatComposer {
         options.shared_footer = None;
         let options = self.resolve_render_options(options);
         let (status, hints) = self.shared_footer_areas(area);
+        let status = inset_footer_hint_area(status);
         self.render_status_surface(status, buf, options);
         self.render_footer_rows(hints, Rect::default(), buf, options);
         if let Some(selection) = options.rendered_selection {
