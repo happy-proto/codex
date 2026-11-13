@@ -94,6 +94,7 @@ pub(super) fn render_popup(
         SearchMode::Results,
         SearchMode::FilesystemOnly,
         SearchMode::Tools,
+        SearchMode::Sessions,
     ];
     let active = modes
         .iter()
