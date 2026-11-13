@@ -86,7 +86,7 @@ async fn websocket_close_during_blocked_upload_is_terminal() {
     let (mut client, mut server) = socket_pair().await;
     let send = send_websocket_request(
         &mut client,
-        "x".repeat(64 * 1024),
+        "x".repeat(64 * 1024).into(),
         Duration::from_secs(1),
         None,
         false,
