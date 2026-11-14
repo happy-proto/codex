@@ -167,7 +167,7 @@ impl App {
                 thread_id,
                 ThreadTitleDestination::Automatic,
                 recent_conversation_thread_title_prompt(&conversation),
-            /*expected_name*/ None,
+                /*expected_name*/ None,
             );
         }
     }
@@ -260,7 +260,7 @@ impl App {
                         })
                         .await
                         .map_err(|error| error.to_string())?;
-                    if response.thread.name.is_some() {
+                    if response.thread.name != expected_name {
                         return Err("thread already has a title".to_string());
                     }
                 }
@@ -421,6 +421,7 @@ impl App {
             thread_id,
             ThreadTitleDestination::RenameSuggestion { request_id },
             recent_conversation_thread_title_prompt(&conversation),
+            /*expected_name*/ None,
         );
     }
 }
@@ -589,3 +590,17 @@ pub(super) fn parse_thread_title(response: &str) -> Option<String> {
 #[cfg(test)]
 #[path = "thread_title_tests.rs"]
 mod tests;
+
+pub(super) fn user_message_text(content: &[UserInput]) -> Option<String> {
+    let text = content
+        .iter()
+        .filter_map(|item| match item {
+            UserInput::Text { text, .. } => {
+                Some(crate::user_prompt::extract_prompt_request_with_offset(text).0)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!text.trim().is_empty()).then_some(text)
+}

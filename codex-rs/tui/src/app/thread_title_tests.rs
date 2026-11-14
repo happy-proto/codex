@@ -136,6 +136,7 @@ async fn automatic_thread_title_skips_saved_names_before_starting_a_hidden_reque
         thread_id,
         ThreadTitleDestination::Automatic,
         recent_conversation_thread_title_prompt("Fix the login timeout"),
+        /*expected_name*/ None,
     );
     let mut tui = crate::tui::test_support::make_test_tui()?;
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
