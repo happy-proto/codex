@@ -604,3 +604,16 @@ pub(super) fn user_message_text(content: &[UserInput]) -> Option<String> {
         .join(" ");
     (!text.trim().is_empty()).then_some(text)
 }
+pub(super) fn thread_title_prompt(user_message: &str) -> String {
+    let instructions = thread_title_instructions();
+    let prefix = format!("{instructions}\n\nUser prompt:\n");
+    let remaining_bytes = THREAD_TITLE_PROMPT_MAX_BYTES.saturating_sub(prefix.len());
+    let user_message = user_message
+        .trim()
+        .char_indices()
+        .take_while(|(index, character)| index + character.len_utf8() <= remaining_bytes)
+        .map(|(_, character)| character)
+        .collect::<String>();
+
+    format!("{prefix}{user_message}")
+}
