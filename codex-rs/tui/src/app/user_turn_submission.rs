@@ -116,7 +116,7 @@ pub(super) async fn try_submit_user_turn(
                     app_server,
                     thread_id,
                     ThreadTitleDestination::Automatic,
-                    &text,
+                    super::thread_title::thread_title_prompt(&text),
                     fork_name,
                 );
             }
