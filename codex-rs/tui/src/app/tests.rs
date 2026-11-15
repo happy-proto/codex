@@ -4711,7 +4711,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
 
     keys!(prefix, main);
     assert_eq!(app.current_displayed_thread_id(), Some(parent_thread_id));
-    let restored = keyboard_frame(side_frame(&mut app, &mut tui, size)?);
+    let restored = side_frame(&mut app, &mut tui, size)?;
     assert!(
         restored.contains("Saved user message")
             && restored.contains("Back to bottom")
