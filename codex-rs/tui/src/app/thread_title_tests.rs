@@ -48,89 +48,20 @@ const EXPECTED_THREAD_TITLE_INSTRUCTIONS: &str = concat!(
 );
 
 #[tokio::test]
-async fn cloud_conversations_save_the_first_message_if_generation_is_unavailable()
--> color_eyre::Result<()> {
-    use codex_app_server_client::CloudOperation;
-    use codex_app_server_protocol::ClientRequest;
-
-    let mut app = make_test_app().await;
-    let thread_id = ThreadId::new();
-    let (client, mut commands, _server_events) =
+async fn cloud_conversations_skip_local_first_turn_title_context() {
+    let app = make_test_app().await;
+    let (client, _commands, _server_events) =
         codex_app_server_client::CloudClient::channel(/*capacity*/ 1);
-    let mut app_server = crate::app_server_session::AppServerSession::new(
+    let server = crate::app_server_session::AppServerSession::new(
         crate::backend_id::BackendId::new(),
         codex_app_server_client::AppServerClient::Cloud(client),
         crate::app_server_session::ThreadParamsMode::Cloud,
     );
-    let mut tui = crate::tui::test_support::make_test_tui()?;
-    let (tx, mut events) = unbounded_channel();
-    app.app_event_tx = AppEventSender::new(tx);
-    app.active_thread_id = Some(thread_id);
-    app.chat_widget
-        .handle_thread_session(crate::app::tests::test_thread_session(
-            thread_id,
-            app.config.cwd.to_path_buf(),
-        ));
-    app.chat_widget
-        .setup_terminal_title(vec![crate::bottom_pane::TerminalTitleItem::ThreadName]);
-
-    app.handle_active_thread_event(
-        &mut tui,
-        &mut app_server,
-        ThreadBufferedEvent::Notification(Box::new(ServerNotification::ItemCompleted(
-            ItemCompletedNotification::new(
-                thread_id.to_string(),
-                "first-turn".to_string(),
-                title_user_message("first-message", "Fix the **login** timeout"),
-                /*started_at_ms*/ None,
-                /*completed_at_ms*/ 0,
-            ),
-        ))),
-    )
-    .await?;
-    insta::assert_snapshot!(
-        app.chat_widget.last_terminal_title.as_deref().unwrap_or_default(),
-        @"Fix the login timeout"
+    assert!(
+        app.first_turn_title_context(&server, ThreadId::new(), false)
+            .await
+            .is_none()
     );
-    let read = commands.recv().await.expect("read the saved Cloud title");
-    assert!(matches!(
-        read.operation,
-        CloudOperation::Request(request)
-            if matches!(request.as_ref(), ClientRequest::ThreadRead { params, .. }
-                if params.thread_id == thread_id.to_string() && !params.include_turns)
-    ));
-    let mut thread = crate::app::agents_overview::tests::overview_thread(
-        thread_id,
-        /*parent_thread_id*/ None,
-        "",
-        codex_app_server_protocol::ThreadStatus::Idle,
-    );
-    thread.name = None;
-    read.response
-        .send(Ok(Ok(serde_json::json!({"thread": thread}))))
-        .unwrap();
-    let rename = commands.recv().await.expect("save the Cloud title");
-    assert!(matches!(
-        rename.operation,
-        CloudOperation::Request(request)
-            if matches!(request.as_ref(), ClientRequest::ThreadSetName { params, .. }
-                if params.thread_id == thread_id.to_string() && params.name == "Fix the login timeout")
-    ));
-    app.cloud_title_shutdown.send(()).unwrap();
-    assert!(app.cloud_title_shutdown.closed().now_or_never().is_none());
-    rename.response.send(Ok(Ok(serde_json::json!({})))).unwrap();
-    app.cloud_title_shutdown.closed().await;
-    loop {
-        let event = events.recv().await.expect("title generation completes");
-        if matches!(&event, AppEvent::GeneratedThreadTitle { .. }) {
-            app.handle_event(&mut tui, &mut app_server, event).await?;
-            break;
-        }
-    }
-
-    assert!(app.pending_thread_titles.is_empty());
-    assert!(commands.try_recv().is_err());
-    Ok(())
 }
 
 #[tokio::test]
