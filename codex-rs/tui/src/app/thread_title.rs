@@ -87,7 +87,7 @@ impl App {
     /// Summarize the first finished task, including results learned from external references.
     pub(super) async fn maybe_generate_automatic_thread_title(
         &mut self,
-        app_server: &AppServerSession,
+        app_server: &mut AppServerSession,
         thread_id: ThreadId,
         turn: &Turn,
     ) {
