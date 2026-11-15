@@ -928,10 +928,10 @@ fn cjk_strong_selection_copy_preserves_bold_and_plain_text() {
     }
     let plain = "加粗内容。后续中文内容";
     assert_eq!(
-        crate::markdown_copy::literal_selection(&selected, plain),
+        crate::markdown_copy::literal_selection(&selected, plain, None),
         plain
     );
-    let (copied, _) = crate::markdown_copy::selection(&selected, plain);
+    let (copied, _) = crate::markdown_copy::selection(&selected, plain, None);
     // 选择复制沿用上游的边界实体转义，使其它 CommonMark 客户端也能识别加粗。
     assert_eq!(copied, "**加粗内容。**&#21518;续中文内容");
     let parsed = pulldown_cmark::Parser::new(&copied).collect::<Vec<_>>();
