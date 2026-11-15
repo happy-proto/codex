@@ -557,7 +557,7 @@ async fn collect_compaction_output(
         // A speculative request may recover at a later checkpoint without failing the turn.
         return Err(match request_kind {
             CompactionRequestKind::Background(_) => CodexErr::Stream(message),
-            CompactionRequestKind::Foreground => CodexErr::Fatal(message),
+            CompactionRequestKind::Foreground(_) => CodexErr::Fatal(message),
         });
     }
 
@@ -1633,11 +1633,15 @@ mod tests {
             reasoning_removals: None,
             end_turn: Some(true),
         })]);
-        let error =
-            collect_compaction_output(&sess, &turn, stream, CompactionRequestKind::Foreground)
-                .await
-                .err()
-                .expect("missing compaction output");
+        let error = collect_compaction_output(
+            &sess,
+            &turn,
+            stream,
+            CompactionRequestKind::Foreground(&CancellationToken::new()),
+        )
+        .await
+        .err()
+        .expect("missing compaction output");
         assert!(matches!(error.details(), CodexErrorDetails::Fatal(_)));
     }
 
