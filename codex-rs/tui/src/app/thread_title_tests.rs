@@ -194,7 +194,7 @@ async fn automatic_thread_title_skips_saved_names_before_starting_a_hidden_reque
         .thread_set_name(thread_id, "Agent already named this task".to_string())
         .await?;
     app.generate_thread_title(
-        &server,
+        &mut server,
         thread_id,
         ThreadTitleDestination::Automatic,
         recent_conversation_thread_title_prompt("Fix the login timeout"),
