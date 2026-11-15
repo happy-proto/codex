@@ -3849,11 +3849,6 @@ async fn try_run_sampling_request(
                 sess.state.lock().await.last_sampling_cot_removed =
                     reasoning_removals.as_ref().map(|counts| !counts.is_empty());
                 response_completed = true;
-                if let Some(usage) = &token_usage {
-                    request_token_usage
-                        .get_or_insert_default()
-                        .add_assign(usage);
-                }
                 tracing::info!(
                     event.name = "codex.generation_speed.response",
                     thread_id = %sess.thread_id,
