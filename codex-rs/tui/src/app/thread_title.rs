@@ -11,6 +11,7 @@ use super::thread_events::ThreadBufferedEvent;
 use crate::app_event::AppEvent;
 use crate::app_event::ThreadTitleDestination;
 use crate::app_server_session::AppServerSession;
+use crate::app_server_session::ThreadSettingsOwner;
 use crate::temporary_structured_request::TemporaryStructuredThreadOptions;
 use crate::temporary_structured_request::TemporaryThreadKind;
 use crate::temporary_structured_request::run_temporary_structured_turn;
@@ -87,7 +88,7 @@ impl App {
     /// Summarize the first finished task, including results learned from external references.
     pub(super) async fn maybe_generate_automatic_thread_title(
         &mut self,
-        app_server: &mut AppServerSession,
+        app_server: &AppServerSession,
         thread_id: ThreadId,
         turn: &Turn,
     ) {
@@ -162,8 +163,9 @@ impl App {
             recent_conversation_messages(items)
         };
         if let Some(conversation) = conversation {
+            let mut request_view = app_server.request_view();
             self.generate_thread_title(
-                app_server,
+                &mut request_view,
                 thread_id,
                 ThreadTitleDestination::Automatic,
                 recent_conversation_thread_title_prompt(&conversation),
