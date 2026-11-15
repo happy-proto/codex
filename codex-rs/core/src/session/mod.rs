@@ -5054,6 +5054,9 @@ impl Session {
                         world_state_baseline,
                         self.services.model_client.auth_owner(),
                     ) else {
+                        tracing::info!(target: "codex_core::async_compaction", thread_id = %self.thread_id,
+                            stage = "rejected", source = "prefix_validation",
+                            "原子历史替换拒绝后台压缩前缀");
                         return false;
                     };
                     replacement
