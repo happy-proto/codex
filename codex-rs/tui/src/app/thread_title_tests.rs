@@ -509,7 +509,7 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
             .clone();
         completed.items.clear();
         completed.status = TurnStatus::Completed;
-        app.maybe_generate_automatic_thread_title(&app_server, thread_id, &completed)
+        app.maybe_generate_automatic_thread_title(&mut app_server, thread_id, &completed)
             .await;
         assert!(app.pending_thread_titles.is_empty());
 
@@ -543,14 +543,14 @@ async fn check_thread_title_generation(scenario: TitleScenario) -> color_eyre::R
 
         for status in [TurnStatus::Failed, TurnStatus::Interrupted] {
             completed.status = status;
-            app.maybe_generate_automatic_thread_title(&app_server, thread_id, &completed)
+            app.maybe_generate_automatic_thread_title(&mut app_server, thread_id, &completed)
                 .await;
             assert!(app.pending_thread_titles.is_empty());
         }
         completed.status = TurnStatus::Completed;
         let mut later_turn = completed.clone();
         later_turn.id = "later-turn".to_string();
-        app.maybe_generate_automatic_thread_title(&app_server, thread_id, &later_turn)
+        app.maybe_generate_automatic_thread_title(&mut app_server, thread_id, &later_turn)
             .await;
         assert!(app.pending_thread_titles.is_empty());
 
