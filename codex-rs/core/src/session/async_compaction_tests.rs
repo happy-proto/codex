@@ -351,11 +351,12 @@ async fn failed_background_compaction_retries_after_backoff(failures: usize, ter
     sess.replace_history(vec![original.clone()], None).await;
     sess.update_token_usage_info(
         &turn,
-        Some(&TokenUsage {
+        TokenUsage {
             input_tokens: 70_000,
             total_tokens: 70_000,
             ..Default::default()
-        }),
+        }
+        .into(),
         /*includes_reasoning*/ false,
     )
     .await
