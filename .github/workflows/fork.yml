@@ -295,6 +295,8 @@ jobs:
           shared-key: fork-build-linux-v1-downloads
           save-if: false
       - name: 配置并校验测试所需的 V8 产物
+        env:
+          CODEX_REPO_ROOT: ${{ github.workspace }}
         run: |
           PYTHONPATH=scripts python3 - <<'PY'
           import os
