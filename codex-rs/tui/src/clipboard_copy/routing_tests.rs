@@ -11,12 +11,89 @@ use pretty_assertions::assert_eq;
 use std::cell::RefCell;
 
 #[test]
+fn rex_requests_terminal_copy_on_every_copy_without_native_writes() {
+    for (ssh_session, tmux_session, wsl_session) in [
+        (false, false, false),
+        (true, false, true),
+        (false, true, false),
+    ] {
+        let native_calls = std::cell::Cell::new(0);
+        let terminal_calls = std::cell::Cell::new(0);
+        // No client inventory is consulted: the same process can gain remote clients later.
+        for text in ["local client", "remote client joined", "mixed clients"] {
+            let result = copy_to_clipboard_with(
+                text,
+                CopyFormat::Markdown,
+                CopyEnvironment {
+                    rex_session: true,
+                    ssh_session,
+                    tmux_session,
+                    wsl_session,
+                    ..local_tmux_environment()
+                },
+                |_| panic!("Rex copies must not invoke tmux"),
+                |actual| {
+                    assert_eq!(actual, text);
+                    terminal_calls.set(terminal_calls.get() + 1);
+                    Ok(())
+                },
+                |_, _| {
+                    native_calls.set(native_calls.get() + 1);
+                    Ok(Some(ClipboardLease::test()))
+                },
+                |_| panic!("Rex copies must not write to the Windows clipboard"),
+            );
+            assert!(matches!(result, Ok(CopyOutcome::Requested)));
+        }
+        assert_eq!(native_calls.get(), 0);
+        assert_eq!(terminal_calls.get(), 3);
+    }
+}
+
+#[test]
+fn rex_copy_preserves_payload_limits_empty_errors_and_terminal_failures() {
+    let environment = CopyEnvironment {
+        rex_session: true,
+        tmux_session: false,
+        ..local_tmux_environment()
+    };
+    for text in [String::new(), "x".repeat(OSC52_MAX_RAW_BYTES + 1)] {
+        let result = copy_to_clipboard_with(
+            &text,
+            CopyFormat::PlainText,
+            environment,
+            |_| panic!("Rex must not invoke tmux"),
+            |text| super::osc52_sequence(text, super::Osc52Target::Direct).map(|_| ()),
+            |_, _| panic!("Rex must not write to the native clipboard"),
+            |_| panic!("Rex must not write to the Windows clipboard"),
+        );
+        let error = result.err().expect("invalid payload should fail");
+        assert!(error.contains(if text.is_empty() {
+            "empty"
+        } else {
+            "too large"
+        }));
+    }
+    let result = copy_to_clipboard_with(
+        "hello",
+        CopyFormat::PlainText,
+        environment,
+        |_| panic!("Rex must not invoke tmux"),
+        |_| Err("terminal write failed".into()),
+        |_, _| panic!("Rex must not write to the native clipboard"),
+        |_| panic!("Rex must not write to the Windows clipboard"),
+    );
+    assert_eq!(result.err().as_deref(), Some("terminal write failed"));
+}
+
+#[test]
 fn local_tmux_preserves_native_html_when_terminal_silently_rejects_copy() {
     let calls = RefCell::new(Vec::new());
     let result = copy_to_clipboard_with(
         "**hello**",
         CopyFormat::Markdown,
         CopyEnvironment {
+            rex_session: false,
             herdr_session: false,
             ssh_session: false,
             forwarded_x11: false,
@@ -50,6 +127,7 @@ fn copy_uses_osc52_when_tmux_fails_even_if_native_copy_succeeds() {
         "hello",
         CopyFormat::PlainText,
         CopyEnvironment {
+            rex_session: false,
             herdr_session: false,
             ssh_session: false,
             forwarded_x11: false,
@@ -77,6 +155,7 @@ fn copy_uses_osc52_when_tmux_fails_even_if_native_copy_succeeds() {
 
 fn local_tmux_environment() -> CopyEnvironment {
     CopyEnvironment {
+        rex_session: false,
         herdr_session: false,
         tmux_session: true,
         ssh_session: false,
@@ -92,6 +171,7 @@ fn herdr_forwards_to_osc52_even_when_native_copy_succeeds() {
         "hello",
         CopyFormat::PlainText,
         CopyEnvironment {
+            rex_session: false,
             herdr_session: true,
             ssh_session: false,
             forwarded_x11: false,

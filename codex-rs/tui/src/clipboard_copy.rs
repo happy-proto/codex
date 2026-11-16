@@ -103,6 +103,7 @@ fn copy_to_clipboard(
     let wsl_deadline = std::time::Instant::now() + std::time::Duration::from_secs(/*secs*/ 5);
     let ssh_session = is_ssh_session();
     let environment = CopyEnvironment {
+        rex_session: false,
         herdr_session: std::env::var("HERDR_ENV").is_ok_and(|value| value == "1"),
         ssh_session,
         forwarded_x11: ssh_session
@@ -174,6 +175,7 @@ impl ClipboardLease {
 /// without touching real clipboards or terminal I/O.
 #[derive(Clone, Copy)]
 struct CopyEnvironment {
+    rex_session: bool,
     herdr_session: bool,
     ssh_session: bool,
     forwarded_x11: bool,
@@ -376,6 +378,7 @@ mod tests {
 
     fn remote_environment() -> CopyEnvironment {
         CopyEnvironment {
+            rex_session: false,
             herdr_session: false,
             ssh_session: true,
             forwarded_x11: false,
@@ -393,6 +396,7 @@ mod tests {
 
     fn local_environment() -> CopyEnvironment {
         CopyEnvironment {
+            rex_session: false,
             herdr_session: false,
             ssh_session: false,
             forwarded_x11: false,
