@@ -35,6 +35,7 @@
 | 0027 | [按项忽略 Cloud config](0027-ignore-cloud-config.md) |
 | 0028 | [Markdown 文件终端链接](0028-markdown-file-hyperlinks.md) |
 | 0029 | [@ 菜单的会话筛选](0029-at-session-filter.md) |
+| 0030 | [终端剪贴板路由](0030-rex-clipboard.md) |
 | 0031 | [内置会话管理 skill](0031-session-skill.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
