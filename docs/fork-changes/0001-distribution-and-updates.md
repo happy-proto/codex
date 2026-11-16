@@ -29,6 +29,8 @@ macOS 包的真实运行验收使用目标系统，不能以 Linux 静态校验�
 直接运行 Cargo 的测试 job 使用上游 package builder 的 V8 resolver 配置并校验
 Codex 发布的 V8 archive 与 binding；包构建由上游 package builder 完成相同配置，
 不能依赖 rusty_v8 默认的 denoland 下载地址。
+Linux 测试 runner 安装系统 bubblewrap，并按上游 CI 配置非特权 user namespace；
+测试开始前验证沙箱可启动，确保受限文件写入测试不会因缺少运行依赖而失败。
 macOS 不使用固定证书或签名 Secrets，不提供 Apple 公证或 Gatekeeper 信任。
 固定自签名尝试在上游基线 `0.170.0-alpha.2` 的同步中移除：证书和 designated requirement
 虽能保持相同，Keychain 的 partition 检查仍按构建 cdhash 区分，无法避免跨版本重复授权。
