@@ -69,7 +69,7 @@ pub(super) async fn run(cli: Cli, endpoint: RemoteAppServerEndpoint) -> anyhow::
             required_human_approval: false,
             endpoint,
             client_name: "codex_exec".into(),
-            client_version: env!("CARGO_PKG_VERSION").into(),
+            client_version: codex_build_info::BuildInfo::package_version().to_string(),
             experimental_api: true,
             mcp_server_openai_form_elicitation: false,
             opt_out_notification_methods: Vec::new(),
