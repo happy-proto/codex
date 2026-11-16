@@ -1666,6 +1666,10 @@ mod tests {
             assert!(
                 matches!(error.details(), CodexErrorDetails::UsageAccountingFailed(message) if message.contains("negative sibling price"))
             );
+        } else if background {
+            assert!(
+                matches!(error.details(), CodexErrorDetails::Stream(message) if message.contains("exactly one compaction output"))
+            );
         } else {
             assert!(
                 matches!(error.details(), CodexErrorDetails::Fatal(message) if message.contains("exactly one compaction output"))
