@@ -260,7 +260,12 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config libcap-dev libasound2-dev fish
+          sudo apt-get install -y --no-install-recommends pkg-config libcap-dev libasound2-dev fish bubblewrap
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          if sudo sysctl -a 2>/dev/null | grep -q '^kernel.apparmor_restrict_unprivileged_userns'; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          bwrap --ro-bind / / --unshare-user --unshare-pid --proc /proc --dev /dev -- true
       - name: 安装仓库 Rust 工具链
         working-directory: codex-rs
         run: |
