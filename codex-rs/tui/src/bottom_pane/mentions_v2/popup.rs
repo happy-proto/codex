@@ -181,6 +181,7 @@ mod tests {
         let tasks = [TaskMention {
             thread_id: "01900000-0000-7000-8000-000000000001".into(),
             title: "Review migration".into(),
+            label_style: crate::thread_label::ThreadLabelStyle::Plain,
             cwd: "/workspace/project".into(),
             snippet: "database schema".into(),
         }];
