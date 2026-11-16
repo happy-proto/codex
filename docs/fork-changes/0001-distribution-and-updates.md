@@ -26,6 +26,9 @@ hardened runtime 签名并保留上游 entitlements。打包前检查 ARM64 架�
 签名后计算归档摘要；Linux 包在 CI 执行运行与安装契约验收。
 macOS 包的真实运行验收使用目标系统，不能以 Linux 静态校验替代；工具链和 SDK 更新后
 需验证 CLI、code-mode host、app-server、V8 工具调用和终端会话行为。
+直接运行 Cargo 的测试 job 使用上游 package builder 的 V8 resolver 配置并校验
+Codex 发布的 V8 archive 与 binding；包构建由上游 package builder 完成相同配置，
+不能依赖 rusty_v8 默认的 denoland 下载地址。
 macOS 不使用固定证书或签名 Secrets，不提供 Apple 公证或 Gatekeeper 信任。
 固定自签名尝试在上游基线 `0.170.0-alpha.2` 的同步中移除：证书和 designated requirement
 虽能保持相同，Keychain 的 partition 检查仍按构建 cdhash 区分，无法避免跨版本重复授权。
