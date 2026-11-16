@@ -294,6 +294,19 @@ jobs:
           cache-bin: false
           shared-key: fork-build-linux-v1-downloads
           save-if: false
+      - name: 配置并校验测试所需的 V8 产物
+        run: |
+          PYTHONPATH=scripts python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from codex_package.targets import TARGET_SPECS
+          from codex_package.v8 import resolve_codex_v8_cargo_env
+
+          env = resolve_codex_v8_cargo_env(TARGET_SPECS["x86_64-unknown-linux-gnu"])
+          with Path(os.environ["GITHUB_ENV"]).open("a") as output:
+              for name, value in env.items():
+                  output.write(f"{name}={value}\n")
+          PY
       - name: 验证包版本解析与源码构建回退
         if: matrix.profile == 'release'
         working-directory: codex-rs
