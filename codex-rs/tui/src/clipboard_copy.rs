@@ -1,12 +1,14 @@
 //! Clipboard copy backend for the TUI's `/copy` command and `Ctrl+O` hotkey.
 //!
 //! Local copying uses the native clipboard, or the Windows clipboard directly on WSL.
+//! Rex sessions use OSC 52 exclusively, without initializing the host clipboard or
+//! inspecting clients, so clients joining after startup receive the same copy requests.
 //! WSL sessions over SSH with a forwarded X11 display use the native clipboard instead.
 //! In tmux and Herdr, also forward to the attached terminal so clients attached after Codex
 //! started receive the copy. Over SSH, wrap OSC 52 for GNU screen when detected.
 //!
 //! Terminal writes have no delivery acknowledgement: a successful send must not
-//! suppress native copying. Both the host and attached client's clipboards may
+//! suppress native copying outside Rex. Both the host and attached client's clipboards may
 //! change. Outside tmux, Herdr, and SSH, use OSC 52 only if native copying fails.
 //!
 //! On Linux, X11 and some Wayland compositors require the process that wrote the
@@ -87,6 +89,7 @@ impl CopyStatus {
 ///
 /// Try native copying, then independently attempt terminal forwarding in tmux,
 /// Herdr, or SSH. A terminal send is best effort and does not confirm clipboard delivery.
+/// Rex bypasses native setup and copying, and always requests terminal delivery.
 /// Terminal forwarding may replace native HTML with plain text.
 ///
 /// Native or WSL success returns `Copied`, even if terminal forwarding fails.
@@ -103,7 +106,7 @@ fn copy_to_clipboard(
     let wsl_deadline = std::time::Instant::now() + std::time::Duration::from_secs(/*secs*/ 5);
     let ssh_session = is_ssh_session();
     let environment = CopyEnvironment {
-        rex_session: false,
+        rex_session: std::env::var_os("REX_SESSION").is_some(),
         herdr_session: std::env::var("HERDR_ENV").is_ok_and(|value| value == "1"),
         ssh_session,
         forwarded_x11: ssh_session
@@ -114,7 +117,8 @@ fn copy_to_clipboard(
     #[cfg(not(target_os = "android"))]
     let native_copy = {
         // Bound WSL native setup: even initialization can block forever.
-        let clipboard = (!environment.wsl_session).then(arboard::Clipboard::new);
+        let clipboard =
+            (!environment.rex_session && !environment.wsl_session).then(arboard::Clipboard::new);
         move |text: &str, html: Option<&str>| {
             let clipboard = match clipboard {
                 Some(clipboard) => clipboard.map_err(|e| format!("clipboard unavailable: {e}"))?,
@@ -194,6 +198,12 @@ fn copy_to_clipboard_with(
 ) -> Result<CopyOutcome, String> {
     if text.is_empty() {
         return Err("nothing to copy: the selected content is empty".to_string());
+    }
+
+    // Rex may gain local or remote clients at any time. Let the terminal route every
+    // request; do not write to the host clipboard or invoke a multiplexer command.
+    if environment.rex_session {
+        return osc52_copy_fn(text).map(|()| CopyOutcome::Requested);
     }
 
     let terminal_copy = || {
