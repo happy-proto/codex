@@ -1143,7 +1143,7 @@ async fn run_hooks_and_collect_inputs(
             record_additional_contexts(sess, turn_context, hook_outcome.additional_contexts).await;
         } else {
             if let TurnInput::UserInput { content, .. } = input_item.as_ref() {
-                accepted_user_input.extend(content.iter().cloned());
+                accepted_user_input.extend(content.iter().map(ResolvedUserInput::to_user_input));
             }
             // Tool outputs retain their durability barrier, including in mixed input batches.
             let input_persist_context = if persist_context == PersistContext::SteeredUserInput
