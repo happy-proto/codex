@@ -2380,7 +2380,6 @@ impl<'a, 'policy> Writer<'a, 'policy> {
                     self.push_span(")".into());
                 }
             } else if let Some(local_target_display) = link.local_target_display {
-                let destination = local_link_url(&link.destination, self.cwd.as_deref());
                 let show_label = link
                     .local_label_spans
                     .iter()
@@ -2400,7 +2399,11 @@ impl<'a, 'policy> Writer<'a, 'policy> {
                             .zip(link.local_label_inline)
                         {
                             let previous = std::mem::replace(&mut self.copy_inline, inline);
-                            self.push_local_link_span(label_span, destination.as_ref());
+                            if local_link_url(&link.destination, self.cwd.as_deref()).is_some() {
+                                self.push_link_target(label_span, &link.destination, link.source);
+                            } else {
+                                self.push_span_to_table_cell(label_span);
+                            }
                             self.copy_inline = previous;
                         }
                         self.push_span_to_table_cell(" (".into());
@@ -2422,7 +2425,11 @@ impl<'a, 'policy> Writer<'a, 'policy> {
                             .zip(link.local_label_inline)
                         {
                             let previous = std::mem::replace(&mut self.copy_inline, inline);
-                            self.push_local_link_span(label_span, destination.as_ref());
+                            if local_link_url(&link.destination, self.cwd.as_deref()).is_some() {
+                                self.push_link_target(label_span, &link.destination, link.source);
+                            } else {
+                                self.push_span(label_span);
+                            }
                             self.copy_inline = previous;
                         }
                         self.push_span(" (".into());
@@ -2455,22 +2462,13 @@ impl<'a, 'policy> Writer<'a, 'policy> {
 
     fn push_link_target(&mut self, span: Span<'static>, destination: &str, source: usize) {
         let mut target = HyperlinkLine::default();
-        if preferences::document_links_enabled()
-            && let Some(link) = local_links::sidebar_file_link(destination)
-        {
+        if let Some(link) = local_links::sidebar_file_link(destination) {
             let width = span_width(&span);
             target.line.push_span(span);
-            target
-                .hyperlinks
-                .push(TerminalHyperlink::document(0..width, link));
-        } else if is_local_path_like_link(destination)
-            && let Some(url) = local_link_url(destination, self.cwd.as_deref())
-        {
-            let width = span_width(&span);
-            target.line.push_span(span);
-            target
-                .hyperlinks
-                .push(TerminalHyperlink::local_file(0..width, &url));
+            target.hyperlinks.push(
+                TerminalHyperlink::document(0..width, link)
+                    .with_terminal_file(local_link_url(destination, self.cwd.as_deref())),
+            );
         } else {
             target.push_span(span, Some(destination));
         }
@@ -2493,27 +2491,6 @@ impl<'a, 'policy> Writer<'a, 'policy> {
             .as_ref()
             .and_then(|link| link.local_target_display.as_ref())
             .is_some()
-    }
-
-    fn push_local_link_span(&mut self, span: Span<'static>, destination: Option<&url::Url>) {
-        let mut annotated = HyperlinkLine::new(Line::from(span));
-        if let Some(destination) = destination {
-            annotated
-                .hyperlinks
-                .push(crate::terminal_hyperlinks::TerminalHyperlink::local_file(
-                    0..annotated.source_width(),
-                    destination,
-                ));
-        }
-        if let Some(cell) = self
-            .table_state
-            .as_mut()
-            .and_then(|table| table.current_cell.as_mut())
-        {
-            cell.push_annotated(annotated, &self.copy_inline);
-        } else {
-            self.push_annotated(annotated);
-        }
     }
 
     fn push_local_link_label_span(&mut self, span: Span<'static>) {
