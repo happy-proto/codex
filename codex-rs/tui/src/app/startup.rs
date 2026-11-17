@@ -1020,6 +1020,7 @@ See the Codex keymap documentation for supported actions and examples."
             agents_overview::AgentsOverviewState::new(local_settings.tui.agents_overview_grouping);
         let mut app = Self {
             statusline_metrics,
+            statusline_picker: None,
             provider_writes,
             feature_write_lock: Arc::default(),
             config_notification_test_generation: 0,
@@ -1342,6 +1343,9 @@ See the Codex keymap documentation for supported actions and examples."
         let mut reconnect = None;
         let mut generation_speed_poll = tokio::time::interval(Duration::from_secs(1));
         generation_speed_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut cloud_environment_picker: Option<
+            futures::future::LocalBoxFuture<'static, crate::bottom_pane::SelectionViewParams>,
+        > = None;
         let mut waiting_for_initial_session_configured = wait_for_initial_session_configured;
         let mut waiting_for_initial_session_header = true;
 
@@ -1371,14 +1375,32 @@ See the Codex keymap documentation for supported actions and examples."
             }
             backends.replay_ready_side_startup(&app);
             let multi_backend = app.config.features.enabled(Feature::TuiMultiBackend);
-            let next_backend = if multi_backend && app.can_cycle_conversation_backend() {
-                backends.next_listening_backend(displayed_owner)
-            } else {
-                None
-            };
+            let draft = multi_backend.then(|| app.backend_draft()).flatten();
+            let next_backend = draft
+                .is_some()
+                .then(|| backends.next_listening_backend(displayed_owner))
+                .flatten();
             let current_label =
                 next_backend.and_then(|_| backends.displayed_name(&app.app_server_target));
-            app.chat_widget.set_new_backend_control(current_label);
+            let cloud_draft = draft.filter(|_| {
+                app.app_server_target == AppServerTarget::Cloud
+                    && backends.is_listening(displayed_owner)
+            });
+            let environment_name = cloud_draft.map(|id| {
+                app.agents_overview
+                    .draft_cloud_environments
+                    .get(&id)
+                    .filter(|(owner, _)| *owner == displayed_owner)
+                    .map(|(_, env)| {
+                        crate::terminal_title::sanitize_terminal_title(
+                            &env.name,
+                            crate::terminal_title::TitleEncoding::Unicode,
+                        )
+                    })
+                    .unwrap_or_else(|| "Default".into())
+            });
+            app.chat_widget
+                .set_new_backend_control(current_label, environment_name);
             if !backends.is_listening(displayed_owner)
                 && !app.pending_startup_thread_start
                 && !app.reconnect.offline
@@ -1535,6 +1557,13 @@ See the Codex keymap documentation for supported actions and examples."
                     }
                     AppRunControl::Continue
                 }
+                Some(view) = futures::future::OptionFuture::from(cloud_environment_picker.as_mut()) => {
+                    cloud_environment_picker = None;
+                    app.chat_widget.replace_selection_view_if_present(
+                        super::cloud_environments::LOADING_VIEW_ID, view,
+                    );
+                    AppRunControl::Continue
+                }
                 Some(event) = app.saved_openings.next_event(&mut app_event_rx) => {
                     if let AppEvent::ArchiveFinished { backend_id, thread_id, result: Ok(()) } = &event
                         && *backend_id != displayed_owner
@@ -1543,6 +1572,25 @@ See the Codex keymap documentation for supported actions and examples."
                         backends.parked_inputs_mut(slot).remove(thread_id);
                     }
                     let switch_backend = match &event {
+                        AppEvent::ChooseCloudEnvironment => {
+                            if let Some(source) = cloud_draft
+                                && app.chat_widget.no_modal_or_popup_active()
+                                && let AppServerRequestHandle::Cloud(handle) = backends.session_at(displayed_session).request_handle()
+                            {
+                                app.chat_widget.show_selection_view(super::cloud_environments::loading_view());
+                                cloud_environment_picker = Some(Box::pin(async move {
+                                    let environments = handle.list_saved_environments().await.map_err(|error| error.to_string());
+                                    super::cloud_environments::cloud_environment_picker(environments, source)
+                                }));
+                            }
+                            continue;
+                        }
+                        AppEvent::StartCloudConversation { source, saved_environment }
+                            if cloud_draft == Some(*source) =>
+                        {
+                            Some((displayed_owner, NewBackendSession::ChangeCloudEnvironment(saved_environment.clone())))
+                        }
+                        AppEvent::StartCloudConversation { .. } => continue,
                         AppEvent::ChooseNewSessionCheckout { name } | AppEvent::NewSession { name }
                             if multi_backend => app.other_new_session_backend(&backends).await
                                 .map(|owner| (owner, NewBackendSession::Fresh { name: name.clone() })),
