@@ -568,14 +568,14 @@ impl SidePaneLayout {
             .map(|widget| widget.side_auxiliary_lines(area.width))
             .unwrap_or_else(|| companion.display.auxiliary.clone());
         crate::markdown_render::preferences::with_visible_local_paths(|| {
-        companion.view.render_parked(
-            transcript,
-            frame.buffer,
-            reflowed_cells.as_deref().unwrap_or(&companion.cells),
-            active,
-            &auxiliary,
-            collapse_turn_details,
-        );
+            companion.view.render_parked(
+                transcript,
+                frame.buffer,
+                reflowed_cells.as_deref().unwrap_or(&companion.cells),
+                active,
+                &auxiliary,
+                collapse_turn_details,
+            );
         });
         frame
             .image_placements
