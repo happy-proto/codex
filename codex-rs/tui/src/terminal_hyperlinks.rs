@@ -149,6 +149,7 @@ impl TerminalHyperlink {
             columns,
             destination: destination.to_string(),
             destination_kind: DestinationKind::LocalFile,
+            markdown_source: None,
         }
     }
 
