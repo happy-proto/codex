@@ -18,7 +18,6 @@ use codex_app_server_protocol::McpServerToolCallResponse;
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadStartParams;
-use codex_app_server_protocol::ThreadStatus;
 use codex_app_server_protocol::TurnInterruptParams;
 use codex_app_server_protocol::TurnInterruptResponse;
 use codex_app_server_protocol::TurnStartParams;
@@ -150,12 +149,13 @@ async fn task_mcp_resume_replaces_endpoint_and_token_and_survives_reload(
             core_test_support::responses::ev_response_created("held"),
             core_test_support::responses::ev_completed("held"),
         ]);
-        Mock::given(method("POST"))
+        let pending_request = Mock::given(method("POST"))
             .and(path_regex(".*/responses$"))
             .respond_with(
                 core_test_support::responses::sse_response(body).set_delay(Duration::from_secs(30)),
             )
-            .mount(&model)
+            .expect(1)
+            .mount_as_scoped(&model)
             .await;
         let started: TurnStartResponse = app
             .request(|request_id| ClientRequest::TurnStart {
@@ -170,7 +170,14 @@ async fn task_mcp_resume_replaces_endpoint_and_token_and_survives_reload(
                 },
             })
             .await?;
-        Some(started.turn.id)
+        // Establish an in-flight model request before resuming. The resume summary
+        // can lag the live turn's notifications and is not the rebind contract.
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            pending_request.wait_until_satisfied(),
+        )
+        .await?;
+        Some((started.turn.id, pending_request))
     } else {
         None
     };
@@ -187,9 +194,6 @@ async fn task_mcp_resume_replaces_endpoint_and_token_and_survives_reload(
         .await?;
     assert_eq!(resumed.approval_policy, started.approval_policy);
     assert_eq!(resumed.sandbox, started.sandbox);
-    if active {
-        assert!(matches!(resumed.thread.status, ThreadStatus::Active { .. }));
-    }
     // Closing the old listener turns a retained endpoint into an observable failure.
     old_task.abort();
     assert_eq!(
@@ -207,7 +211,12 @@ async fn task_mcp_resume_replaces_endpoint_and_token_and_survives_reload(
         "Bearer new"
     );
     new_task.abort();
-    if let Some(turn_id) = pending_turn {
+    if let Some((turn_id, _pending_request)) = pending_turn {
+        assert_eq!(
+            model.received_requests().await.unwrap().len(),
+            1,
+            "resuming must preserve the pending turn rather than start another model request"
+        );
         let _: TurnInterruptResponse = app
             .request(|request_id| ClientRequest::TurnInterrupt {
                 request_id,
