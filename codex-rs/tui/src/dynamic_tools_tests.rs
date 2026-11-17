@@ -640,7 +640,7 @@ async fn agent_sets_thread_title_before_first_turn_completes() -> color_eyre::Re
 
 #[tokio::test]
 async fn initial_thread_title_preserves_existing_and_manual_names() -> color_eyre::Result<()> {
-    let (_home, server, source, _target) = test_server(json!({})).await?;
+    let (_home, server, source, _target) = test_server(json!({}), /*older_messages*/ 0).await?;
     for title in ["Read the deployment report", "Overwrite the initial title"] {
         let response = response_json(
             call_tool(
