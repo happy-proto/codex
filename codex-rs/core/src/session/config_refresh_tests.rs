@@ -128,6 +128,75 @@ async fn mcp_reload_survives_guardian_only_publications() {
     );
 }
 
+#[tokio::test]
+async fn task_mcp_rebind_preserves_policy_and_survives_config_reload() {
+    let (session, _) = make_session_and_context().await;
+    let original = session.get_config().await;
+    let mut initial = original.as_ref().clone();
+    let old: McpServerConfig = serde_json::from_value(json!({
+        "url": "http://127.0.0.1:1/mcp",
+        "http_headers": {"Authorization": "Bearer old"},
+        "default_tools_approval_mode": "prompt",
+        "tools": {"send_message_to_thread": {"approval_mode": "prompt"}},
+        "enabled": false
+    }))
+    .unwrap();
+    let mut servers = initial.mcp_servers.get().clone();
+    servers.insert("codex_tui".into(), old.clone());
+    initial.mcp_servers.set(servers).unwrap();
+    initial.config_layer_stack = initial
+        .config_layer_stack
+        .with_session_config(
+            toml::Value::try_from(&HashMap::from([(
+                "mcp_servers",
+                HashMap::from([("codex_tui", old.clone())]),
+            )]))
+            .unwrap(),
+        )
+        .unwrap();
+    session
+        .state
+        .lock()
+        .await
+        .session_configuration
+        .original_config_do_not_use = Arc::new(initial.clone());
+    let mut expected = old;
+    expected.transport = serde_json::from_value(json!({
+        "url": "http://127.0.0.1:2/mcp",
+        "http_headers": {"Authorization": "Bearer new"}
+    }))
+    .unwrap();
+    session
+        .rebind_tui_mcp_transport(expected.transport.clone())
+        .await
+        .unwrap();
+    let rebound = session.get_config().await;
+    assert_eq!(rebound.mcp_servers.get().get("codex_tui"), Some(&expected));
+    assert_eq!(rebound.model, initial.model);
+    assert_eq!(rebound.permissions, initial.permissions);
+    let layers = rebound.config_layer_stack.effective_config();
+    assert_eq!(
+        layers["mcp_servers"]["codex_tui"]["url"].as_str(),
+        Some("http://127.0.0.1:2/mcp")
+    );
+    assert_eq!(
+        layers["mcp_servers"]["codex_tui"]["http_headers"]["Authorization"].as_str(),
+        Some("Bearer new")
+    );
+    let refreshed = Config::rebuild_with_session_layers(
+        &rebound.config_layer_stack,
+        rebound.cwd.to_path_buf(),
+        &rebound.config_layer_stack,
+        rebound.codex_home.clone(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        refreshed.mcp_servers.get().get("codex_tui"),
+        Some(&expected)
+    );
+}
+
 async fn runtime_servers(session: &Session) -> HashMap<String, McpServerConfig> {
     let config = session.get_config().await;
     codex_mcp::configured_mcp_servers(
