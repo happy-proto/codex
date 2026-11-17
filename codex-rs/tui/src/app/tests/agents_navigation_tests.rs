@@ -639,10 +639,24 @@ async fn collab_history_resolves_replayed_and_live_names_in_background() -> Resu
         }
         Box::pin(app.handle_event(&mut tui, &mut server, event)).await?;
     };
-    let mut parked = SideCompanion::empty(app.config.cwd.to_path_buf());
-    parked.cells = app.transcript_cells.clone();
     let parked_id = ThreadId::new();
-    app.side_companions.insert(parked_id, parked);
+    let (mut parked_widget, _, _, _) = make_chatwidget_manual_with_sender().await;
+    let (_, display, bottom) = parked_widget.take_side_display(/*width*/ 80);
+    app.side_companions.insert(
+        parked_id,
+        SideCompanion {
+            route: crate::app_event_sender::SideProjectionRoute {
+                thread_id: parked_id,
+                generation: uuid::Uuid::new_v4(),
+            },
+            projection: None,
+            commit_ticks: false,
+            bottom,
+            display,
+            cells: app.transcript_cells.clone(),
+            view: Default::default(),
+        },
+    );
     // The wait is queued before the name arrives, but inserted after the lookup completes.
     app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(
         ServerNotification::ItemStarted(ItemStartedNotification::new(

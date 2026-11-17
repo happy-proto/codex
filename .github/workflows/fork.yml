@@ -331,6 +331,14 @@ jobs:
         env:
           CORE_TEST_FILTER: ${{ inputs.core_test_filter }}
         run: ../scripts/fork/cargo-observed.sh test --profile ci-test --timings --target x86_64-unknown-linux-gnu -p codex-core --test all "$CORE_TEST_FILTER" -- --test-threads=1
+      - name: 验证内置会话工具、侧栏预览与 managed worktree
+        if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
+        working-directory: codex-rs
+        run: |
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib session_task_commands
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib open_in_codex_reveals_a_file_when_the_calling_thread_returns -- --test-threads=1
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib managed_worktree_tools -- --test-threads=1
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test app_server_daemon task_worktrees_survive_cli_disconnect_on_shared_daemon
       - name: Verify fork update presentation
         if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs

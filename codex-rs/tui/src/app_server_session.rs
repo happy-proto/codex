@@ -780,13 +780,24 @@ impl AppServerSession {
         &mut self,
         config: Config,
         workspace_enabled: bool,
+        task_tools_enabled: bool,
         app_event_tx: AppEventSender,
         status_updates: tokio::sync::broadcast::Sender<ThreadStatusChangedNotification>,
     ) -> std::io::Result<()> {
         if self.thread_params_mode == ThreadParamsMode::Cloud {
             return Ok(());
         }
-        let worktrees = if !self.uses_remote_workspace() && !config.active_project.is_untrusted() {
+        let sidebar_backend = (workspace_enabled
+            && !self.uses_remote_workspace()
+            && self.supports_document_previews())
+        .then_some(self.backend_id());
+        if !task_tools_enabled && sidebar_backend.is_none() {
+            return Ok(());
+        }
+        let worktrees = if task_tools_enabled
+            && !self.uses_remote_workspace()
+            && !config.active_project.is_untrusted()
+        {
             // Listing a fresh, nonexistent thread is read-only and returns an empty page
             // on supported stores. Probe before advertising tools or allocating a checkout.
             let support = self
@@ -845,10 +856,6 @@ impl AppServerSession {
             });
         thread_start_params.daybreak_enabled =
             daybreak_launch_override.then_some(config.daybreak_enabled);
-        let sidebar_backend = (workspace_enabled
-            && !self.uses_remote_workspace()
-            && self.supports_document_previews())
-        .then_some(self.backend_id());
         let server = Arc::new(
             DynamicToolMcpServer::start(
                 self.request_handle(),
@@ -858,6 +865,7 @@ impl AppServerSession {
                 status_updates,
                 worktrees,
                 sidebar_backend,
+                task_tools_enabled,
             )
             .await?,
         );

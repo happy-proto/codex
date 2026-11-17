@@ -30,6 +30,7 @@
 | 0022 | [terminfo 颜色能力回退](0022-terminfo-color-detection.md) |
 | 0023 | [通过 @ 选择插件提供的 skill](0023-at-plugin-skills.md) |
 | 0027 | [按项忽略 Cloud config](0027-ignore-cloud-config.md) |
+| 0031 | [内置会话管理 skill](0031-session-skill.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 同步上游按 [同步与发布](../../.agents/skills/codex-fork-maintenance/references/upstream-sync.md) 执行。

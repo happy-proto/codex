@@ -393,6 +393,10 @@ enum Subcommand {
     /// Queue a message for an existing session.
     Queue(QueueCommand),
 
+    /// Manage tasks through an existing app-server connection.
+    #[command(subcommand)]
+    Task(codex_tui::SessionTaskCommand),
+
     /// Archive a saved session by id or session name.
     Archive(SessionArchiveCommand),
 
@@ -1801,6 +1805,16 @@ async fn dispatch_cli(
             .await?;
             println!("{output}");
         }
+        Some(Subcommand::Task(command)) => {
+            if interactive.no_daemon {
+                anyhow::bail!("codex task requires a shared app-server");
+            }
+            let endpoint = resolve_remote_endpoint(root_remote, root_remote_auth_token_env)?;
+            let result = codex_tui::run_session_task_command(command, endpoint)
+                .await
+                .map_err(|err| anyhow::anyhow!("{err:#}"))?;
+            println!("{result}");
+        }
         Some(Subcommand::Queue(cmd)) => {
             let output = queue_cmd::run_queue_command(
                 cmd,
@@ -2611,6 +2625,7 @@ fn unsupported_subcommand_name_for_strict_config(
         }
         Some(Subcommand::RemoteControl(remote_control)) => Some(remote_control.subcommand_name()),
         Some(Subcommand::Mcp(_)) => Some("mcp"),
+        Some(Subcommand::Task(_)) => Some("task"),
         Some(Subcommand::Plugin(_)) => Some("plugin"),
         Some(Subcommand::MigrateRollouts(_)) => Some("migrate-rollouts"),
         Some(Subcommand::MigrateNfsDb(_)) => Some("migrate-nfs-db"),

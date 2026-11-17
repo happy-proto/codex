@@ -1486,6 +1486,9 @@
             "tui_multi_backend": {
               "type": "boolean"
             },
+            "tui_task_mcp": {
+              "type": "boolean"
+            },
             "tui_workspace": {
               "type": "boolean"
             },
@@ -8911,6 +8914,9 @@
           "type": "boolean"
         },
         "tui_multi_backend": {
+          "type": "boolean"
+        },
+        "tui_task_mcp": {
           "type": "boolean"
         },
         "tui_workspace": {

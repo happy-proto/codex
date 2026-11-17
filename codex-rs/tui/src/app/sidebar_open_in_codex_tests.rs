@@ -90,10 +90,12 @@ async fn open_in_codex_scenario() -> Result<()> {
         .start_dynamic_tool_mcp(
             config.clone(),
             app.local_settings.workspace_enabled(&config),
+            /*task_tools_enabled*/ false,
             app.app_event_tx.clone(),
             app.dynamic_tool_status_updates.clone(),
         )
         .await?;
+    assert!(!server.thread_tool_transport().uses_task_mcp());
     let caller = server.start_thread(&config).await?;
     let caller_id = caller.session.thread_id;
 
