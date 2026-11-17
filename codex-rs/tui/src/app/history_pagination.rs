@@ -143,12 +143,12 @@ impl App {
                     return None;
                 }
                 let inserted = index..index + split_images.len();
-                pane.splice_older_cells(index..index, split_images);
+                pane.cells.splice(index..index, split_images);
                 Some(inserted)
             });
             let index = history_prefix_len(&pane.cells);
             let inserted = index..index + cells.len();
-            pane.splice_older_cells(index..index, cells);
+            pane.cells.splice(index..index, cells);
             pane.view.history_page_loaded(&pane.cells, inserted, images);
             pane.view.history = if app_server.has_older_history(thread_id) {
                 TranscriptHistoryState::Partial

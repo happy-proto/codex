@@ -1041,6 +1041,7 @@ impl App {
                             )),
                             display: crate::app_event::CapturedSideDisplay {
                                 rendered_completion_turn_ids: Default::default(),
+                                generated_images: Default::default(),
                                 active: None,
                                 auxiliary: Vec::new(),
                             },
