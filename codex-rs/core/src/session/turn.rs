@@ -1272,7 +1272,7 @@ async fn run_hooks_and_collect_inputs(
                 persist_context
             };
             if let TurnInput::UserInput { content, .. } = input_item.as_ref() {
-                accepted_user_input.extend(content.iter().cloned());
+                accepted_user_input.extend(content.iter().map(ResolvedUserInput::to_user_input));
             }
             if let Err(error) = record_pending_input(
                 sess,
