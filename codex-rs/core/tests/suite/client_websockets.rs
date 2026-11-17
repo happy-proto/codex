@@ -2230,6 +2230,7 @@ async fn responses_websocket_rotation_refreshes_prepared_connections(warmup: boo
                 harness.summary,
                 None,
                 &metadata,
+                /*reuse_response*/ true,
             )
             .await
             .unwrap();
@@ -2255,6 +2256,7 @@ async fn responses_websocket_rotation_refreshes_prepared_connections(warmup: boo
                 harness.summary,
                 None,
                 &metadata,
+                /*reuse_response*/ true,
             )
             .await
             .unwrap();
