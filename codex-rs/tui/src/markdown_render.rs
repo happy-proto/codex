@@ -2465,9 +2465,13 @@ impl<'a, 'policy> Writer<'a, 'policy> {
         if let Some(link) = local_links::sidebar_file_link(destination) {
             let width = span_width(&span);
             target.line.push_span(span);
+            let terminal_file = if preferences::document_links_enabled() {
+                None
+            } else {
+                local_link_url(destination, self.cwd.as_deref())
+            };
             target.hyperlinks.push(
-                TerminalHyperlink::document(0..width, link)
-                    .with_terminal_file(local_link_url(destination, self.cwd.as_deref())),
+                TerminalHyperlink::document(0..width, link).with_terminal_file(terminal_file),
             );
         } else {
             target.push_span(span, Some(destination));
