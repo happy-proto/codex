@@ -284,7 +284,6 @@ mod session_picker;
 mod side;
 mod side_focus;
 mod side_pane;
-mod sidebar_files;
 mod sidebar_model_documents;
 #[cfg(all(test, not(windows)))]
 #[path = "app/sidebar_open_in_codex_tests.rs"]
@@ -294,6 +293,7 @@ mod side_projection;
 mod sidebar;
 mod sidebar_close;
 mod sidebar_document;
+mod sidebar_files;
 pub(crate) mod sidebar_loading;
 mod startup;
 pub(crate) mod startup_bootstrap;
