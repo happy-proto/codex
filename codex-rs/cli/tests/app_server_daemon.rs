@@ -590,3 +590,138 @@ fn manual_update_rejects_an_unowned_installation() -> Result<()> {
     assert!(daemon.pid("app-server-updater.pid").is_err());
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn task_worktrees_survive_cli_disconnect_on_shared_daemon() -> Result<()> {
+    use codex_app_server_client::RemoteAppServerClient;
+    use codex_app_server_client::RemoteAppServerConnectArgs;
+    use codex_app_server_client::RemoteAppServerEndpoint;
+    use codex_app_server_protocol::ClientRequest;
+    use codex_app_server_protocol::RequestId;
+    use codex_app_server_protocol::ThreadStartParams;
+    use codex_app_server_protocol::ThreadStartResponse;
+    use serde_json::json;
+
+    let daemon = TestDaemon::new()?;
+    let responses =
+        app_test_support::create_mock_responses_server_repeating_assistant("Ready").await;
+    app_test_support::MockResponsesConfig::new(&responses.uri()).write(daemon.home.path())?;
+    let repo = daemon.home.path().canonicalize()?.join("project");
+    std::fs::create_dir(&repo)?;
+    let git = |args: &[&str]| -> Result<()> {
+        let output = Command::new("git")
+            .current_dir(&repo)
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgSign=false",
+            ])
+            .args(args)
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(())
+    };
+    git(&["init", "--initial-branch=main"])?;
+    std::fs::write(repo.join("tracked.txt"), "committed")?;
+    git(&["add", "tracked.txt"])?;
+    git(&["commit", "-m", "base"])?;
+    std::fs::write(repo.join("tracked.txt"), "source edit")?;
+    daemon.lifecycle("start")?;
+
+    let socket_path = codex_app_server_client::app_server_control_socket_path(daemon.home.path())?;
+    let client = RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
+        endpoint: RemoteAppServerEndpoint::UnixSocket { socket_path },
+        client_name: "task-worktree-test".to_owned(),
+        client_version: "0.0.0".to_owned(),
+        required_human_approval: false,
+        experimental_api: true,
+        mcp_server_openai_form_elicitation: false,
+        opt_out_notification_methods: Vec::new(),
+        channel_capacity: 64,
+    })
+    .await?;
+    let source: ThreadStartResponse = client
+        .request_typed(ClientRequest::ThreadStart {
+            request_id: RequestId::Integer(1),
+            params: ThreadStartParams {
+                cwd: Some(repo.to_string_lossy().into_owned()),
+                environments: Some(serde_json::from_value(
+                    json!([{"environmentId": "local", "cwd": repo}]),
+                )?),
+                ..Default::default()
+            },
+        })
+        .await?;
+    let task = |owner: &str, args: &[&str]| -> Result<Value> {
+        let output = daemon
+            .command()
+            .env("CODEX_THREAD_ID", owner)
+            .current_dir(&repo)
+            .arg("task")
+            .args(args)
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&output.stdout)?)
+    };
+
+    let source_id = &source.thread.id;
+    let attached = task(source_id, &["worktree-create", "--ref", "main"])?;
+    assert_eq!(attached["type"], "created", "{attached:#}");
+    let root = attached["worktree"]["workspaceRoot"]
+        .as_str()
+        .context("worktree path")?;
+    assert_eq!(
+        std::fs::read_to_string(std::path::Path::new(root).join("tracked.txt"))?,
+        "committed"
+    );
+    let listed = task(source_id, &["worktree-list"])?;
+    assert_eq!(listed["data"][0]["workspaceRoot"], root);
+    let child = task(
+        source_id,
+        &[
+            "create",
+            "--worktree",
+            "--ref",
+            "main",
+            "--prompt",
+            "Say Ready",
+        ],
+    )?;
+    let child_id = child["threadId"].as_str().context("child thread ID")?;
+    let child_root = child["worktree"]["worktree"]["workspaceRoot"]
+        .as_str()
+        .context("child worktree path")?;
+    assert_ne!(child_id, source_id);
+    assert_ne!(child_root, root);
+    assert_eq!(child["worktree"]["type"], "created", "{child:#}");
+    assert_eq!(
+        task(child_id, &["worktree-list"])?["data"][0]["workspaceRoot"],
+        child_root
+    );
+    let summary = task(child_id, &["read", child_id, "--summary"])?;
+    let cwd = summary["thread"]["cwd"].as_str().context("child cwd")?;
+    assert_eq!(std::path::Path::new(cwd), std::path::Path::new(child_root));
+    let delegated = task(
+        source_id,
+        &["send", child_id, "--prompt", "Signal Ready again"],
+    )?;
+    assert_eq!(delegated["threadId"], child_id);
+    assert!(delegated["turn"]["id"].is_string());
+    assert_eq!(
+        std::fs::read_to_string(repo.join("tracked.txt"))?,
+        "source edit"
+    );
+    client.shutdown().await?;
+    Ok(())
+}

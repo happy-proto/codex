@@ -3261,13 +3261,13 @@ async fn archive_progress_scenario(owned_screen: bool) -> Result<()> {
 
     // The handler drew this frame before it waited for either cleanup reply.
     let rendered = buffer_text(tui.terminal.previous_buffer());
-    insta::assert_snapshot!(
+    assert_eq!(
         rendered
             .lines()
             .find(|line| line.contains("Archiving"))
             .expect("archive progress hint")
             .trim(),
-        @"Archiving…"
+        "Archiving…"
     );
     assert_eq!(app.current_displayed_thread_id(), Some(thread_id));
     assert!(app.side_threads.contains_key(&side_id));
@@ -3442,6 +3442,7 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths_sc
     Box::pin(app_server.start_dynamic_tool_mcp(
         app.config.clone(),
         /*workspace_enabled*/ false,
+        /*task_tools_enabled*/ true,
         app.app_event_tx.clone(),
         app.dynamic_tool_status_updates.clone(),
     ))
@@ -3764,6 +3765,7 @@ async fn local_mcp_respects_configured_servers_and_managed_requirements() -> Res
             .start_dynamic_tool_mcp(
                 app.config.clone(),
                 /*workspace_enabled*/ false,
+                /*task_tools_enabled*/ true,
                 app.app_event_tx.clone(),
                 app.dynamic_tool_status_updates.clone(),
             )

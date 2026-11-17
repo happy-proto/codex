@@ -711,10 +711,7 @@ impl App {
 
             let requires_mcp = crate::dynamic_tools::DELEGATION_TOOLS
                 .contains(&params.tool.as_str())
-                || matches!(
-                    app_server_client.thread_tool_transport(),
-                    crate::dynamic_tools_mcp::ThreadToolTransport::Mcp(_)
-                );
+                || app_server_client.thread_tool_transport().uses_task_mcp();
             let archiving =
                 thread_id.is_some_and(|id| self.agents_overview.pending_archives.contains_key(&id));
             if !tui_tool

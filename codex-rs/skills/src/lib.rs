@@ -56,6 +56,9 @@ use std::hash::Hasher;
 use thiserror::Error;
 
 const SYSTEM_SKILLS_DIR: Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets/samples");
+const FORK_SKILLS_DIR: Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets/fork");
+const FORK_NATIVE_SKILLS_DIR: Dir =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets/fork-native");
 
 const SYSTEM_SKILLS_DIR_NAME: &str = ".fork";
 const SKILLS_DIR_NAME: &str = "skills";
