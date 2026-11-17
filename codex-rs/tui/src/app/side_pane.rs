@@ -602,13 +602,7 @@ pub(super) fn paint_divider(
     // of retained pixels can erase the rest of that terminal row.
     let guide = drag
         .filter(|drag| drag.guide_only)
-        .map_or(divider.x, |drag| {
-            drag.screen.right()
-                - drag.percent().map_or(drag.initial_width, |p| {
-                    preferred_width(drag.screen.width, Some(p))
-                })
-                - GAP
-        });
+        .map_or(divider.x, |drag| drag.screen.right() - drag.width - GAP);
     let style = if highlight_divider || drag.is_some() {
         crate::style::accent_style()
     } else {
