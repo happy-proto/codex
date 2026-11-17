@@ -3429,6 +3429,11 @@ async fn try_run_sampling_request(
                     && let Some(interrupt) = stream.interrupt.take()
                     && step_context.settings.model_info.use_responses_lite
                 {
+                    tracing::info!(
+                        event.name = "codex.generation_speed.interrupt",
+                        reason = "preempt_drain",
+                        "generation speed request interrupted and draining"
+                    );
                     let _ = interrupt.send(codex_api::ResponseInterrupt::Drain);
                 }
                 // A steer cannot start another request before the accounting owner returns its decision.
