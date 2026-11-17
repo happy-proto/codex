@@ -15,6 +15,69 @@ use codex_features::Feature;
 use tracing::warn;
 
 impl Session {
+    /// Replace only the client-owned task transport; retain all tool and session policy.
+    pub(crate) async fn rebind_tui_mcp_transport(
+        &self,
+        transport: codex_config::McpServerTransportConfig,
+    ) -> std::io::Result<()> {
+        let transport_layer = toml::Value::try_from(&transport).map_err(std::io::Error::other)?;
+        {
+            let mut state = self.state.lock().await;
+            let mut config = state
+                .session_configuration
+                .original_config_do_not_use
+                .as_ref()
+                .clone();
+            let mut servers = config.mcp_servers.get().clone();
+            // Daemon recovery may load the thread before a TUI registers its
+            // ephemeral listener. Restore the TUI's standard task approval policy.
+            let fallback = serde_json::from_value(serde_json::json!({
+                "url": "http://127.0.0.1:1/mcp",
+                "default_tools_approval_mode": "approve",
+                "tools": {
+                    "create_thread": {"approval_mode": "prompt"},
+                    "send_message_to_thread": {"approval_mode": "prompt"},
+                    "fork_thread": {"approval_mode": "prompt"},
+                    "create_worktree": {"approval_mode": "approve"}
+                }
+            }))
+            .map_err(std::io::Error::other)?;
+            let was_missing = !servers.contains_key("codex_tui");
+            let server = servers.entry("codex_tui".into()).or_insert(fallback);
+            server.transport = transport;
+            let registration_layer = if was_missing {
+                toml::Value::try_from(&*server).map_err(std::io::Error::other)?
+            } else {
+                transport_layer
+            };
+            config
+                .mcp_servers
+                .set(servers)
+                .map_err(std::io::Error::other)?;
+            // Keep the replacement in session layers as well, so a later config reload
+            // cannot resurrect the earlier client's URL or bearer token.
+            config.config_layer_stack =
+                config
+                    .config_layer_stack
+                    .with_session_config(toml::Value::Table(
+                        [(
+                            "mcp_servers".into(),
+                            toml::Value::Table(
+                                [("codex_tui".into(), registration_layer)]
+                                    .into_iter()
+                                    .collect(),
+                            ),
+                        )]
+                        .into_iter()
+                        .collect(),
+                    ))?;
+            state.session_configuration.original_config_do_not_use = Arc::new(config);
+            self.mark_mcp_runtime_dirty(McpRefreshReason::McpConfigReloaded);
+        }
+        self.schedule_mcp_prewarm();
+        Ok(())
+    }
+
     pub(crate) async fn disable_mcp_enterprise_auth(&self) {
         {
             let mut state = self.state.lock().await;
