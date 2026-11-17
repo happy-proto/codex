@@ -2455,12 +2455,22 @@ impl<'a, 'policy> Writer<'a, 'policy> {
 
     fn push_link_target(&mut self, span: Span<'static>, destination: &str, source: usize) {
         let mut target = HyperlinkLine::default();
-        if let Some(link) = sidebar_file_link(destination) {
+        if preferences::document_links_enabled()
+            && let Some(link) = local_links::sidebar_file_link(destination)
+        {
             let width = span_width(&span);
             target.line.push_span(span);
             target
                 .hyperlinks
                 .push(TerminalHyperlink::document(0..width, link));
+        } else if is_local_path_like_link(destination)
+            && let Some(url) = local_link_url(destination, self.cwd.as_deref())
+        {
+            let width = span_width(&span);
+            target.line.push_span(span);
+            target
+                .hyperlinks
+                .push(TerminalHyperlink::local_file(0..width, &url));
         } else {
             target.push_span(span, Some(destination));
         }
