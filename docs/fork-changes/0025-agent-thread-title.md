@@ -29,7 +29,7 @@
 - [user_turn_submission.rs](../../codex-rs/tui/src/app/user_turn_submission.rs)：首次用户 turn 提交时附带上下文。
 - [user_message_submission.rs](../../codex-rs/tui/src/app_server_session/user_message_submission.rs)：统一消息提交流程通过 `TurnStartSettings` 透传上下文，仅新 turn 使用；保留提交回执、未确认草稿及 steer 行为。
 - [app_server_session.rs](../../codex-rs/tui/src/app_server_session.rs)：通过既有协议转发上下文，公共指令保持不变。
-- [内置会话管理](0034-session-skill.md)：app-server 连接与重命名操作。
+- [内置会话管理](0032-session-skill.md)：app-server 连接与重命名操作。
 - [thread_title_tests.rs](../../codex-rs/tui/src/app/thread_title_tests.rs)：首轮注入范围、未命名兜底、已有服务端名称跳过兜底，以及原有手动命名与取消回归。
 
 定向测试通过 [fork CI](../../.github/workflows/fork.yml) 的 `thread_title` 过滤器执行。
