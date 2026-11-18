@@ -1,6 +1,7 @@
 //! Reattach the TUI-owned loopback transport without replaying general resume overrides.
 
 use super::*;
+use codex_app_server_protocol::TUI_MCP_OWNER_CONNECTED_REASON;
 use codex_config::McpServerConfig;
 use codex_config::McpServerTransportConfig;
 
@@ -72,7 +73,11 @@ impl ThreadRequestProcessor {
                 .claim_tui_mcp_owner(thread_id, request_id.connection_id)
                 .await
             {
-                return Err(invalid_request("cannot rebind task MCP while its owning client is connected; disconnect that client and resume again".to_string()));
+                let mut error = invalid_request(
+                    "cannot rebind task MCP while its owning client is connected; disconnect that client and resume again",
+                );
+                error.data = Some(serde_json::json!({ "reason": TUI_MCP_OWNER_CONNECTED_REASON }));
+                return Err(error);
             }
             thread
                 .rebind_tui_mcp_transport(replacement.transport)
