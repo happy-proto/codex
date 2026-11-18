@@ -709,10 +709,9 @@ async fn task_worktrees_survive_cli_disconnect_on_shared_daemon() -> Result<()> 
         task(child_id, &["worktree-list"])?["data"][0]["workspaceRoot"],
         child_root
     );
-    assert_eq!(
-        task(child_id, &["read", child_id, "--summary"])?["thread"]["cwd"],
-        child_root
-    );
+    let summary = task(child_id, &["read", child_id, "--summary"])?;
+    let cwd = summary["thread"]["cwd"].as_str().context("child cwd")?;
+    assert_eq!(std::path::Path::new(cwd), std::path::Path::new(child_root));
     assert_eq!(
         std::fs::read_to_string(repo.join("tracked.txt"))?,
         "source edit"
