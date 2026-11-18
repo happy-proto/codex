@@ -18,6 +18,7 @@ use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadSource;
 use codex_worktree::CreateWorktree;
+use codex_worktree::ManagedWorktree;
 use codex_worktree::WorktreeManager;
 use codex_worktree::WorktreeSettings;
 use serde::Deserialize;
@@ -119,7 +120,133 @@ impl ManagedWorktreeTools {
         }
     }
 
-    async fn execute_inner(
+    pub(crate) async fn source_cwd(
+        &self,
+        handle: &AppServerRequestHandle,
+        thread_id: &str,
+    ) -> Result<PathBuf, String> {
+        let response: ThreadReadResponse = handle
+            .request_typed(ClientRequest::ThreadRead {
+                request_id: request_id(),
+                params: ThreadReadParams {
+                    thread_id: thread_id.to_owned(),
+                    include_turns: false,
+                },
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        if response.thread.ephemeral
+            || matches!(
+                response.thread.thread_source.as_ref(),
+                Some(ThreadSource::Feature(source)) if source == ATTACHED_SIDE_CHAT_SOURCE
+            )
+        {
+            return Err("Side conversations cannot retain worktree attachments. Request a new worktree in the main conversation.".to_owned());
+        }
+        attachments(handle, thread_id, /*cursor*/ None).await?;
+        let environments = response
+            .thread
+            .environments
+            .as_ref()
+            .ok_or("Server cannot verify the task's execution environment")?;
+        if environments.is_empty()
+            || environments.iter().any(|environment| {
+                environment.environment_id != codex_exec_server::LOCAL_ENVIRONMENT_ID
+            })
+        {
+            return Err("Managed worktrees require a local execution environment".to_owned());
+        }
+        let source_cwd = PathBuf::from(environments[0].cwd.as_str());
+        Self::ensure_trusted(self.source_config_builder.clone(), &source_cwd).await?;
+        Ok(source_cwd)
+    }
+
+    pub(crate) async fn ensure_trusted(
+        builder: ConfigBuilder,
+        cwd: &std::path::Path,
+    ) -> Result<(), String> {
+        let config = builder
+            .fallback_cwd(Some(cwd.to_path_buf()))
+            .build()
+            .await
+            .map_err(|error| error.to_string())?;
+        if config.active_project.is_untrusted() {
+            return Err("Source project is explicitly untrusted".to_owned());
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn allocate(
+        &self,
+        source_cwd: PathBuf,
+        revision: Option<String>,
+    ) -> Result<ManagedWorktree, String> {
+        if revision.as_ref().is_some_and(|value| value.len() > 128) {
+            return Err("Use a revision of at most 128 bytes".to_owned());
+        }
+        let manager = self.manager.clone();
+        tokio::task::spawn_blocking(move || {
+            let base = match revision {
+                Some(base) => base,
+                None => codex_worktree::default_worktree_base(&source_cwd)?,
+            };
+            manager.create(&CreateWorktree {
+                source_cwd,
+                base: Some(base),
+            })
+        })
+        .await
+        .map_err(|error| format!("Worktree creation outcome is uncertain: {error}"))?
+        .map_err(|error| error.to_string())
+    }
+
+    pub(crate) async fn attach(
+        &self,
+        handle: &AppServerRequestHandle,
+        thread_id: String,
+        checkout: ManagedWorktree,
+    ) -> Value {
+        let payload = json!({
+            "root": checkout.root,
+            "workspaceRoot": checkout.cwd,
+            "sourceCwd": checkout.source_cwd
+        });
+        let manager = self.manager.clone();
+        let root = checkout.root.clone();
+        let owner = thread_id.clone();
+        let binding = tokio::task::spawn_blocking(move || manager.bind_thread(&root, &owner)).await;
+        let registration = match binding {
+            Ok(Ok(())) => handle
+                .request_typed::<ThreadAttachmentAddResponse>(ClientRequest::ThreadAttachmentAdd {
+                    request_id: request_id(),
+                    params: ThreadAttachmentAddParams {
+                        thread_id,
+                        attachment_type: "worktree".to_owned(),
+                        identity_key: checkout.root.to_string_lossy().into_owned(),
+                        payload: payload.clone(),
+                    },
+                })
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string()),
+            Ok(Err(error)) => Err(error.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
+        match registration {
+            Ok(()) => json!({
+                "type": "created",
+                "worktree": payload,
+                "message": "Keep the task cwd. Use the returned workspaceRoot explicitly and request filesystem permissions if needed."
+            }),
+            Err(error) => json!({
+                "type": "registrationFailed",
+                "worktree": payload,
+                "message": format!("Checkout retained; registration failed: {error}. Inspect it before retrying.")
+            }),
+        }
+    }
+
+    pub(crate) async fn execute_inner(
         &self,
         handle: AppServerRequestHandle,
         thread_id: String,
@@ -177,51 +304,7 @@ impl ManagedWorktreeTools {
                         "Use allowAsync: true and a revision of at most 128 bytes".to_owned()
                     );
                 }
-                let response: ThreadReadResponse = handle
-                    .request_typed(ClientRequest::ThreadRead {
-                        request_id: request_id(),
-                        params: ThreadReadParams {
-                            thread_id: thread_id.clone(),
-                            include_turns: false,
-                        },
-                    })
-                    .await
-                    .map_err(|error| error.to_string())?;
-                if response.thread.ephemeral
-                    || matches!(
-                        response.thread.thread_source.as_ref(),
-                        Some(ThreadSource::Feature(source)) if source == ATTACHED_SIDE_CHAT_SOURCE
-                    )
-                {
-                    return Err("Side conversations cannot retain worktree attachments. Request a new worktree in the main conversation.".to_owned());
-                }
-                // Verify capability before allocating a checkout, including SQLite availability.
-                attachments(&handle, &thread_id, /*cursor*/ None).await?;
-                let environments = response
-                    .thread
-                    .environments
-                    .as_ref()
-                    .ok_or("Server cannot verify the task's execution environment")?;
-                if environments.is_empty()
-                    || environments.iter().any(|environment| {
-                        environment.environment_id != codex_exec_server::LOCAL_ENVIRONMENT_ID
-                    })
-                {
-                    return Err(
-                        "Managed worktree tools require a local execution environment".to_owned(),
-                    );
-                }
-                let source_cwd = PathBuf::from(environments[0].cwd.as_str());
-                let source = self
-                    .source_config_builder
-                    .clone()
-                    .fallback_cwd(Some(source_cwd.clone()))
-                    .build()
-                    .await
-                    .map_err(|error| error.to_string())?;
-                if source.active_project.is_untrusted() {
-                    return Err("Source project is explicitly untrusted".to_owned());
-                }
+                let source_cwd = self.source_cwd(&handle, &thread_id).await?;
                 let mut operations = self.operations.lock().await;
                 operations.retain(|_, operation| {
                     operation.result.is_none()
@@ -246,61 +329,13 @@ impl ManagedWorktreeTools {
                         result: None,
                     },
                 );
-                let manager = self.manager.clone();
+                let service = self.clone();
                 let registry = Arc::clone(&self.operations);
                 let id = operation_id.clone();
                 tokio::spawn(async move {
-                    // Supervise the entire worker, including serialization and attachment RPCs.
-                    // A panic after allocation must not leave status permanently pending.
                     let worker = tokio::spawn(async move {
-                        let owner = thread_id.clone();
-                        let created = tokio::task::spawn_blocking(move || {
-                            let base = match args.revision {
-                                Some(base) => base,
-                                None => codex_worktree::default_worktree_base(&source_cwd)?,
-                            };
-                            let checkout = manager.create(&CreateWorktree {
-                                source_cwd,
-                                base: Some(base),
-                            })?;
-                            let registration = manager.bind_thread(&checkout.root, &owner);
-                            Ok::<_, anyhow::Error>((checkout, registration))
-                        })
-                        .await;
-                        match created {
-                            Ok(Ok((checkout, registration))) => {
-                                let payload = json!({"root":checkout.root,"workspaceRoot":checkout.cwd,"sourceCwd":checkout.source_cwd});
-                                let registration = match registration {
-                                    Ok(()) => handle
-                                        .request_typed::<ThreadAttachmentAddResponse>(
-                                            ClientRequest::ThreadAttachmentAdd {
-                                                request_id: request_id(),
-                                                params: ThreadAttachmentAddParams {
-                                                    thread_id,
-                                                    attachment_type: "worktree".to_owned(),
-                                                    identity_key: checkout
-                                                        .root
-                                                        .to_string_lossy()
-                                                        .into_owned(),
-                                                    payload: payload.clone(),
-                                                },
-                                            },
-                                        )
-                                        .await
-                                        .map(|_| ())
-                                        .map_err(|error| error.to_string()),
-                                    Err(error) => Err(error.to_string()),
-                                };
-                                Ok(
-                                    json!({"type":if registration.is_ok() {"created"} else {"registrationFailed"}, "worktree":payload,
-                                "message":if registration.is_ok() {"Keep the task cwd. Use the returned workspaceRoot explicitly and request filesystem permissions if needed."} else {"Checkout retained; registration failed. Do not create a duplicate. Inspect the worktree browser to recover."}}),
-                                )
-                            }
-                            Ok(Err(error)) => Err(error.to_string()),
-                            Err(error) => Err(format!(
-                                "Worktree creation was interrupted: {error}. Inspect managed worktrees before retrying."
-                            )),
-                        }
+                        let checkout = service.allocate(source_cwd, args.revision).await?;
+                        Ok(service.attach(&handle, thread_id, checkout).await)
                     });
                     let result = worker.await.unwrap_or_else(|error| {
                         Err(format!("Worktree creation outcome is uncertain: {error}. Inspect this task's attachments and managed worktrees before retrying."))

@@ -1,6 +1,10 @@
+use crate::legacy_core::config::ConfigBuilder;
+use crate::managed_worktree_tools::ManagedWorktreeTools;
+use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::RemoteAppServerClient;
 use codex_app_server_client::RemoteAppServerConnectArgs;
 use codex_app_server_client::RemoteAppServerEndpoint;
+use codex_app_server_protocol::DynamicToolCallParams;
 use codex_app_server_protocol::JSONRPCRequest;
 use codex_app_server_protocol::RequestId;
 use codex_utils_home_dir::find_codex_home;
@@ -11,6 +15,7 @@ use serde_json::Value;
 use serde_json::json;
 use std::time::Duration;
 use tokio::time::Instant;
+use uuid::Uuid;
 
 #[derive(Debug, clap::Subcommand)]
 pub enum SessionTaskCommand {
@@ -30,6 +35,13 @@ pub enum SessionTaskCommand {
         limit: u32,
         #[arg(long)]
         cursor: Option<String>,
+        /// Use the same bounded turn summaries as the TUI task tool.
+        #[arg(long)]
+        summary: bool,
+        #[arg(long, requires = "summary")]
+        include_outputs: bool,
+        #[arg(long, requires = "include_outputs")]
+        max_output_chars_per_item: Option<usize>,
     },
     /// Send a delegated prompt and return its accepted turn.
     Send {
@@ -47,6 +59,12 @@ pub enum SessionTaskCommand {
         title: Option<String>,
         #[arg(long)]
         model: Option<String>,
+        /// Start the new session in a managed worktree on the local daemon.
+        #[arg(long)]
+        worktree: bool,
+        /// Base Git revision. Defaults to the repository's remote default branch.
+        #[arg(long = "ref", requires = "worktree")]
+        revision: Option<String>,
     },
     /// Fork a session without starting a turn.
     Fork { thread_id: Option<String> },
@@ -61,13 +79,27 @@ pub enum SessionTaskCommand {
     /// Archive a session.
     Archive { thread_id: String },
     /// Restore an archived session.
-    Unarchive { thread_id: String },
+    Unarchive { thread_id: Option<String> },
     /// Wait until one of the sessions becomes idle or needs attention.
     Wait {
         #[arg(required = true, num_args = 1..=8)]
         thread_ids: Vec<String>,
         #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(0..=300))]
         timeout_seconds: u64,
+        /// Wait for a change since a previously returned poll cursor (THREAD_ID=CURSOR).
+        #[arg(long, value_name = "THREAD_ID=CURSOR")]
+        after: Vec<String>,
+    },
+    /// Create and attach a managed Git worktree to the current session.
+    WorktreeCreate {
+        /// Base Git revision. Defaults to the repository's remote default branch.
+        #[arg(long = "ref")]
+        revision: Option<String>,
+    },
+    /// List the current session's managed worktree attachments.
+    WorktreeList {
+        #[arg(long)]
+        cursor: Option<String>,
     },
 }
 
@@ -113,6 +145,7 @@ pub async fn run_session_task_command(
     let mut client = TaskClient {
         app: &app,
         request_id: 0,
+        local_daemon: implicit,
     };
     let result = client.execute(command).await;
     // Closing this connection does not shut down the shared app-server.
@@ -123,9 +156,84 @@ pub async fn run_session_task_command(
 struct TaskClient<'a> {
     app: &'a RemoteAppServerClient,
     request_id: i64,
+    local_daemon: bool,
 }
 
 impl TaskClient<'_> {
+    fn handle(&self) -> AppServerRequestHandle {
+        AppServerRequestHandle::Remote(self.app.request_handle())
+    }
+
+    async fn local_worktree_service(&self) -> Result<ManagedWorktreeTools> {
+        if !self.local_daemon {
+            return Err(eyre!("managed worktrees require the local app-server"));
+        }
+        let config = ConfigBuilder::default()
+            .codex_home(find_codex_home()?.to_path_buf())
+            .build()
+            .await?;
+        ManagedWorktreeTools::new(&config)
+            .await
+            .map_err(|error| eyre!("{error:#}"))
+    }
+
+    async fn allocate_worktree(
+        &mut self,
+        thread_id: &str,
+        revision: Option<String>,
+    ) -> Result<(ManagedWorktreeTools, codex_worktree::ManagedWorktree)> {
+        let service = self.local_worktree_service().await?;
+        let cwd = service
+            .source_cwd(&self.handle(), thread_id)
+            .await
+            .map_err(|error| eyre!("{error}"))?;
+        let config = self.rpc("config/read", json!({"cwd": cwd})).await?;
+        if let Some(projects) = config["config"]
+            .get("projects")
+            .filter(|entry| entry.is_object())
+        {
+            // Use the app-server's effective project trust as well as the local configuration.
+            ManagedWorktreeTools::ensure_trusted(
+                ConfigBuilder::default()
+                    .codex_home(find_codex_home()?.to_path_buf())
+                    .cli_overrides(vec![(
+                        "projects".to_owned(),
+                        toml::Value::try_from(projects.clone())?,
+                    )]),
+                &cwd,
+            )
+            .await
+            .map_err(|error| eyre!("{error}"))?;
+        }
+        let checkout = service
+            .allocate(cwd, revision)
+            .await
+            .map_err(|error| eyre!("{error}"))?;
+        Ok((service, checkout))
+    }
+
+    async fn task_snapshot(&self, tool: &str, arguments: Value) -> Result<Value> {
+        // The daemon exposes the same state through RPC; refresh on the shared polling interval.
+        let (_sender, updates) = tokio::sync::broadcast::channel(1);
+        crate::dynamic_tools::execute_inner(
+            self.handle(),
+            DynamicToolCallParams {
+                thread_id: std::env::var("CODEX_THREAD_ID").unwrap_or_default(),
+                turn_id: String::new(),
+                call_id: Uuid::new_v4().to_string(),
+                namespace: Some(crate::dynamic_tools::NAMESPACE.to_owned()),
+                tool: tool.to_owned(),
+                arguments,
+            },
+            Default::default(),
+            Default::default(),
+            updates,
+            None,
+        )
+        .await
+        .map_err(|error| eyre!("{error}"))
+    }
+
     async fn rpc(&mut self, method: &str, params: Value) -> Result<Value> {
         self.request_id += 1;
         self.app
@@ -217,7 +325,24 @@ impl TaskClient<'_> {
                 thread_id,
                 limit,
                 cursor,
+                summary,
+                include_outputs,
+                max_output_chars_per_item,
             } => {
+                if summary {
+                    return self
+                        .task_snapshot(
+                            "read_thread",
+                            json!({
+                                "threadId": thread_id,
+                                "turnLimit": limit,
+                                "cursor": cursor,
+                                "includeOutputs": include_outputs,
+                                "maxOutputCharsPerItem": max_output_chars_per_item
+                            }),
+                        )
+                        .await;
+                }
                 let mut result = self.read(&thread_id).await?;
                 result["turnsPage"] = self
                     .rpc(
@@ -257,7 +382,15 @@ impl TaskClient<'_> {
                 prompt,
                 title,
                 model,
+                worktree,
+                revision,
             } => {
+                if title
+                    .as_deref()
+                    .is_some_and(|title| title.trim().is_empty())
+                {
+                    return Err(eyre!("title must not be empty"));
+                }
                 let source_id = current_thread()?;
                 let prompt = prepare_prompt(&source_id, &prompt)?;
                 let source = self.resume(&source_id).await?;
@@ -272,6 +405,7 @@ impl TaskClient<'_> {
                     "modelProvider": source["modelProvider"],
                     "serviceTier": source["serviceTier"],
                     "projectId": source["thread"]["projectId"],
+                    "historyMode": source["thread"]["historyMode"],
                     "runtimeWorkspaceRoots": source["runtimeWorkspaceRoots"],
                     "approvalPolicy": source["approvalPolicy"],
                     "approvalsReviewer": source["approvalsReviewer"]
@@ -296,10 +430,49 @@ impl TaskClient<'_> {
                     params["sandbox"] = json!(mode);
                     Some(sandbox)
                 };
-                let started = self.rpc("thread/start", params).await?;
+                let checkout = if worktree {
+                    let (service, checkout) = self.allocate_worktree(&source_id, revision).await?;
+                    params["cwd"] = json!(checkout.cwd);
+                    params["runtimeWorkspaceRoots"] = json!([checkout.cwd]);
+                    params["environments"] = json!([{
+                        "environmentId": codex_exec_server::LOCAL_ENVIRONMENT_ID,
+                        "cwd": checkout.cwd
+                    }]);
+                    Some((service, checkout))
+                } else {
+                    None
+                };
+                let started = self.rpc("thread/start", params).await.wrap_err_with(|| {
+                    checkout.as_ref().map_or_else(
+                        || "could not confirm session creation".to_owned(),
+                        |(_, checkout)| {
+                            format!(
+                                "checkout retained at {}; inspect sessions before retrying",
+                                checkout.root.display()
+                            )
+                        },
+                    )
+                })?;
                 let id = started["thread"]["id"]
                     .as_str()
                     .ok_or_else(|| eyre!("thread/start did not return a thread ID"))?;
+                let attachment = if let Some((service, checkout)) = checkout {
+                    if started["cwd"].as_str().map(std::path::Path::new)
+                        != Some(checkout.cwd.as_path())
+                    {
+                        return Err(eyre!(
+                            "thread {id} started outside the requested worktree; checkout retained at {}",
+                            checkout.root.display()
+                        ));
+                    }
+                    Some(
+                        service
+                            .attach(&self.handle(), id.to_owned(), checkout)
+                            .await,
+                    )
+                } else {
+                    None
+                };
                 let mut warnings = Vec::new();
                 if let Some(title) = title
                     && let Err(err) = self
@@ -320,6 +493,9 @@ impl TaskClient<'_> {
                     .wrap_err_with(|| {
                         format!("created thread {id}; could not confirm its first turn")
                     })?;
+                if let Some(attachment) = attachment {
+                    result["worktree"] = attachment;
+                }
                 if !warnings.is_empty() {
                     result["warnings"] = json!(warnings);
                 }
@@ -362,6 +538,7 @@ impl TaskClient<'_> {
                 Ok(json!({"threadId": thread_id, "archived": true}))
             }
             Unarchive { thread_id } => {
+                let thread_id = thread_id.map_or_else(current_thread, Ok)?;
                 self.rpc("thread/unarchive", json!({"threadId": thread_id}))
                     .await?;
                 Ok(json!({"threadId": thread_id, "archived": false}))
@@ -369,29 +546,67 @@ impl TaskClient<'_> {
             Wait {
                 thread_ids,
                 timeout_seconds,
-            } => self.wait(thread_ids, timeout_seconds).await,
-        }
-    }
-
-    async fn wait(&mut self, thread_ids: Vec<String>, timeout_seconds: u64) -> Result<Value> {
-        let deadline = Instant::now() + Duration::from_secs(timeout_seconds);
-        loop {
-            let mut statuses = Vec::with_capacity(thread_ids.len());
-            for id in &thread_ids {
-                let read = self.read(id).await?;
-                statuses.push(json!({"threadId": id, "status": read["thread"]["status"]}));
+                after,
+            } => {
+                let mut cursors = std::collections::HashMap::new();
+                for entry in &after {
+                    let (id, cursor) = entry
+                        .split_once('=')
+                        .ok_or_else(|| eyre!("--after requires THREAD_ID=CURSOR"))?;
+                    if cursor.is_empty()
+                        || !thread_ids.iter().any(|target| target == id)
+                        || cursors.insert(id, cursor).is_some()
+                    {
+                        return Err(eyre!(
+                            "each --after must name a distinct target and its cursor"
+                        ));
+                    }
+                }
+                let targets: Vec<_> = thread_ids
+                    .iter()
+                    .map(|id| json!({"threadId": id, "afterCursor": cursors.get(id.as_str())}))
+                    .collect();
+                let deadline = Instant::now() + Duration::from_secs(timeout_seconds);
+                let mut result = loop {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    let timeout_ms = remaining.as_millis().min(120_000) as u64;
+                    let result = self
+                        .task_snapshot(
+                            "wait_threads",
+                            json!({
+                                "targets": targets,
+                                "timeoutMs": timeout_ms,
+                            }),
+                        )
+                        .await?;
+                    if result["timedOut"] != true || remaining <= Duration::from_secs(120) {
+                        break result;
+                    }
+                };
+                result["threads"] =
+                    json!(result["polls"].as_array().into_iter().flatten().map(|poll| {
+                    json!({"threadId": poll["thread"]["id"], "status": poll["thread"]["status"]})
+                }).collect::<Vec<_>>());
+                Ok(result)
             }
-            let ready = statuses.iter().any(|entry| {
-                let status = &entry["status"];
-                status["type"] != "active"
-                    || status["activeFlags"]
-                        .as_array()
-                        .is_some_and(|flags| !flags.is_empty())
-            });
-            if ready || Instant::now() >= deadline {
-                return Ok(json!({"timedOut": !ready, "threads": statuses}));
+            WorktreeCreate { revision } => {
+                let thread_id = current_thread()?;
+                let (service, checkout) = self.allocate_worktree(&thread_id, revision).await?;
+                Ok(service.attach(&self.handle(), thread_id, checkout).await)
             }
-            tokio::time::sleep_until((Instant::now() + Duration::from_secs(1)).min(deadline)).await;
+            WorktreeList { cursor } => {
+                let thread_id = current_thread()?;
+                let service = self.local_worktree_service().await?;
+                service
+                    .execute_inner(
+                        self.handle(),
+                        thread_id,
+                        "list_worktrees",
+                        json!({"cursor": cursor}),
+                    )
+                    .await
+                    .map_err(|error| eyre!("{error}"))
+            }
         }
     }
 }
@@ -417,4 +632,52 @@ fn prepare_prompt(source: &str, prompt: &str) -> Result<String> {
         escape(source),
         escape(prompt)
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TaskCli {
+        #[command(subcommand)]
+        task: SessionTaskCommand,
+    }
+
+    #[test]
+    fn worktree_options_parse_for_both_creation_modes() {
+        let task = TaskCli::try_parse_from([
+            "task",
+            "create",
+            "--prompt",
+            "inspect",
+            "--worktree",
+            "--ref",
+            "main",
+        ])
+        .expect("create in worktree");
+        assert!(matches!(
+            task.task,
+            SessionTaskCommand::Create { worktree: true, revision: Some(ref revision), .. }
+                if revision == "main"
+        ));
+        assert!(
+            TaskCli::try_parse_from(["task", "create", "--prompt", "inspect", "--ref", "main",])
+                .is_err()
+        );
+
+        let task = TaskCli::try_parse_from(["task", "worktree-create", "--ref", "main"])
+            .expect("attach worktree to current task");
+        assert!(matches!(
+            task.task,
+            SessionTaskCommand::WorktreeCreate { revision: Some(ref revision) } if revision == "main"
+        ));
+        let task = TaskCli::try_parse_from(["task", "worktree-list", "--cursor", "next"])
+            .expect("continue listing worktree attachments");
+        assert!(matches!(
+            task.task,
+            SessionTaskCommand::WorktreeList { cursor: Some(ref cursor) } if cursor == "next"
+        ));
+    }
 }
