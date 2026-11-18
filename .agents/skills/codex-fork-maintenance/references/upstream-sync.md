@@ -1,34 +1,7 @@
----
-name: codex-upstream-sync
-description: 同步 happy-proto/codex fork 到最新已发布的上游 alpha，检查内置 skills 更新与任务工具能力，分析版本差异并维护中文 GitHub Release notes。
----
+# 同步上游 alpha 与发布
 
-# Codex 上游同步
-
-先读仓库通用约定 [AGENTS.md](../../../AGENTS.md)。
-
-维护 fork 的改动默认包含同步最新已发布的上游 alpha，无需用户另行提出同步。
-只读调查不改变基线；用户明确要求保留基线、暂不同步或指定版本时，遵循该要求。
-单独补写已有 Release notes 或修改本 skill 时，不额外执行 alpha 同步或手动触发新版本构建；
-已授权推送后的自动 CI 仍遵循仓库工作流。
-用户要求同步上游时，默认包含提交、推送及跟进发布，直到对应版本实际发布并验证；
-仅限本地、不推送、不发布或其它明确限制优先，安装仍需单独授权。
-Actions 不自行 rebase 或强推分支。
-
-本轮开始时确定已发布的候选；`scripts/fork/upstream-tag` 已对应该候选时，报告已是最新并跳过 alpha rebase，
-仍须完成下面的第三方 skill 更新和任务工具能力检查。
-将本轮改动与上游同步都准备、验证完毕后，先统一推送 `main`，避免不必要地重复触发完整 CI；
-后续为修复问题所需的提交和推送不受这一约束。
-本轮确定候选后不反复追逐新发行版。
-
-## 自有脚本
-
-为本 skill 新增或修改可复用 Python CLI 时，使用 `$dcjanus:uv-cli-creator`，
-入口放在本 skill 的 `scripts/` 目录；按该 skill 初始化和维护 PEP 723 依赖、可执行入口、
-参数帮助及验证，不按 `$dcjanus:python-execution` 的临时脚本方式编写。
-环境支持时直接执行脚本路径，其它环境使用 `uv run --script`；通过参数显式传入目标仓库路径。
-仓库与 CI 共用的 `scripts/fork/` Python CLI 同样通过可执行路径或 `uv run --script` 调用；
-运行时要求见仓库约定，测试使用 `scripts/fork/run_tests.py`，可按 `--help` 选择测试模块或文件。
+本轮固定已发布的候选版本。候选等于 `scripts/fork/upstream-tag` 时跳过 rebase，
+仍检查第三方 skill 更新、会话工具等价性与已有发布。将同步与本轮改动一起验证后统一推送。
 
 ## 内置第三方 skills
 
@@ -38,21 +11,25 @@ Actions 不自行 rebase 或强推分支。
 保留原有跟踪 ref，避免改为固定 commit 后失去后续更新发现能力。
 审查 skill 指令、引用文件和许可证差异，确认仍适用于 fork 的接入方式及运行程序；
 执行离线 `check` 和 `test_sync_skills.py`，将快照及 lock 与 alpha 同步结果一起验证、交付。
-来源及维护边界见 [0009 改造记录](../../../docs/fork-changes/0009-open-automation.md)。
+来源及维护边界见 [0009 改造记录](../../../../docs/fork-changes/0009-open-automation.md)。
 最终回复简述哪些 skill 已更新、哪些没有更新；兼容性或检查失败时明确说明未完成项。
 
-## 内置会话管理 skill
+## 内置会话管理 skill 的发布门槛
 
-每次同步都检查候选 alpha 的 `codex-rs/tui/src/dynamic_tools.rs`
-和 `dynamic_tools_mcp.rs`。对照当前基线查看工具清单、参数、审批、
-消息送达与等待行为的变化，再与内置 `codex-session` skill 和
-`codex task` 的实现逐项核对。基线相同也核对当前实现和能力缺口。
-若上游把工具移到其他模块，跟到新的注册入口和实现。
+每次同步都以候选 alpha 的 TUI MCP 为行为基准，即使候选和当前基线相同。
+从 `codex-rs/tui/src/dynamic_tools_mcp.rs` 的注册入口追到 `dynamic_tools.rs`、
+`managed_worktree_tool_specs.rs` 及实际实现。上游迁移入口时跟随源码。
+逐项比对内置 `codex-session` 与 `codex task` 的工具、参数和可用条件，
+以及权限与审批、结果、错误与重试、消息送达、等待游标和长操作跟踪。
 
-用候选版本现有 app-server RPC 同步可覆盖的能力，更新 CLI、skill 和定向验证。
-如果新能力依赖 TUI 进程或缺 RPC，记录能力差异并说明原因。
-在同步结果里简述有无变化及仍未覆盖的能力。
-实现与验证入口见 [0032 改造记录](../../../docs/fork-changes/0032-session-skill.md)。
+默认关闭 TUI MCP 时，内置 skill 必须能完成其全部用户可见工作流，并可提供额外能力。
+CLI 可以采用适合命令行的交互方式，但要验证能得到等价的结果、状态与权限边界。
+从已有 app-server RPC 和共享逻辑着手补齐。候选新增的能力若依赖 TUI 进程或缺少 RPC，
+继续追到可复用的运行时边界，补上原生入口、内置 skill 与定向回归验证。
+发现缺口后持续修复。确有外部阻塞时明确报告未完成的能力及原因；
+仅在用户明确授权接受缺口时，才按例外范围交付候选版本。
+发布前对照本轮工具清单确认等价或超集，将变化和验证结果写进交付说明。
+实现与验证入口见 [0032 改造记录](../../../../docs/fork-changes/0032-session-skill.md)。
 
 ## Alpha 同步步骤
 
@@ -79,7 +56,7 @@ CI 失败或同步过程中发现有依据的相关 bug 时，调查并修复，
 若其他人更新了远端先整合其改动，不能覆盖。遇到无法自主解决的外部阻塞时，说明证据和剩余事项。
 
 确认发布 job 成功后，回读非 draft Release、tag 对应源码 SHA、两个平台包和发布清单，
-核对版本、资源及摘要与最新提交一致；具体发布契约见 [发布说明](../codex-fork-maintenance/references/release.md)。
+核对版本、资源及摘要与最新提交一致；具体发布契约见 [发布说明](release.md)。
 随后完成下面的中文 Release notes，并回读确认；只有构建与安装信息的自动发布正文不算交付完成。
 若本轮基线已是最新且没有新提交，核对已有对应版本的发布状态，不为制造新版本做空提交。
 用户明确要求只检查、本地准备、不推送、不发布或提前停止时，按其范围执行并报告未完成的发布验证。
