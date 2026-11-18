@@ -3261,13 +3261,13 @@ async fn archive_progress_scenario(owned_screen: bool) -> Result<()> {
 
     // The handler drew this frame before it waited for either cleanup reply.
     let rendered = buffer_text(tui.terminal.previous_buffer());
-    insta::assert_snapshot!(
+    assert_eq!(
         rendered
             .lines()
             .find(|line| line.contains("Archiving"))
             .expect("archive progress hint")
             .trim(),
-        @"Archiving…"
+        "Archiving…"
     );
     assert_eq!(app.current_displayed_thread_id(), Some(thread_id));
     assert!(app.side_threads.contains_key(&side_id));
