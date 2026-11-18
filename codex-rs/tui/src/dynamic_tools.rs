@@ -22,6 +22,7 @@ use codex_app_server_protocol::ModelListParams;
 use codex_app_server_protocol::ModelListResponse;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SortDirection;
+use codex_app_server_protocol::TUI_MCP_OWNER_CONNECTED_REASON;
 use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadArchiveParams;
 use codex_app_server_protocol::ThreadArchiveResponse;
@@ -577,7 +578,7 @@ async fn execute_inner(
                     },
                 },
             )
-            .await?;
+            .await.map_err(|error| error.to_string())?;
             let turn_start_params = crate::app_server_session::inherit_thread_start_settings(
                 &mut thread_start_params,
                 source,
@@ -702,7 +703,8 @@ async fn execute_inner(
                     },
                 },
             )
-            .await?;
+            .await
+            .map_err(|error| error.to_string())?;
             let forked_thread_id = response.thread.id.clone();
             register_background_thread(
                 app_event_tx,
@@ -727,20 +729,37 @@ async fn execute_inner(
             validate_prompt(&prompt, MAX_DELEGATED_INPUT_BYTES)?;
             let thread = read_thread(&handle, &arguments.thread_id).await?;
             let exclude_turns = thread.history_mode == ThreadHistoryMode::Paginated;
-            let resumed: ThreadResumeResponse = request_with_history_fallback(
-                &handle,
-                exclude_turns,
-                |request_id, exclude_turns| ClientRequest::ThreadResume {
-                    request_id,
-                    params: ThreadResumeParams {
-                        thread_id: arguments.thread_id.clone(),
-                        exclude_turns,
-                        config: mcp_config.clone(),
-                        ..ThreadResumeParams::default()
+            let thread_id = &arguments.thread_id;
+            let resume = |config: Option<HashMap<String, Value>>| {
+                request_with_history_fallback(
+                    &handle,
+                    exclude_turns,
+                    move |request_id, exclude_turns| ClientRequest::ThreadResume {
+                        request_id,
+                        params: ThreadResumeParams {
+                            thread_id: thread_id.clone(),
+                            exclude_turns,
+                            config: config.clone(),
+                            ..ThreadResumeParams::default()
+                        },
                     },
-                },
-            )
-            .await?;
+                )
+            };
+            let resumed: ThreadResumeResponse = match resume(mcp_config.clone()).await {
+                Err(TypedRequestError::Server { source, .. })
+                    if mcp_config.is_some()
+                        && source
+                            .data
+                            .as_ref()
+                            .and_then(|data| data["reason"].as_str())
+                            == Some(TUI_MCP_OWNER_CONNECTED_REASON) =>
+                {
+                    // Attach to the target's existing registration before sending the turn.
+                    resume(None).await
+                }
+                result => result,
+            }
+            .map_err(|error| error.to_string())?;
             let daybreak_enabled = thread.daybreak_enabled.unwrap_or(false);
             register_background_thread(
                 app_event_tx,
@@ -1242,7 +1261,7 @@ async fn request_with_history_fallback<T: DeserializeOwned>(
     handle: &AppServerRequestHandle,
     exclude_turns: bool,
     mut build: impl FnMut(RequestId, bool) -> ClientRequest,
-) -> Result<T, String> {
+) -> Result<T, TypedRequestError> {
     let request_id = || RequestId::String(format!("tui-dynamic-{}", Uuid::new_v4()));
     match handle
         .request_typed(build(request_id(), exclude_turns))
@@ -1255,9 +1274,8 @@ async fn request_with_history_fallback<T: DeserializeOwned>(
             handle
                 .request_typed(build(request_id(), /*exclude_turns*/ false))
                 .await
-                .map_err(|error| error.to_string())
         }
-        result => result.map_err(|error| error.to_string()),
+        result => result,
     }
 }
 
