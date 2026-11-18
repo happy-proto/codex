@@ -321,7 +321,7 @@ fn success_response(value: Value) -> Result<DynamicToolCallResponse, String> {
     })
 }
 
-async fn execute_inner(
+pub(crate) async fn execute_inner(
     handle: AppServerRequestHandle,
     params: DynamicToolCallParams,
     mut thread_start_params: ThreadStartParams,
