@@ -72,6 +72,9 @@ pub struct JSONRPCResponse {
 }
 
 /// A response to a request that indicates an error occurred.
+/// Error data reason for a task MCP registration held by another client.
+pub const TUI_MCP_OWNER_CONNECTED_REASON: &str = "tuiMcpOwnerConnected";
+
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema, TS)]
 pub struct JSONRPCError {
     pub error: JSONRPCErrorError,
