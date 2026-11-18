@@ -19,7 +19,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 
 use super::App;
-use super::side_companion::SideCompanion;
+use super::side::SideCompanion;
 use crate::app_event::AppEvent;
 use crate::custom_terminal::osc8_hyperlink_parts;
 use crate::terminal_hyperlinks::ReaderLink;
