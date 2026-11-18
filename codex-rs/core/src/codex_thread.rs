@@ -1607,14 +1607,6 @@ impl CodexThread {
         .await
     }
 
-    /// Rebind client-owned task tools without changing the loaded thread's policy.
-    pub async fn rebind_tui_mcp_transport(
-        &self,
-        transport: codex_config::McpServerTransportConfig,
-    ) -> std::io::Result<()> {
-        self.session.rebind_tui_mcp_transport(transport).await
-    }
-
     /// Revokes enterprise MCP authority from the current owner after a failed reload.
     pub async fn disable_mcp_enterprise_auth(&self) {
         self.session.disable_mcp_enterprise_auth().await;

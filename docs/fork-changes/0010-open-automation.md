@@ -40,10 +40,7 @@ CLI 与官方 Desktop 共用配置，直接禁用或卸载官方插件会影响 
 本改造内置的是 skill 和接入规则，不包含第三方运行程序、Chrome 扩展或系统权限。
 这些仍按各项目安装说明准备；fork 不自动安装、升级或授权它们。
 本行为也适用于 fork 提供的 app-server；官方 Desktop 自带的程序和配置保持原样。
-交互式 CLI 的独立会话管理使用上游自带的 `codex_tui` 工具；
-连接共享 app-server 时可创建、读取、等待和发送消息给独立任务，
-不依赖 `codex_app` MCP。该入口由 TUI 托管，不能据此推断 `codex exec`
-或其它客户端创建的会话也自动具有这些工具。
+CLI 的独立会话管理见 [0034 内置会话管理 skill](0034-session-skill.md)。
 
 ## 更新第三方 skill
 

@@ -57,6 +57,8 @@ use thiserror::Error;
 
 const SYSTEM_SKILLS_DIR: Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets/samples");
 const FORK_SKILLS_DIR: Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets/fork");
+const FORK_NATIVE_SKILLS_DIR: Dir =
+    include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets/fork-native");
 
 const SYSTEM_SKILLS_DIR_NAME: &str = ".fork";
 const SKILLS_DIR_NAME: &str = "skills";
@@ -97,6 +99,7 @@ pub fn install_system_skills(codex_home: &AbsolutePathBuf) -> Result<(), SystemS
 
     write_embedded_dir(&SYSTEM_SKILLS_DIR, &dest_system)?;
     write_embedded_dir(&FORK_SKILLS_DIR, &dest_system)?;
+    write_embedded_dir(&FORK_NATIVE_SKILLS_DIR, &dest_system)?;
     fs::write(marker_path.as_path(), format!("{expected_fingerprint}\n"))
         .map_err(|source| SystemSkillsError::io("write system skills marker", source))?;
     Ok(())
@@ -113,6 +116,7 @@ fn embedded_system_skills_fingerprint() -> String {
     let mut items = Vec::new();
     collect_fingerprint_items(&SYSTEM_SKILLS_DIR, &mut items);
     collect_fingerprint_items(&FORK_SKILLS_DIR, &mut items);
+    collect_fingerprint_items(&FORK_NATIVE_SKILLS_DIR, &mut items);
     items.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
 
     let mut hasher = DefaultHasher::new();
