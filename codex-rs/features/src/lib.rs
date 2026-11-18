@@ -180,6 +180,8 @@ pub enum Feature {
     UnifiedExec,
     /// Allow unified exec commands to allocate an interactive terminal.
     UnifiedExecTty,
+    /// Enable the legacy TUI-hosted task MCP server.
+    TuiTaskMcp,
     /// Removed compatibility flag for the retired patched zsh backend.
     ShellZshFork,
     /// Removed compatibility flag for the retired patched zsh backend.
@@ -1257,6 +1259,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         key: "unified_exec_tty",
         stage: Stage::Stable,
         default_enabled: true,
+    },
+    FeatureSpec {
+        id: Feature::TuiTaskMcp,
+        key: "tui_task_mcp",
+        stage: Stage::Stable,
+        default_enabled: false,
     },
     FeatureSpec {
         id: Feature::ShellZshFork,
