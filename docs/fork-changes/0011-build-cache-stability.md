@@ -155,7 +155,7 @@ Cargo 单元。读取全部带时间戳的 timing 报告，排除指向最后一
 
 相同缓存键对应的重编译产物摘要变化时，先隔离该依赖；保持工具链、依赖字节、
 features 和 profile 一致，禁用编译缓存，避免将恢复的同一对象误判为可复现构建。
-宏输出顺序造成的元数据变化及维护边界见 [ts-rs 确定性记录](0015-ts-rs-metadata-stability.md)。
+宏输出顺序造成的元数据变化及维护边界见 [ts-rs 确定性记录](0013-ts-rs-metadata-stability.md)。
 不同平台分别检查重复编译，不直接比较跨平台的元数据摘要。
 
 固定的 sccache 0.18.0 未包含 [上游的 `.rmeta` 流式通知修复](https://github.com/mozilla/sccache/pull/2875)。
