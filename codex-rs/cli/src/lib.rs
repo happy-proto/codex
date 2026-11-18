@@ -1818,7 +1818,9 @@ async fn dispatch_cli(
                 anyhow::bail!("codex task requires a shared app-server");
             }
             let endpoint = resolve_remote_endpoint(root_remote, root_remote_auth_token_env)?;
-            let result = codex_tui::run_session_task_command(command, endpoint).await?;
+            let result = codex_tui::run_session_task_command(command, endpoint)
+                .await
+                .map_err(|err| anyhow::anyhow!("{err:#}"))?;
             println!("{result}");
         }
         Some(Subcommand::Queue(cmd)) => {
@@ -2634,6 +2636,7 @@ fn unsupported_subcommand_name_for_strict_config(
         }
         Some(Subcommand::RemoteControl(remote_control)) => Some(remote_control.subcommand_name()),
         Some(Subcommand::Mcp(_)) => Some("mcp"),
+        Some(Subcommand::Task(_)) => Some("task"),
         Some(Subcommand::Plugin(_)) => Some("plugin"),
         Some(Subcommand::MigrateRollouts(_)) => Some("migrate-rollouts"),
         Some(Subcommand::MigrateNfsDb(_)) => Some("migrate-nfs-db"),
