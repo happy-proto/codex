@@ -519,11 +519,14 @@ impl SidePaneLayout {
             separate_status_line: true,
             composer_gap: Some(&gap),
             max_height: Some(composer_height_limit(area.height)),
-            extend_composer_background_left: area.x > 0,
             command_popup_placement: CommandPopupPlacement::Hidden,
             ..Default::default()
         });
-        let bottom_height = if watch_only { 0 } else { bottom.desired_height(area.width).min(area.height) };
+        let bottom_height = if watch_only {
+            0
+        } else {
+            bottom.desired_height(area.width).min(area.height)
+        };
         let above = area.height - bottom_height;
         let transcript = Rect {
             height: above,
