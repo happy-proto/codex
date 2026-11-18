@@ -217,6 +217,7 @@ impl TerminalHyperlink {
             destination: id.to_string(),
             destination_kind: DestinationKind::Agent(id),
             markdown_source: None,
+            terminal_file_destination: None,
         }
     }
 
