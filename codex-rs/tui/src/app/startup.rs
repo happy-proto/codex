@@ -1574,6 +1574,15 @@ See the Codex keymap documentation for supported actions and examples."
                     {
                         backends.parked_inputs_mut(slot).remove(thread_id);
                     }
+                    if matches!(&event, AppEvent::RemoteControl(_) | AppEvent::RemoteControlForBackend { .. } | AppEvent::RemoteControlFinished { .. }) {
+                        super::remote_control::handle(&mut app, &backends, event);
+                        if app.chat_widget.has_active_modal()
+                            && let Err(err) = app.render_startup_frame(tui, &app_event_rx)
+                        {
+                            break Err(err);
+                        }
+                        continue;
+                    }
                     let switch_backend = match &event {
                         AppEvent::ChooseCloudEnvironment => {
                             if let Some(source) = cloud_draft

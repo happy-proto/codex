@@ -280,7 +280,7 @@ impl App {
         {
             pane.sync_agent_rows(&self.agent_navigation);
         }
-        
+
         let layout = sidebar::paint_layout(self, tui, screen_size.into());
         self.conversation_frame.shared_footer = match &layout {
             Some(sidebar::SidebarLayout::Chat(panes)) => Some(panes.footer),
