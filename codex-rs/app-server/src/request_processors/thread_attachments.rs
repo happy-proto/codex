@@ -36,7 +36,9 @@ use codex_thread_store::RemoveThreadAttachmentOutcome;
 use codex_thread_store::RemoveThreadAttachmentParams;
 use codex_thread_store::ThreadAttachment as StoredThreadAttachment;
 use codex_thread_store::ThreadAttachmentArchiveFilter;
+use codex_thread_store::ThreadMetadataPatch;
 use codex_thread_store::ThreadStoreError;
+use codex_thread_store::UpdateThreadMetadataParams;
 
 impl ThreadRequestProcessor {
     pub(crate) async fn thread_attachment_add(
@@ -56,15 +58,35 @@ impl ThreadRequestProcessor {
         }
 
         let thread_id = parse_attachment_thread_id(&params.thread_id)?;
-        // A worktree can be bound immediately after thread/start, before the first turn.
+        // A worktree can be bound before the first turn creates the SQLite thread row.
         if params.attachment_type == "worktree"
-            && let Ok(thread) = self.thread_manager.get_thread(thread_id).await
-            && !thread.config_snapshot().await.ephemeral
-        {
-            self.thread_store
-                .persist_thread(thread_id, PersistContext::Standard)
+            && let Some(state_db) = self.state_db.as_ref()
+            && state_db
+                .get_thread(thread_id)
                 .await
-                .map_err(|error| thread_attachment_store_error(OPERATION, error))?;
+                .map_err(|error| internal_error(format!("failed to read thread index: {error}")))?
+                .is_none()
+            && let Ok(thread) = self.thread_manager.get_thread(thread_id).await
+        {
+            let snapshot = thread.config_snapshot().await;
+            if !snapshot.ephemeral {
+                self.thread_store
+                    .persist_thread(thread_id, PersistContext::Standard)
+                    .await
+                    .map_err(|error| thread_attachment_store_error(OPERATION, error))?;
+                self.thread_store
+                    .update_thread_metadata(UpdateThreadMetadataParams {
+                        thread_id,
+                        patch: ThreadMetadataPatch {
+                            model: Some(snapshot.model),
+                            model_provider: Some(snapshot.model_provider_id),
+                            ..Default::default()
+                        },
+                        include_archived: false,
+                    })
+                    .await
+                    .map_err(|error| thread_attachment_store_error(OPERATION, error))?;
+            }
         }
         let result = self
             .thread_store
