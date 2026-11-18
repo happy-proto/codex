@@ -33,6 +33,105 @@ use wiremock::Mock;
 use wiremock::matchers::method;
 use wiremock::matchers::path_regex;
 
+use super::connection_handling_websocket::connect_websocket;
+use super::connection_handling_websocket::read_error_for_id;
+use super::connection_handling_websocket::read_notification_for_method;
+use super::connection_handling_websocket::read_response_for_id;
+use super::connection_handling_websocket::send_initialize_request;
+use super::connection_handling_websocket::send_request;
+use super::connection_handling_websocket::spawn_websocket_server;
+
+#[tokio::test]
+async fn task_mcp_owner_conflict_allows_followup_without_rebinding() -> Result<()> {
+    let model = create_mock_responses_server_repeating_assistant("Done").await;
+    let home = TempDir::new()?;
+    MockResponsesConfig::new(&model.uri()).write(home.path())?;
+    let (old_url, old_task) = task_server("Bearer old").await?;
+    let (new_url, new_task) = task_server("Bearer new").await?;
+    let (mut process, addr) = spawn_websocket_server(home.path()).await?;
+    let mut owner = connect_websocket(addr).await?;
+    let mut sender = connect_websocket(addr).await?;
+    send_initialize_request(&mut owner, 1, "task_owner").await?;
+    read_response_for_id(&mut owner, 1).await?;
+    send_initialize_request(&mut sender, 1, "task_sender").await?;
+    read_response_for_id(&mut sender, 1).await?;
+
+    send_request(
+        &mut owner,
+        "thread/start",
+        2,
+        Some(json!({
+            "config": registration(&old_url, "Bearer old")
+        })),
+    )
+    .await?;
+    let started = read_response_for_id(&mut owner, 2).await?;
+    let thread_id = &started.result["thread"]["id"];
+    assert!(thread_id.is_string());
+
+    send_request(
+        &mut owner,
+        "turn/start",
+        3,
+        Some(json!({
+            "threadId": thread_id, "input": [{"type": "text", "text": "Materialize the thread"}]
+        })),
+    )
+    .await?;
+    read_response_for_id(&mut owner, 3).await?;
+    read_notification_for_method(&mut owner, "turn/completed").await?;
+
+    send_request(&mut sender, "thread/resume", 2, Some(json!({
+        "threadId": thread_id, "excludeTurns": true, "config": registration(&new_url, "Bearer new")
+    }))).await?;
+    let conflict = read_error_for_id(&mut sender, 2).await?;
+    assert_eq!(conflict.error.code, -32600);
+    assert_eq!(
+        conflict.error.data,
+        Some(json!({"reason": "tuiMcpOwnerConnected"}))
+    );
+
+    send_request(
+        &mut sender,
+        "thread/resume",
+        3,
+        Some(json!({
+            "threadId": thread_id, "excludeTurns": true
+        })),
+    )
+    .await?;
+    read_response_for_id(&mut sender, 3).await?;
+    send_request(
+        &mut sender,
+        "turn/start",
+        4,
+        Some(json!({
+            "threadId": thread_id, "input": [], "toolOutput": {
+                "name": "send_message_to_thread", "namespace": "codex_tui",
+                "retain": true, "output": "Follow up"
+            }
+        })),
+    )
+    .await?;
+    read_response_for_id(&mut sender, 4).await?;
+    send_request(
+        &mut sender,
+        "mcpServer/tool/call",
+        5,
+        Some(json!({
+            "threadId": thread_id, "server": "codex_tui", "tool": "probe", "arguments": {}
+        })),
+    )
+    .await?;
+    let probe = read_response_for_id(&mut sender, 5).await?;
+    assert_eq!(probe.result["content"][0]["text"], "Bearer old");
+
+    old_task.abort();
+    new_task.abort();
+    process.kill().await?;
+    Ok(())
+}
+
 async fn task_server(marker: &'static str) -> Result<(String, JoinHandle<()>)> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let url = format!("http://{}/mcp", listener.local_addr()?);
