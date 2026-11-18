@@ -16,4 +16,4 @@
 本目录排除在 workspace 成员之外，避免套用 Codex 内部版本。升级到包含该修复的
 兼容发布版后，移除 source override 和此副本，并重新执行元数据稳定性对照。
 
-维护依据见 [编号记录 0015](../../../docs/fork-changes/0015-ts-rs-metadata-stability.md)。
+维护依据见 [编号记录 0015](../../../docs/fork-changes/0013-ts-rs-metadata-stability.md)。
