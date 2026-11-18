@@ -12,7 +12,7 @@ use crossterm::event::MouseEventKind::ScrollUp;
 use crossterm::event::MouseEventKind::Up;
 
 use super::App;
-use super::side_companion::SideCompanion;
+use super::side::SideCompanion;
 use crate::app_event::AppEvent;
 use crate::terminal_hyperlinks::ReaderLink;
 use crate::transcript_view::ViewAction;
