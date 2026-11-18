@@ -12,34 +12,32 @@
 | 0004 | [功能列表输出格式](0004-features-list.md) |
 | 0005 | [MCP 列表展示](0005-mcp-list.md) |
 | 0006 | [工作中显式 skill 正文注入](0006-steered-skills.md) |
-| 0007 | [容量错误无限退避重试](0007-capacity-retries.md)（已移除，恢复上游规则） |
-| 0008 | [已打开会话的名称同步](0008-thread-name-refresh.md) |
-| 0009 | [回合与近期平均生成速度](0009-generation-speed.md) |
-| 0010 | [默认使用开放的浏览器与电脑操作工具](0010-open-automation.md) |
-| 0011 | [WebSocket 连接主动轮转](0011-websocket-rotation.md) |
-| 0012 | [后台压缩失败后的接收器清理](0012-async-compaction-closed-receiver.md)（alpha.8 已吸收） |
-| 0013 | [发布版本与编译缓存分离](0013-build-cache-stability.md) |
-| 0014 | [会话 Skills 自动刷新保持输入响应](0014-session-skills-refresh.md) |
-| 0015 | [ts-rs 宏输出与编译元数据稳定性](0015-ts-rs-metadata-stability.md) |
-| 0016 | [异步压缩生命周期诊断](0016-async-compaction-diagnostics.md) |
-| 0017 | [后台压缩失败后的退避重试](0017-async-compaction-retry.md) |
-| 0018 | [会话动态补全](0018-session-completion.md) |
-| 0019 | [会话列表只展示当前 rollout](0019-current-rollout-listing.md) |
-| 0020 | [OpenAI 模型请求专用代理](0020-openai-proxy.md) |
-| 0021 | [每次重试等待提示](0021-advised-retry-visibility.md) |
-| 0022 | [容量错误缺省等待重试](0022-overload-default-retry.md) |
-| 0023 | [WebSocket 消息过大错误](0023-websocket-message-size.md) |
-| 0024 | [daemon 关停拒绝后的 TUI 重连](0024-daemon-shutdown-recovery.md) |
-| 0025 | [terminfo 颜色能力回退](0025-terminfo-color-detection.md) |
-| 0026 | [通过 @ 选择插件提供的 skill](0026-at-plugin-skills.md) |
-| 0027 | [首轮由 Agent 主动命名会话](0027-agent-thread-title.md) |
-| 0028 | [分栏任务状态与共享底栏](0028-workspace-status-and-footer.md) |
-| 0029 | [为所有模型开启输入框星光](0029-all-model-composer-stars.md) |
-| 0030 | [按项忽略 Cloud config](0030-ignore-cloud-config.md) |
-| 0031 | [Markdown 文件终端链接](0031-markdown-file-hyperlinks.md) |
-| 0032 | [@ 菜单的会话筛选](0032-at-session-filter.md) |
-| 0033 | [Rex 终端剪贴板路由](0033-rex-clipboard.md) |
-| 0034 | [内置会话管理 skill](0034-session-skill.md) |
+| 0007 | [已打开会话的名称同步](0007-thread-name-refresh.md) |
+| 0008 | [回合与近期平均生成速度](0008-generation-speed.md) |
+| 0009 | [默认使用开放的浏览器与电脑操作工具](0009-open-automation.md) |
+| 0010 | [WebSocket 连接主动轮转](0010-websocket-rotation.md) |
+| 0011 | [发布版本与编译缓存分离](0011-build-cache-stability.md) |
+| 0012 | [会话 Skills 自动刷新保持输入响应](0012-session-skills-refresh.md) |
+| 0013 | [ts-rs 宏输出与编译元数据稳定性](0013-ts-rs-metadata-stability.md) |
+| 0014 | [异步压缩生命周期诊断](0014-async-compaction-diagnostics.md) |
+| 0015 | [后台压缩失败后的退避重试](0015-async-compaction-retry.md) |
+| 0016 | [会话动态补全](0016-session-completion.md) |
+| 0017 | [会话列表只展示当前 rollout](0017-current-rollout-listing.md) |
+| 0018 | [OpenAI 模型请求专用代理](0018-openai-proxy.md) |
+| 0019 | [每次重试等待提示](0019-advised-retry-visibility.md) |
+| 0020 | [容量错误缺省等待重试](0020-overload-default-retry.md) |
+| 0021 | [WebSocket 消息过大错误](0021-websocket-message-size.md) |
+| 0022 | [daemon 关停拒绝后的 TUI 重连](0022-daemon-shutdown-recovery.md) |
+| 0023 | [terminfo 颜色能力回退](0023-terminfo-color-detection.md) |
+| 0024 | [通过 @ 选择插件提供的 skill](0024-at-plugin-skills.md) |
+| 0025 | [首轮由 Agent 主动命名会话](0025-agent-thread-title.md) |
+| 0026 | [分栏任务状态与共享底栏](0026-workspace-status-and-footer.md) |
+| 0027 | [为所有模型开启输入框星光](0027-all-model-composer-stars.md) |
+| 0028 | [按项忽略 Cloud config](0028-ignore-cloud-config.md) |
+| 0029 | [Markdown 文件终端链接](0029-markdown-file-hyperlinks.md) |
+| 0030 | [@ 菜单的会话筛选](0030-at-session-filter.md) |
+| 0031 | [Rex 终端剪贴板路由](0031-rex-clipboard.md) |
+| 0032 | [内置会话管理 skill](0032-session-skill.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 同步上游使用独立的 [上游同步 skill](../../.agents/skills/codex-upstream-sync/SKILL.md)。

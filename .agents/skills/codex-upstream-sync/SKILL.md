@@ -38,7 +38,7 @@ Actions 不自行 rebase 或强推分支。
 保留原有跟踪 ref，避免改为固定 commit 后失去后续更新发现能力。
 审查 skill 指令、引用文件和许可证差异，确认仍适用于 fork 的接入方式及运行程序；
 执行离线 `check` 和 `test_sync_skills.py`，将快照及 lock 与 alpha 同步结果一起验证、交付。
-来源及维护边界见 [0010 改造记录](../../../docs/fork-changes/0010-open-automation.md)。
+来源及维护边界见 [0009 改造记录](../../../docs/fork-changes/0009-open-automation.md)。
 最终回复简述哪些 skill 已更新、哪些没有更新；兼容性或检查失败时明确说明未完成项。
 
 ## 内置会话管理 skill
@@ -52,7 +52,7 @@ Actions 不自行 rebase 或强推分支。
 用候选版本现有 app-server RPC 同步可覆盖的能力，更新 CLI、skill 和定向验证。
 如果新能力依赖 TUI 进程或缺 RPC，记录能力差异并说明原因。
 在同步结果里简述有无变化及仍未覆盖的能力。
-实现与验证入口见 [0034 改造记录](../../../docs/fork-changes/0034-session-skill.md)。
+实现与验证入口见 [0032 改造记录](../../../docs/fork-changes/0032-session-skill.md)。
 
 ## Alpha 同步步骤
 
