@@ -144,6 +144,42 @@ def smoke(package):
         if (package / "codex-resources/bwrap").exists():
             run(str(package / "codex-resources/bwrap"), "--version", env=env)
         initialize_app_server(cli, env, version)
+        verify_task_connection(cli, env)
+
+
+def verify_task_connection(cli, env):
+    control = Path(env["CODEX_HOME"]) / "app-server-control"
+    control.mkdir(mode=0o700, exist_ok=True)
+    socket_path = control / "app-server-control.sock"
+    with tempfile.TemporaryFile() as log, subprocess.Popen(
+        [str(cli), "app-server", "--listen", f"unix://{socket_path}"],
+        cwd=ROOT,
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=log,
+        stderr=log,
+    ) as server:
+        try:
+            deadline = time.monotonic() + 30
+            while not socket_path.exists():
+                if server.poll() is not None or time.monotonic() >= deadline:
+                    log.seek(0)
+                    raise ValueError(f"app-server task socket did not start: {log.read()!r}")
+                time.sleep(0.05)
+            result = run(
+                str(cli), "task", "list", "--limit", "1", env=env,
+                capture_output=True, text=True, timeout=30,
+            )
+            if not isinstance(json.loads(result.stdout).get("data"), list):
+                raise ValueError(f"task list did not return a thread page: {result.stdout!r}")
+        finally:
+            if server.poll() is None:
+                server.terminate()
+                try:
+                    server.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    server.kill()
+                    server.wait()
 
 
 def initialize_app_server(cli, env, expected_version):
