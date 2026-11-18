@@ -185,6 +185,15 @@ pub(super) struct SideCompanion {
     pub(super) view: crate::transcript_view::TranscriptView,
 }
 
+impl SideCompanion {
+    pub(super) fn can_scroll_without_refresh(&self) -> bool {
+        !self.commit_ticks
+            && self
+                .view
+                .can_scroll_without_refresh(&self.cells, /*live_key*/ None)
+    }
+}
+
 pub(super) struct PendingSideComposer {
     pub(super) bottom: Box<crate::bottom_pane::BottomPane>,
     pub(super) route: crate::app_event_sender::SideProjectionRoute,
