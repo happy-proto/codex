@@ -674,7 +674,7 @@ async fn task_worktrees_survive_cli_disconnect_on_shared_daemon() -> Result<()> 
 
     let source_id = &source.thread.id;
     let attached = task(source_id, &["worktree-create", "--ref", "main"])?;
-    assert_eq!(attached["type"], "created");
+    assert_eq!(attached["type"], "created", "{attached:#}");
     let root = attached["worktree"]["workspaceRoot"]
         .as_str()
         .context("worktree path")?;
@@ -701,7 +701,7 @@ async fn task_worktrees_survive_cli_disconnect_on_shared_daemon() -> Result<()> 
         .context("child worktree path")?;
     assert_ne!(child_id, source_id);
     assert_ne!(child_root, root);
-    assert_eq!(child["worktree"]["type"], "created");
+    assert_eq!(child["worktree"]["type"], "created", "{child:#}");
     assert_eq!(
         task(child_id, &["worktree-list"])?["data"][0]["workspaceRoot"],
         child_root
