@@ -11,6 +11,7 @@ app-server RPC 执行，TUI 可以独立退出或重新连接。
 
 `codex task` 默认连接当前 `CODEX_HOME` 的常驻 app-server，
 也支持显式选择 `--remote`。每条命令复用一条连接，不启动另一个 app-server。
+受限 shell 连接受保护 socket 时沿用现有命令审批流程。
 跨会话发送恢复目标并提交带来源的回合，返回服务端受理的回合 ID。
 创建会话继承源会话的权限配置和审批策略。目标审批由 app-server 处理。
 连接丢失后先检查目标回合再决定是否重试。会话管理替代覆盖 TUI 的任务工具。
