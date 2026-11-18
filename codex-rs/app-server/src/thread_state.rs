@@ -383,29 +383,6 @@ mod tests {
     use codex_utils_absolute_path::AbsolutePathBuf;
     use pretty_assertions::assert_eq;
 
-    #[tokio::test]
-    async fn task_mcp_handoff_follows_owner_connection_not_observers() {
-        let manager = ThreadStateManager::new();
-        let thread = ThreadId::new();
-        let owner = ConnectionId(1);
-        let observer = ConnectionId(2);
-        let replacement = ConnectionId(3);
-        for connection in [owner, observer, replacement] {
-            manager
-                .connection_initialized(connection, ConnectionCapabilities::default())
-                .await;
-        }
-        assert!(manager.claim_tui_mcp_owner(thread, owner).await);
-        manager.try_add_connection_to_thread(thread, owner).await;
-        manager.try_add_connection_to_thread(thread, observer).await;
-        assert!(!manager.claim_tui_mcp_owner(thread, replacement).await);
-        assert!(manager.claim_tui_mcp_owner(thread, owner).await);
-        manager.remove_connection(owner).await;
-        // An unrelated observer must not prevent the disconnected owner's replacement.
-        assert!(manager.claim_tui_mcp_owner(thread, replacement).await);
-        assert!(!manager.claim_tui_mcp_owner(thread, observer).await);
-    }
-
     #[test]
     fn note_thread_settings_reports_only_effective_changes() {
         let mut state = ThreadState::default();
@@ -465,7 +442,6 @@ async fn stop_replay(stop: Option<watch::Sender<()>>) {
 struct ThreadEntry {
     state: Arc<Mutex<ThreadState>>,
     subscriptions: HashMap<ConnectionId, Option<watch::Sender<()>>>,
-    tui_mcp_owner: Option<ConnectionId>,
     has_connections_watcher: watch::Sender<bool>,
 }
 
@@ -480,7 +456,6 @@ impl ThreadEntry {
         Self {
             state,
             subscriptions: HashMap::new(),
-            tui_mcp_owner: None,
             has_connections_watcher: watch::channel(false).0,
         }
     }
@@ -549,33 +524,6 @@ impl ThreadLifecycleContributor<Config> for ThreadStateManager {
 }
 
 impl ThreadStateManager {
-    /// A task endpoint follows its supplying connection, not every observing subscriber.
-    pub(crate) async fn claim_tui_mcp_owner(
-        &self,
-        thread_id: ThreadId,
-        connection_id: ConnectionId,
-    ) -> bool {
-        let mut state = self.state.lock().await;
-        let owner = state
-            .threads
-            .get(&thread_id)
-            .and_then(|entry| entry.tui_mcp_owner);
-        if let Some(owner) = owner {
-            if owner != connection_id && state.live_connections.contains_key(&owner) {
-                return false;
-            }
-        } else if state
-            .threads
-            .get(&thread_id)
-            .is_some_and(|entry| entry.subscriptions.keys().any(|id| *id != connection_id))
-        {
-            // Unknown ownership after recovery: do not replace another attached client's tools.
-            return false;
-        }
-        state.threads.entry(thread_id).or_default().tui_mcp_owner = Some(connection_id);
-        true
-    }
-
     /// Coordinates goal edits with cold/path-based resume for just this thread.
     pub(crate) async fn lock_goal_resume(
         &self,

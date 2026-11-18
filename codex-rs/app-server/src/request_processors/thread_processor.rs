@@ -14,8 +14,6 @@ use resume_permit::ResumePermit;
 #[path = "thread_resume_account.rs"]
 mod thread_resume_account;
 
-mod tui_mcp_rebind;
-
 use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_persisted_model_settings;
 use super::thread_enrichment::enrich_loaded_threads;
@@ -1727,18 +1725,6 @@ impl ThreadRequestProcessor {
             }
         };
         let session_telemetry = thread.session_telemetry();
-        if thread
-            .config()
-            .await
-            .mcp_servers
-            .get()
-            .contains_key("codex_tui")
-        {
-            listener_task_context
-                .thread_state_manager
-                .claim_tui_mcp_owner(thread_id, request_id.connection_id)
-                .await;
-        }
         session_telemetry.record_startup_phase(
             "thread_start_create_thread",
             create_thread_started_at.elapsed(),
@@ -4557,17 +4543,6 @@ impl ThreadRequestProcessor {
                     return Ok(ControlFlow::Break(()));
                 };
                 let request_id = request_id.clone();
-                if codex_thread
-                    .config()
-                    .await
-                    .mcp_servers
-                    .get()
-                    .contains_key("codex_tui")
-                {
-                    self.thread_state_manager
-                        .claim_tui_mcp_owner(thread_id, request_id.connection_id)
-                        .await;
-                }
                 if let Err(err) = Self::set_app_server_client_info(
                     codex_thread.as_ref(),
                     app_server_client_name,
@@ -4917,11 +4892,8 @@ impl ThreadRequestProcessor {
             {
                 return Ok(RunningThreadResumeResult::NeedsExclusive);
             }
-            let rejoin_params = self
-                .rebind_tui_mcp_for_resume(request_id, existing_thread_id, &existing_thread, params)
-                .await?;
             let mismatch_details = collect_resume_override_mismatches(
-                &rejoin_params,
+                params,
                 &config_snapshot,
                 selected_service_tier.as_deref(),
             )?;

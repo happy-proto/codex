@@ -98,7 +98,6 @@ mod mcp_resource_origin;
 mod mcp_server_elicitation;
 mod mcp_server_status;
 mod mcp_tool;
-mod mcp_tui_rebind;
 mod memory_read;
 mod memory_reset;
 mod misalignment_policy;

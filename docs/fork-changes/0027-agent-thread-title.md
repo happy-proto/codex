@@ -8,8 +8,8 @@
 首轮通过中文提示词引导 Agent 在基本调研后主动命名会话，具体措辞以
 [thread_title_instructions.rs](../../codex-rs/tui/src/thread_title_instructions.rs) 为准。
 
-初次命名调用省略 `threadId`，并传入 `onlyIfUnnamed: true`。
-工具读取当前会话名称，已有名称时返回原名称而不写入；默认的显式改名仍允许覆盖。
+初次命名使用 `codex task rename --only-if-unnamed`，通过 `CODEX_THREAD_ID` 定位当前会话。
+已有名称时返回原名称而不写入。默认的显式改名允许覆盖。
 名称持久化及界面更新复用现有 `thread/name/set` 与名称通知。
 
 提示词通过现有 `turn/start.additionalContext` 的应用上下文传入，成为紧靠用户输入前的
@@ -29,8 +29,7 @@
 - [user_turn_submission.rs](../../codex-rs/tui/src/app/user_turn_submission.rs)：首次用户 turn 提交时附带上下文。
 - [user_message_submission.rs](../../codex-rs/tui/src/app_server_session/user_message_submission.rs)：统一消息提交流程通过 `TurnStartSettings` 透传上下文，仅新 turn 使用；保留提交回执、未确认草稿及 steer 行为。
 - [app_server_session.rs](../../codex-rs/tui/src/app_server_session.rs)：通过既有协议转发上下文，公共指令保持不变。
-- [dynamic_tools.rs](../../codex-rs/tui/src/dynamic_tools.rs)：初次命名的已有名称检查。
-- [dynamic_tools_tests.rs](../../codex-rs/tui/src/dynamic_tools_tests.rs)：真实内嵌 app-server 配合模拟模型，验证独立消息紧靠用户输入、首轮等待工具结果时名称已持久化；覆盖重复命名和手动名称优先。
+- [内置会话管理](0034-session-skill.md)：app-server 连接与重命名操作。
 - [thread_title_tests.rs](../../codex-rs/tui/src/app/thread_title_tests.rs)：首轮注入范围、未命名兜底、已有服务端名称跳过兜底，以及原有手动命名与取消回归。
 
 定向测试通过 [fork CI](../../.github/workflows/fork.yml) 的 `thread_title` 过滤器执行。

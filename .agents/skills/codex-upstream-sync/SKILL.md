@@ -1,6 +1,6 @@
 ---
 name: codex-upstream-sync
-description: 同步 happy-proto/codex fork 到最新已发布的上游 alpha，检查内置第三方 skills 更新，分析版本差异并维护中文 GitHub Release notes。
+description: 同步 happy-proto/codex fork 到最新已发布的上游 alpha，检查内置 skills 更新与任务工具能力，分析版本差异并维护中文 GitHub Release notes。
 ---
 
 # Codex 上游同步
@@ -16,7 +16,7 @@ description: 同步 happy-proto/codex fork 到最新已发布的上游 alpha，�
 Actions 不自行 rebase 或强推分支。
 
 本轮开始时确定已发布的候选；`scripts/fork/upstream-tag` 已对应该候选时，报告已是最新并跳过 alpha rebase，
-仍须完成下面的内置 skill 更新检查。
+仍须完成下面的第三方 skill 更新和任务工具能力检查。
 将本轮改动与上游同步都准备、验证完毕后，先统一推送 `main`，避免不必要地重复触发完整 CI；
 后续为修复问题所需的提交和推送不受这一约束。
 本轮确定候选后不反复追逐新发行版。
@@ -40,6 +40,19 @@ Actions 不自行 rebase 或强推分支。
 执行离线 `check` 和 `test_sync_skills.py`，将快照及 lock 与 alpha 同步结果一起验证、交付。
 来源及维护边界见 [0010 改造记录](../../../docs/fork-changes/0010-open-automation.md)。
 最终回复简述哪些 skill 已更新、哪些没有更新；兼容性或检查失败时明确说明未完成项。
+
+## 内置会话管理 skill
+
+每次同步都检查候选 alpha 的 `codex-rs/tui/src/dynamic_tools.rs`
+和 `dynamic_tools_mcp.rs`。对照当前基线查看工具清单、参数、审批、
+消息送达与等待行为的变化，再与内置 `codex-session` skill 和
+`codex task` 的实现逐项核对。基线相同也核对当前实现和能力缺口。
+若上游把工具移到其他模块，跟到新的注册入口和实现。
+
+用候选版本现有 app-server RPC 同步可覆盖的能力，更新 CLI、skill 和定向验证。
+如果新能力依赖 TUI 进程或缺 RPC，记录能力差异并说明原因。
+在同步结果里简述有无变化及仍未覆盖的能力。
+实现与验证入口见 [0034 改造记录](../../../docs/fork-changes/0034-session-skill.md)。
 
 ## Alpha 同步步骤
 
