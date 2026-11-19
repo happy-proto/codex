@@ -2134,7 +2134,7 @@ impl App {
                 }
             }
             AppEvent::RefreshSessionSkills { cwd } => {
-                if !cwds_differ(&cwd, self.config.cwd.as_path()) {
+                if &cwd == self.chat_widget.session_cwd() {
                     self.refresh_skills_in_background(app_server);
                 }
             }

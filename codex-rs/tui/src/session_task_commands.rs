@@ -307,19 +307,22 @@ impl TaskClient<'_> {
                 archived,
                 cursor,
             } => {
-                self.rpc(
-                    "thread/list",
-                    json!({
-                        "limit": limit,
-                        "archived": archived,
-                        "cursor": cursor,
-                        "sortKey": "updated_at",
-                        "currentAccountOnly": true,
-                        "useStateDbOnly": true,
-                        "modelProviders": []
-                    }),
-                )
-                .await
+                let mut page = self
+                    .rpc(
+                        "thread/list",
+                        json!({
+                            "limit": limit,
+                            "archived": archived,
+                            "cursor": cursor,
+                            "sortKey": "updated_at",
+                            "currentAccountOnly": true,
+                            "useStateDbOnly": true,
+                            "modelProviders": []
+                        }),
+                    )
+                    .await?;
+                page["navigationHint"] = json!(crate::dynamic_tools::THREAD_NAVIGATION_HINT);
+                Ok(page)
             }
             Read {
                 thread_id,

@@ -28,7 +28,10 @@ async fn run_response(ws: &mut WsStream) -> (Result<(), ApiError>, Vec<ResponseE
     let result = run_websocket_response_stream(
         ws,
         tx,
-        "{}".into(),
+        WsRequestText {
+            text: "{}".into(),
+            private: false,
+        },
         Duration::from_secs(1),
         None,
         None,
@@ -86,7 +89,10 @@ async fn websocket_close_during_blocked_upload_is_terminal() {
     let (mut client, mut server) = socket_pair().await;
     let send = send_websocket_request(
         &mut client,
-        "x".repeat(64 * 1024).into(),
+        WsRequestText {
+            text: "x".repeat(64 * 1024).into(),
+            private: false,
+        },
         Duration::from_secs(1),
         None,
         false,
@@ -131,10 +137,18 @@ async fn websocket_close_queued_before_send_is_not_discarded() {
     })
     .await
     .expect("pump close");
-    let error =
-        send_websocket_request(&mut client, "{}".into(), Duration::from_secs(1), None, true)
-            .await
-            .expect_err("closed socket");
+    let error = send_websocket_request(
+        &mut client,
+        WsRequestText {
+            text: "{}".into(),
+            private: false,
+        },
+        Duration::from_secs(1),
+        None,
+        true,
+    )
+    .await
+    .expect_err("closed socket");
     let error = map_api_error(error);
     assert!(error.to_string().contains("1009"), "{error}");
     assert_eq!(error.retry_delay(1), None);
