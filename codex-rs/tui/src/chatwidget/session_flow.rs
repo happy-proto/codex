@@ -286,7 +286,7 @@ impl ChatWidget {
         }
         self.transcript.committed_turn_response = None;
         self.app_event_tx.send(AppEvent::RefreshSessionSkills {
-            cwd: self.config.cwd.to_path_buf(),
+            cwd: self.session_cwd().clone(),
         });
         self.refresh_connector_mentions(/*force_refresh*/ false);
         let initial_user_message_pending = self.initial_user_message.is_some();
