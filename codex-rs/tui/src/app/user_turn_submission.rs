@@ -5,6 +5,7 @@
 use super::*;
 use crate::app_command::CloudSubmissionIntent;
 use crate::app_server_session::UnsupportedLegacyPermissionProfile;
+use crate::app_server_session::is_server_shutting_down_error;
 use crate::app_server_session::user_message_submission::TurnStartSettings;
 use crate::app_server_session::user_message_submission::UserMessageAdmission;
 use crate::app_server_session::user_message_submission::UserMessageSubmissionFailure;
@@ -163,6 +164,16 @@ pub(super) async fn try_submit_user_turn(
         }
         Err(UserMessageSubmissionFailure::Rejected(error)) => {
             if app.recover_transport_error(&error) {
+                if matches!(
+                    error.downcast_ref::<TypedRequestError>(),
+                    Some(TypedRequestError::Server { source, .. })
+                        if is_server_shutting_down_error(source)
+                ) {
+                    // The draining server refused admission, so recovery can safely send
+                    // this input once the connection and thread have been restored.
+                    app.chat_widget
+                        .requeue_unsubmitted_user_message(client_user_message_id);
+                }
                 return Ok(true);
             }
             if error
