@@ -24,7 +24,7 @@ pub(super) fn normalize_reconnect_status(popup: &str) -> String {
 }
 
 #[tokio::test]
-async fn draining_turn_submission_reconnects_without_exiting_or_replaying() -> Result<()> {
+async fn draining_turn_submission_requeues_input_until_reconnected() -> Result<()> {
     for steering in [false, true] {
         for legacy_error in [false, true] {
             let (mut app, _events, mut ops) = make_test_app_with_channels().await;
@@ -96,14 +96,39 @@ async fn draining_turn_submission_reconnects_without_exiting_or_replaying() -> R
                 AppRunControl::Continue
             ));
             assert!(app.reconnect.offline);
-            let after = app.chat_widget.capture_thread_input_state().unwrap();
-            assert_eq!(after.pending_steers, before.pending_steers);
+            let mut after = app.chat_widget.capture_thread_input_state().unwrap();
+            assert!(after.pending_steers.is_empty());
+            assert!(app.chat_widget.has_queued_follow_up_messages());
             assert_eq!(
                 app.chat_widget.composer_text_with_pending(),
                 "keep this draft"
             );
             app.handle_tui_event(&mut tui, &mut session, TuiEvent::Key(KeyCode::Enter.into()))
                 .await?;
+            assert!(
+                !std::iter::from_fn(|| ops.try_recv().ok())
+                    .any(|op| matches!(op, Op::UserTurn { .. }))
+            );
+
+            // Apply the same reconciliation as a reconnect whose history has no receipt
+            // for the submission. An explicit refusal must remain eligible for autosend.
+            after.reconnect_pending = true;
+            app.chat_widget
+                .restore_reconnected_input(Some(after), /*confirmed_message_ids*/ &[]);
+            app.chat_widget
+                .set_queue_autosend_suppressed(/*suppressed*/ false);
+            if steering {
+                assert!(!app.chat_widget.maybe_send_next_queued_input());
+                app.chat_widget.handle_server_notification(
+                    turn_completed_notification(thread_id, "turn-1", TurnStatus::Completed),
+                    /*replay_kind*/ None,
+                );
+            } else {
+                assert!(app.chat_widget.maybe_send_next_queued_input());
+            }
+            assert_matches!(next_user_turn_op(&mut ops), Op::UserTurn { items, .. }
+                if matches!(items.as_slice(), [UserInput::Text { text, .. }] if text == "keep this message"));
+            assert!(!app.chat_widget.has_queued_follow_up_messages());
             assert!(
                 !std::iter::from_fn(|| ops.try_recv().ok())
                     .any(|op| matches!(op, Op::UserTurn { .. }))
