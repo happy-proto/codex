@@ -170,7 +170,11 @@ def verify_task_connection(cli, env):
                 str(cli), "task", "list", "--limit", "1", env=env,
                 capture_output=True, text=True, timeout=30,
             )
-            if not isinstance(json.loads(result.stdout).get("data"), list):
+            page = json.loads(result.stdout)
+            if (
+                not isinstance(page.get("data"), list)
+                or "codex://threads/<id>" not in page.get("navigationHint", "")
+            ):
                 raise ValueError(f"task list did not return a thread page: {result.stdout!r}")
         finally:
             if server.poll() is None:
