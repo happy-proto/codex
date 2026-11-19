@@ -1369,7 +1369,7 @@ pub(crate) enum AppEvent {
 
     /// Refresh skill metadata after attaching a session without blocking terminal input.
     RefreshSessionSkills {
-        cwd: PathBuf,
+        cwd: PathUri,
     },
 
     /// Result of an automatic skills refresh during startup or session attachment.

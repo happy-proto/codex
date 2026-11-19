@@ -28,7 +28,10 @@ async fn run_response(ws: &mut WsStream) -> (Result<(), ApiError>, Vec<ResponseE
     let result = run_websocket_response_stream(
         ws,
         tx,
-        "{}".into(),
+        WsRequestText {
+            text: "{}".into(),
+            private: false,
+        },
         Duration::from_secs(1),
         None,
         None,

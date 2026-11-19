@@ -1245,8 +1245,7 @@ pub fn run() -> anyhow::Result<()> {
                 std::env::args_os().len() == 2,
                 "--codex-run-as-sandbox-launcher does not accept additional arguments"
             );
-            return codex_cli::shared_sandbox_launcher::run(arg0_paths.codex_linux_sandbox_exe)
-                .await;
+            return crate::shared_sandbox_launcher::run(arg0_paths.codex_linux_sandbox_exe).await;
         }
         // Finish polling the large subcommand dispatcher before polling interactive TUI events.
         if let Some(tui) = Box::pin(dispatch_cli(arg0_paths, remote_control_disabled)).await? {
