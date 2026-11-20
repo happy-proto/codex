@@ -719,3 +719,116 @@ async fn task_worktrees_survive_cli_disconnect_on_shared_daemon() -> Result<()> 
     client.shutdown().await?;
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn task_send_to_fresh_and_unloaded_sessions() -> Result<()> {
+    use codex_app_server_client::AppServerEvent;
+    use codex_app_server_client::RemoteAppServerClient;
+    use codex_app_server_client::RemoteAppServerConnectArgs;
+    use codex_app_server_client::RemoteAppServerEndpoint;
+    use codex_app_server_protocol::ClientRequest;
+    use codex_app_server_protocol::RequestId;
+    use codex_app_server_protocol::ServerNotification;
+    use codex_app_server_protocol::ThreadHistoryMode;
+    use codex_app_server_protocol::ThreadLoadedListResponse;
+    use codex_app_server_protocol::ThreadStartParams;
+    use codex_app_server_protocol::ThreadStartResponse;
+    use serde_json::json;
+
+    let daemon = TestDaemon::new()?;
+    let responses =
+        app_test_support::create_mock_responses_server_repeating_assistant("Ready").await;
+    app_test_support::MockResponsesConfig::new(&responses.uri()).write(daemon.home.path())?;
+    daemon.lifecycle("start")?;
+    let socket_path = codex_app_server_client::app_server_control_socket_path(daemon.home.path())?;
+    let connect = || {
+        RemoteAppServerClient::connect(RemoteAppServerConnectArgs {
+            endpoint: RemoteAppServerEndpoint::UnixSocket {
+                socket_path: socket_path.clone(),
+            },
+            client_name: "task-delegation-test".to_owned(),
+            client_version: "0.0.0".to_owned(),
+            required_human_approval: false,
+            experimental_api: true,
+            mcp_server_openai_form_elicitation: false,
+            opt_out_notification_methods: Vec::new(),
+            channel_capacity: 64,
+        })
+    };
+    let start = |request_id| ClientRequest::ThreadStart {
+        request_id: RequestId::Integer(request_id),
+        params: ThreadStartParams {
+            history_mode: Some(ThreadHistoryMode::Paginated),
+            ..Default::default()
+        },
+    };
+    let task = |source: &str, args: &[&str]| -> Result<Value> {
+        let output = daemon
+            .command()
+            .env("CODEX_THREAD_ID", source)
+            .arg("task")
+            .args(args)
+            .output()?;
+        ensure!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        Ok(serde_json::from_slice(&output.stdout)?)
+    };
+
+    let mut client = connect().await?;
+    let source: ThreadStartResponse = client.request_typed(start(1)).await?;
+    let target: ThreadStartResponse = client.request_typed(start(2)).await?;
+    let target_id = &target.thread.id;
+
+    let empty = task(
+        &source.thread.id,
+        &["read", target_id, "--summary", "--limit", "1"],
+    )?;
+    assert_eq!(empty["turns"], json!([]));
+    let full = task(&source.thread.id, &["read", target_id, "--limit", "1"])?;
+    assert_eq!(full["turnsPage"]["data"], json!([]));
+    let first = task(
+        &source.thread.id,
+        &["send", target_id, "--prompt", "First delegation"],
+    )?;
+    let first_id = first["turn"]["id"].as_str().context("accepted turn ID")?;
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while let Some(event) = client.next_event().await {
+            if let AppServerEvent::ServerNotification(notification) = event
+                && let ServerNotification::TurnCompleted(completed) = *notification
+                && completed.turn.id == first_id
+            {
+                return Ok(());
+            }
+        }
+        anyhow::bail!("client disconnected before the delegated turn completed");
+    })
+    .await??;
+    let read = task(
+        &source.thread.id,
+        &["read", target_id, "--summary", "--limit", "1"],
+    )?;
+    assert_eq!(read["turns"][0]["id"], first_id);
+
+    client.shutdown().await?;
+    daemon.lifecycle("restart")?;
+    let client = connect().await?;
+    let loaded: ThreadLoadedListResponse = client
+        .request_typed(ClientRequest::ThreadLoadedList {
+            request_id: RequestId::Integer(1),
+            params: Default::default(),
+        })
+        .await?;
+    assert!(!loaded.data.contains(target_id));
+    let source: ThreadStartResponse = client.request_typed(start(2)).await?;
+    let second = task(
+        &source.thread.id,
+        &["send", target_id, "--prompt", "Second delegation"],
+    )?;
+    let second_id = second["turn"]["id"].as_str().context("accepted turn ID")?;
+    assert_ne!(second_id, first_id);
+    client.shutdown().await?;
+    Ok(())
+}
