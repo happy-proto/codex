@@ -3471,7 +3471,7 @@ impl ThreadRequestProcessor {
         } = params;
         let thread_uuid = ThreadId::from_string(&thread_id)
             .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
-        let paginated = match self
+        match self
             .thread_store
             .read_thread(StoreReadThreadParams {
                 thread_id: thread_uuid,
@@ -3480,15 +3480,21 @@ impl ThreadRequestProcessor {
             })
             .await
         {
-            Ok(thread) => thread.history_mode == ThreadHistoryMode::Paginated,
-            Err(err) if err.is_missing_for_read(thread_uuid) => {
-                if let Ok(thread) = self.thread_manager.get_thread(thread_uuid).await {
-                    let config = thread.config_snapshot().await;
-                    !config.ephemeral && config.history_mode == ThreadHistoryMode::Paginated
-                } else {
-                    false
-                }
+            Ok(thread) if thread.history_mode == ThreadHistoryMode::Paginated => {
+                return self
+                    .paginated_thread_turns_list_response(
+                        thread_uuid,
+                        cursor,
+                        limit,
+                        sort_direction,
+                        items_view,
+                    )
+                    .await;
             }
+            Ok(_) => {}
+            Err(ThreadStoreError::InvalidRequest { message })
+                if message == format!("no rollout found for thread id {thread_uuid}") => {}
+            Err(ThreadStoreError::ThreadNotFound { thread_id }) if thread_id == thread_uuid => {}
             Err(ThreadStoreError::InvalidRequest { message }) => {
                 return Err(invalid_request(message));
             }
@@ -3496,17 +3502,6 @@ impl ThreadRequestProcessor {
                 return Err(unsupported_thread_store_operation(operation));
             }
             Err(err) => return Err(internal_error(format!("failed to read thread: {err}"))),
-        };
-        if paginated {
-            return self
-                .paginated_thread_turns_list_response(
-                    thread_uuid,
-                    cursor,
-                    limit,
-                    sort_direction,
-                    items_view,
-                )
-                .await;
         }
 
         let items = self
