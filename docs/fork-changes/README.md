@@ -17,7 +17,7 @@
 | 0009 | [默认使用开放的浏览器与电脑操作工具](0009-open-automation.md) |
 | 0010 | [WebSocket 连接主动轮转](0010-websocket-rotation.md) |
 | 0011 | [发布版本与编译缓存分离](0011-build-cache-stability.md) |
-| 0012 | [会话 Skills 自动刷新保持输入响应](0012-session-skills-refresh.md) |
+| 0012 | [会话 Skills 自动刷新保持输入响应](0012-session-skills-refresh.md)（已移除） |
 | 0013 | [ts-rs 宏输出与编译元数据稳定性](0013-ts-rs-metadata-stability.md) |
 | 0014 | [异步压缩生命周期诊断](0014-async-compaction-diagnostics.md) |
 | 0015 | [后台压缩失败后的退避重试](0015-async-compaction-retry.md) |
