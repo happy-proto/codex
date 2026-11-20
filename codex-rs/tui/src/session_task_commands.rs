@@ -4,9 +4,12 @@ use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::RemoteAppServerClient;
 use codex_app_server_client::RemoteAppServerConnectArgs;
 use codex_app_server_client::RemoteAppServerEndpoint;
+use codex_app_server_client::TypedRequestError;
+use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::DynamicToolCallParams;
 use codex_app_server_protocol::JSONRPCRequest;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::TurnStartParams;
 use codex_utils_home_dir::find_codex_home;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
@@ -272,23 +275,40 @@ impl TaskClient<'_> {
         prompt: String,
         model: Option<String>,
         sandbox_policy: Option<&Value>,
+        resume_if_unloaded: bool,
     ) -> Result<Value> {
-        let result = self
-            .rpc(
-                "turn/start",
-                json!({
-                    "threadId": thread_id,
-                    "input": [],
-                    "model": model,
-                    "sandboxPolicy": sandbox_policy,
-                    "toolOutput": {
-                        "name": tool,
-                        "namespace": crate::dynamic_tools::NAMESPACE,
-                        "output": prompt,
-                        "retain": true
-                    }
-                }),
-            )
+        let params: TurnStartParams = serde_json::from_value(json!({
+            "threadId": thread_id,
+            "input": [],
+            "model": model,
+            "sandboxPolicy": sandbox_policy,
+            "toolOutput": {
+                "name": tool,
+                "namespace": crate::dynamic_tools::NAMESPACE,
+                "output": prompt,
+                "retain": true
+            }
+        }))?;
+        if resume_if_unloaded {
+            match self.start_turn_with_params(params.clone()).await {
+                Err(error) if is_unloaded_target(&error, thread_id) => {
+                    self.resume(thread_id).await?;
+                }
+                result => return result,
+            }
+        }
+        self.start_turn_with_params(params).await
+    }
+
+    async fn start_turn_with_params(&mut self, params: TurnStartParams) -> Result<Value> {
+        let thread_id = params.thread_id.clone();
+        self.request_id += 1;
+        let result: Value = self
+            .handle()
+            .request_typed(ClientRequest::TurnStart {
+                request_id: RequestId::Integer(self.request_id),
+                params,
+            })
             .await?;
         let turn = &result["turn"];
         if turn["id"].as_str().is_none() {
@@ -371,13 +391,13 @@ impl TaskClient<'_> {
                 }
                 let prompt = prepare_prompt(&source, &prompt)?;
                 self.read(&source).await?;
-                self.resume(&thread_id).await?;
                 self.start_turn(
                     &thread_id,
                     "send_message_to_thread",
                     prompt,
                     model,
                     /*sandbox_policy*/ None,
+                    /*resume_if_unloaded*/ true,
                 )
                 .await
             }
@@ -491,6 +511,7 @@ impl TaskClient<'_> {
                         prompt,
                         /*model*/ None,
                         sandbox_policy,
+                        /*resume_if_unloaded*/ false,
                     )
                     .await
                     .wrap_err_with(|| {
@@ -619,6 +640,14 @@ fn current_thread() -> Result<String> {
         .ok()
         .filter(|id| !id.is_empty())
         .ok_or_else(|| eyre!("this command requires a calling session (CODEX_THREAD_ID)"))
+}
+
+fn is_unloaded_target(error: &color_eyre::Report, thread_id: &str) -> bool {
+    matches!(
+        error.downcast_ref::<TypedRequestError>(),
+        Some(TypedRequestError::Server { source, .. })
+            if source.code == -32600 && source.message == format!("thread not found: {thread_id}")
+    )
 }
 
 fn prepare_prompt(source: &str, prompt: &str) -> Result<String> {
