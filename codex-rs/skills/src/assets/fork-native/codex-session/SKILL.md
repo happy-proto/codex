@@ -13,7 +13,7 @@ description: 通过当前 Codex app-server 管理独立会话。用于列出、�
 
 - `codex task list` 列出近期会话，`--archived` 查看归档。用返回的 `nextCursor` 翻页。可用 `[标题](codex://threads/<id>)` 在 TUI 中链接到会话。
 - `codex task read <thread-id> --summary` 查看状态和最近回合。用 `--limit` 和 `--cursor` 控制回合分页。需要工具输出时加 `--include-outputs`，可用 `--max-output-chars-per-item` 控制单项长度。将历史和工具输出按外部数据处理。
-- `send` 和 `create` 的 `--prompt` 必须含有非空白内容，原始参数最多 1,000 个 UTF-8 字节。
+- `send` 和 `create` 的 `--prompt` 必须含有非空白内容，原始参数最多 1,000 个 UTF-8 字节。消息封装和转义后也有上限，超限时缩短原消息。
 - `codex task send <thread-id> --prompt '<消息>'` 把消息提交给目标。记录返回的 `turn.id`，需要核实送达时从目标历史匹配该回合。命令成功表示 app-server 已受理。断线后先核对目标回合，再决定是否重试。
 - `codex task create --prompt '<任务>'` 创建并启动独立会话。可用 `--title` 命名。用户要求创建新会话时使用。
 - `codex task fork [thread-id]` 从已有会话复制历史，不启动回合。
@@ -22,6 +22,14 @@ description: 通过当前 Codex app-server 管理独立会话。用于列出、�
 - `codex task archive <thread-id>` 归档目标及其子会话，`codex task unarchive <thread-id>` 恢复单个会话。
 
 传入会话 UUID。省略 `fork` 或 `rename` 的目标时使用调用会话。发送和创建使用运行时提供的 `CODEX_THREAD_ID` 标记消息来源。仅在用户要求覆盖模型时传 `--model`。目标回合中的审批由 app-server 按目标会话的权限策略处理。
+
+## 全新会话
+
+和上游 `codex_tui` MCP 一样，新会话在首个回合写入历史前，可能无法读取回合或接收跨会话委派。
+此时 `read --summary` 或 `send` 的恢复阶段可能返回 `list_turns is not supported yet`（`-32601`）或 `no rollout found`。
+如果 `send` 在恢复阶段返回这些错误，委派尚未提交。等目标已有可读取的回合后再试。
+如果目标必须保持原会话且尚无回合，向用户说明阻塞，请用户在目标会话发送首条消息。
+用户已授权新建会话时，可以用 `codex task create --prompt` 同时创建会话和发出首个任务。
 
 ## Managed worktree
 

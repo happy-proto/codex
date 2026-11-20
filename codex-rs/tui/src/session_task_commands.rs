@@ -1,15 +1,14 @@
+use crate::dynamic_tools::prepare_delegated_prompt;
+use crate::dynamic_tools::resume_delegation_target;
 use crate::legacy_core::config::ConfigBuilder;
 use crate::managed_worktree_tools::ManagedWorktreeTools;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::RemoteAppServerClient;
 use codex_app_server_client::RemoteAppServerConnectArgs;
 use codex_app_server_client::RemoteAppServerEndpoint;
-use codex_app_server_client::TypedRequestError;
-use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::DynamicToolCallParams;
 use codex_app_server_protocol::JSONRPCRequest;
 use codex_app_server_protocol::RequestId;
-use codex_app_server_protocol::TurnStartParams;
 use codex_utils_home_dir::find_codex_home;
 use color_eyre::eyre::Result;
 use color_eyre::eyre::WrapErr;
@@ -275,40 +274,23 @@ impl TaskClient<'_> {
         prompt: String,
         model: Option<String>,
         sandbox_policy: Option<&Value>,
-        resume_if_unloaded: bool,
     ) -> Result<Value> {
-        let params: TurnStartParams = serde_json::from_value(json!({
-            "threadId": thread_id,
-            "input": [],
-            "model": model,
-            "sandboxPolicy": sandbox_policy,
-            "toolOutput": {
-                "name": tool,
-                "namespace": crate::dynamic_tools::NAMESPACE,
-                "output": prompt,
-                "retain": true
-            }
-        }))?;
-        if resume_if_unloaded {
-            match self.start_turn_with_params(params.clone()).await {
-                Err(error) if is_unloaded_target(&error, thread_id) => {
-                    self.resume(thread_id).await?;
-                }
-                result => return result,
-            }
-        }
-        self.start_turn_with_params(params).await
-    }
-
-    async fn start_turn_with_params(&mut self, params: TurnStartParams) -> Result<Value> {
-        let thread_id = params.thread_id.clone();
-        self.request_id += 1;
-        let result: Value = self
-            .handle()
-            .request_typed(ClientRequest::TurnStart {
-                request_id: RequestId::Integer(self.request_id),
-                params,
-            })
+        let result = self
+            .rpc(
+                "turn/start",
+                json!({
+                    "threadId": thread_id,
+                    "input": [],
+                    "model": model,
+                    "sandboxPolicy": sandbox_policy,
+                    "toolOutput": {
+                        "name": tool,
+                        "namespace": crate::dynamic_tools::NAMESPACE,
+                        "output": prompt,
+                        "retain": true
+                    }
+                }),
+            )
             .await?;
         let turn = &result["turn"];
         if turn["id"].as_str().is_none() {
@@ -389,15 +371,21 @@ impl TaskClient<'_> {
                 if source == thread_id {
                     return Err(eyre!("send requires a different target session"));
                 }
-                let prompt = prepare_prompt(&source, &prompt)?;
+                if model.as_deref().is_some_and(str::is_empty) {
+                    return Err(eyre!("model must not be empty"));
+                }
+                let prompt =
+                    prepare_delegated_prompt(&source, &prompt).map_err(|err| eyre!(err))?;
                 self.read(&source).await?;
+                resume_delegation_target(&self.handle(), &thread_id, /*config*/ None)
+                    .await
+                    .map_err(|err| eyre!(err))?;
                 self.start_turn(
                     &thread_id,
                     "send_message_to_thread",
                     prompt,
                     model,
                     /*sandbox_policy*/ None,
-                    /*resume_if_unloaded*/ true,
                 )
                 .await
             }
@@ -415,7 +403,8 @@ impl TaskClient<'_> {
                     return Err(eyre!("title must not be empty"));
                 }
                 let source_id = current_thread()?;
-                let prompt = prepare_prompt(&source_id, &prompt)?;
+                let prompt =
+                    prepare_delegated_prompt(&source_id, &prompt).map_err(|err| eyre!(err))?;
                 let source = self.resume(&source_id).await?;
                 if source["thread"]["ephemeral"] == true {
                     return Err(eyre!(
@@ -511,7 +500,6 @@ impl TaskClient<'_> {
                         prompt,
                         /*model*/ None,
                         sandbox_policy,
-                        /*resume_if_unloaded*/ false,
                     )
                     .await
                     .wrap_err_with(|| {
@@ -642,30 +630,6 @@ fn current_thread() -> Result<String> {
         .ok_or_else(|| eyre!("this command requires a calling session (CODEX_THREAD_ID)"))
 }
 
-fn is_unloaded_target(error: &color_eyre::Report, thread_id: &str) -> bool {
-    matches!(
-        error.downcast_ref::<TypedRequestError>(),
-        Some(TypedRequestError::Server { source, .. })
-            if source.code == -32600 && source.message == format!("thread not found: {thread_id}")
-    )
-}
-
-fn prepare_prompt(source: &str, prompt: &str) -> Result<String> {
-    if prompt.trim().is_empty() || prompt.len() > 1_000 {
-        return Err(eyre!("prompt must contain between 1 and 1,000 UTF-8 bytes"));
-    }
-    let escape = |text: &str| {
-        text.replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-    };
-    Ok(format!(
-        "<codex_delegation>\n  <source_thread_id>{}</source_thread_id>\n  <input>{}</input>\n</codex_delegation>",
-        escape(source),
-        escape(prompt)
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -675,6 +639,14 @@ mod tests {
     struct TaskCli {
         #[command(subcommand)]
         task: SessionTaskCommand,
+    }
+
+    #[test]
+    fn delegated_prompt_uses_upstream_utf8_and_escaped_limits() {
+        let thread_id = "01a1f701-1b14-77d0-a2fe-297adb558d1e";
+        assert!(prepare_delegated_prompt(thread_id, &"é".repeat(500)).is_ok());
+        assert!(prepare_delegated_prompt(thread_id, &"é".repeat(501)).is_err());
+        assert!(prepare_delegated_prompt(thread_id, &"&".repeat(1_000)).is_err());
     }
 
     #[test]
