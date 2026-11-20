@@ -1367,15 +1367,11 @@ pub(crate) enum AppEvent {
         thread_id: Option<ThreadId>,
     },
 
-    /// Refresh skill metadata after attaching a session without blocking terminal input.
-    RefreshSessionSkills {
-        cwd: PathUri,
-    },
-
-    /// Result of an automatic skills refresh during startup or session attachment.
+    /// Result of the startup skills refresh that runs after the first frame is scheduled.
     ///
-    /// Interactive refreshes use the synchronous app command path because those callers expect the
-    /// visible skill state to be current when their command completes.
+    /// This event is startup-only. Interactive skills refreshes are handled synchronously through the app
+    /// command path because those callers expect the visible skill state to be current when their command
+    /// completes.
     SkillsListLoaded {
         cwd: PathUri,
         result: Result<SkillsListResponse, String>,
