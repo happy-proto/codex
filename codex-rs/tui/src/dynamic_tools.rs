@@ -519,9 +519,7 @@ pub(crate) async fn execute_inner(
         }
         "create_thread" => {
             let arguments: CreateArguments = parse_arguments(params.arguments)?;
-            validate_prompt(&arguments.prompt, MAX_INPUT_BYTES)?;
-            let prompt = delegated_prompt(&params.thread_id, &arguments.prompt);
-            validate_prompt(&prompt, MAX_DELEGATED_INPUT_BYTES)?;
+            let prompt = prepare_delegated_prompt(&params.thread_id, &arguments.prompt)?;
             if arguments
                 .title
                 .as_deref()
@@ -717,25 +715,9 @@ pub(crate) async fn execute_inner(
             if arguments.model.as_deref().is_some_and(str::is_empty) {
                 return Err("model must not be empty".to_string());
             }
-            validate_prompt(&arguments.prompt, MAX_INPUT_BYTES)?;
-            let prompt = delegated_prompt(&params.thread_id, &arguments.prompt);
-            validate_prompt(&prompt, MAX_DELEGATED_INPUT_BYTES)?;
-            let thread = read_thread(&handle, &arguments.thread_id).await?;
-            let exclude_turns = thread.history_mode == ThreadHistoryMode::Paginated;
-            let resumed: ThreadResumeResponse = request_with_history_fallback(
-                &handle,
-                exclude_turns,
-                |request_id, exclude_turns| ClientRequest::ThreadResume {
-                    request_id,
-                    params: ThreadResumeParams {
-                        thread_id: arguments.thread_id.clone(),
-                        exclude_turns,
-                        config: mcp_config.clone(),
-                        ..ThreadResumeParams::default()
-                    },
-                },
-            )
-            .await?;
+            let prompt = prepare_delegated_prompt(&params.thread_id, &arguments.prompt)?;
+            let (thread, resumed) =
+                resume_delegation_target(&handle, &arguments.thread_id, mcp_config).await?;
             let daybreak_enabled = thread.daybreak_enabled.unwrap_or(false);
             register_background_thread(
                 app_event_tx,
@@ -1146,6 +1128,13 @@ fn validate_prompt(prompt: &str, max_bytes: usize) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn prepare_delegated_prompt(source: &str, prompt: &str) -> Result<String, String> {
+    validate_prompt(prompt, MAX_INPUT_BYTES)?;
+    let prompt = delegated_prompt(source, prompt);
+    validate_prompt(&prompt, MAX_DELEGATED_INPUT_BYTES)?;
+    Ok(prompt)
+}
+
 fn delegated_prompt(source_thread_id: &str, prompt: &str) -> String {
     let escape = |text: &str| {
         text.replace('&', "&amp;")
@@ -1246,6 +1235,29 @@ async fn request_with_history_fallback<T: DeserializeOwned>(
         }
         result => result.map_err(|error| error.to_string()),
     }
+}
+
+pub(crate) async fn resume_delegation_target(
+    handle: &AppServerRequestHandle,
+    thread_id: &str,
+    config: Option<HashMap<String, Value>>,
+) -> Result<(Thread, ThreadResumeResponse), String> {
+    let thread = read_thread(handle, thread_id).await?;
+    let response = request_with_history_fallback(
+        handle,
+        thread.history_mode == ThreadHistoryMode::Paginated,
+        |request_id, exclude_turns| ClientRequest::ThreadResume {
+            request_id,
+            params: ThreadResumeParams {
+                thread_id: thread_id.to_string(),
+                exclude_turns,
+                config: config.clone(),
+                ..Default::default()
+            },
+        },
+    )
+    .await?;
+    Ok((thread, response))
 }
 
 async fn read_thread(handle: &AppServerRequestHandle, thread_id: &str) -> Result<Thread, String> {

@@ -5,7 +5,6 @@ use serde::Serialize;
 use sqlx::Row;
 
 use super::super::LocalThreadStore;
-use super::super::live_writer::unpersisted_session_meta;
 use super::super::rollout_lineage::LineageWalk;
 use super::segment_paging::page_item_rows;
 use super::segment_paging::page_turn_rows;
@@ -104,14 +103,6 @@ pub(in crate::local) async fn list_turns(
     store: &LocalThreadStore,
     params: ListTurnsParams,
 ) -> ThreadStoreResult<TurnPage> {
-    if params.cursor.is_none() && has_empty_live_history(store, params.thread_id).await {
-        validate_page_size(params.page_size)?;
-        return Ok(TurnPage {
-            turns: Vec::new(),
-            next_cursor: None,
-            backwards_cursor: None,
-        });
-    }
     validate_thread_for_paginated_reads(
         store,
         params.thread_id,
@@ -171,6 +162,13 @@ pub(in crate::local) async fn list_items(
     store: &LocalThreadStore,
     mut params: ListItemsParams,
 ) -> ThreadStoreResult<ItemPage> {
+    validate_thread_for_paginated_reads(
+        store,
+        params.thread_id,
+        params.include_archived,
+        "list_items",
+    )
+    .await?;
     if let Some(ids) = &params.item_ids {
         if params.turn_id.is_none()
             || params.position.is_some()
@@ -188,20 +186,6 @@ pub(in crate::local) async fn list_items(
         params.sort_direction = crate::SortDirection::Asc;
     }
     validate_page_size(params.page_size)?;
-    if params.position.is_none() && has_empty_live_history(store, params.thread_id).await {
-        return Ok(ItemPage {
-            items: Vec::new(),
-            next_cursor: None,
-            backwards_cursor: None,
-        });
-    }
-    validate_thread_for_paginated_reads(
-        store,
-        params.thread_id,
-        params.include_archived,
-        "list_items",
-    )
-    .await?;
     let pool = store.thread_history_db().await?;
     let mut lineage = LineageWalk::for_history_page(store, params.thread_id);
     let page = page_item_rows(pool, &mut lineage, &params).await?;
@@ -211,15 +195,6 @@ pub(in crate::local) async fn list_items(
         next_cursor: page.next_cursor,
         backwards_cursor: page.backwards_cursor,
     })
-}
-
-async fn has_empty_live_history(store: &LocalThreadStore, thread_id: ThreadId) -> bool {
-    // A fresh rollout has no indexed rows until its first persist.
-    unpersisted_session_meta(store, thread_id)
-        .await
-        .is_some_and(|(_, meta)| {
-            meta.history_mode == ThreadHistoryMode::Paginated && meta.history_base.is_none()
-        })
 }
 
 pub(super) async fn validate_thread_for_paginated_reads(
