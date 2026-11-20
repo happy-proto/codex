@@ -2203,11 +2203,6 @@ impl App {
                     }
                 }
             }
-            AppEvent::RefreshSessionSkills { cwd } => {
-                if &cwd == self.chat_widget.session_cwd() {
-                    self.refresh_skills_in_background(app_server);
-                }
-            }
             AppEvent::SkillsListLoaded { result, .. } => {
                 self.handle_skills_list_result(
                     result.map_err(|err| color_eyre::eyre::eyre!(err)),
