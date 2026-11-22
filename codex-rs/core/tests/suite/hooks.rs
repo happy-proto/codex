@@ -6946,6 +6946,5 @@ async fn steered_explicit_only_skill_respects_blocked_queued_prompt() -> Result<
         ],
     );
 
-    server.shutdown().await;
     Ok(())
 }
