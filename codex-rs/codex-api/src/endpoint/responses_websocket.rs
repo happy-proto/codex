@@ -907,9 +907,8 @@ async fn connect_websocket(
     {
         let _ = turn_state.set(header_value.to_string());
     }
-    let routing_affinity = stream.routing_affinity().cloned();
     Ok((
-        WsStream::new(stream, routing_affinity, max_message_bytes),
+        WsStream::new(stream, max_message_bytes),
         response,
         reasoning_included,
         server_model,

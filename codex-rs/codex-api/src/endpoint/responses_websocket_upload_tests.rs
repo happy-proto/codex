@@ -301,7 +301,7 @@ async fn size_close_after_partial_first_frame_write_error_rejects_upload() {
         .wait(TIMEOUT) // Subsequent Pong writes stay blocked during recovery.
         .build();
     let result = upload(scripted_client(io).await, /*telemetry*/ None).await;
-    assert_matches!(result, Err(ApiError::WebsocketMessageTooLarge));
+    assert_matches!(result, Err(ApiError::WebSocketClosed { code: 1009, .. }));
 }
 
 async fn reject_upload(messages: impl IntoIterator<Item = Message>) -> ApiError {
@@ -325,7 +325,7 @@ async fn reject_upload(messages: impl IntoIterator<Item = Message>) -> ApiError 
 #[tokio::test(start_paused = true)]
 async fn upload_reports_size_close_without_waiting_for_remaining_bytes() {
     let error = reject_upload([size_close()]).await;
-    assert_matches!(error, ApiError::WebsocketMessageTooLarge);
+    assert_matches!(error, ApiError::WebSocketClosed { code: 1009, .. });
 }
 
 fn assert_rate_limit(error: ApiError) {

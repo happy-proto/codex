@@ -760,11 +760,12 @@ async fn build_thread_item(
     updated_at: Option<String>,
     preview_filter: PreviewFilter,
 ) -> Option<ThreadItem> {
-    let state_db = filters.state_db.clone();
-    let summary =
-        compression::read_rollout_lines(&path, move |lines| read_head_summary(lines, &filters))
-            .await
-            .ok()??;
+    let summary_filters = Arc::clone(&filters);
+    let summary = compression::read_rollout_lines(&path, move |lines| {
+        read_head_summary(lines, &summary_filters)
+    })
+    .await
+    .ok()??;
     if summary.saw_session_meta
         && (matches!(preview_filter, PreviewFilter::IncludeEmpty)
             || summary.preview.is_some()
@@ -773,25 +774,7 @@ async fn build_thread_item(
     {
         // 回退产生的旧 rollout 仍是有效历史，但只列出 SQLite 选中的当前路径。
         // 在分页计数前过滤，避免旧文件占满页面；缺行或查询失败时保留文件回退行为。
-        if let Some(state_db) = state_db
-            && let Some(thread_id) = summary.thread_id
-        {
-            match state_db.get_thread(thread_id).await {
-                Ok(Some(metadata))
-                    if compression::plain_rollout_path(&metadata.rollout_path)
-                        != compression::plain_rollout_path(&path) =>
-                {
-                    return None;
-                }
-                Err(err) => tracing::warn!(
-                    "state db get_thread failed while selecting current rollout for list: {err}"
-                ),
-                _ => {}
-            }
-        }
-        // 回退产生的旧 rollout 仍是有效历史，但只列出 SQLite 选中的当前路径。
-        // 在分页计数前过滤，避免旧文件占满页面；缺行或查询失败时保留文件回退行为。
-        if let Some(state_db) = state_db
+        if let Some(state_db) = &filters.state_db
             && let Some(thread_id) = summary.thread_id
         {
             match state_db.get_thread(thread_id).await {
