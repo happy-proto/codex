@@ -6,7 +6,7 @@
 
 服务端以 WebSocket 关闭码 1009 拒绝消息时，原实现丢弃关闭码和原因，
 将它视为普通流断开，重复发送相同请求并可能回退 HTTPS。
-上传期间没有读取关闭帧，以及发送前已排队的关闭帧被丢弃，也会掩盖具体原因。
+上传期间及时读取关闭帧也能避免在发送失败后丢失具体原因。
 
 ## 如何改
 
@@ -16,9 +16,9 @@ Responses WebSocket 错误保留结构化关闭码和经过转义、限长的原
 其它关闭码与没有关闭帧的断连保持原有重试策略，并尽可能展示已知关闭信息。
 遥测只记录关闭码，不记录服务端关闭原因。
 
-连接 pump 分开轮询读写，在上传等待写入期间继续读取服务端事件。
-收到关闭帧时保留该消息并中止待完成的发送；发送前已排队的关闭帧也走同一分类。
-Ping/Pong 沿用底层 tungstenite 的自动响应。
+从上游 `0.173.0-alpha.4` 起复用其 WebSocket pump，在上传背压和写失败期间继续读取事件并刷新 Pong。
+当前请求开始发送后收到的关闭帧进入结构化分类。发送首帧前检测到连接已关闭时，
+按上游策略将连接视为失效并允许重连。
 已经收到 `response.completed` 的正常响应不会因后续关闭而变为失败。
 
 没有观测到关闭码的网络写失败仍按临时错误处理，不能仅凭请求大小推断为 1009。
@@ -32,7 +32,8 @@ Ping/Pong 沿用底层 tungstenite 的自动响应。
 - [WebSocket pump 与响应处理](../../codex-rs/codex-api/src/endpoint/responses_websocket.rs)。
 - [API 错误与核心错误映射](../../codex-rs/codex-api/src/api_bridge.rs)。
 - [传输回归](../../codex-rs/codex-api/src/endpoint/responses_websocket_close_tests.rs)：
-  通过真实 WebSocket 帧覆盖接收、阻塞上传、发送前关闭、空原因、临时关闭及完成后关闭。
+  通过真实 WebSocket 帧覆盖关闭码、原因转义、临时关闭及正常完成；
+  [上传测试](../../codex-rs/codex-api/src/endpoint/responses_websocket_upload_tests.rs)覆盖阻塞上传和发送首帧前关闭。
 - [共用重试回归](../../codex-rs/core/src/responses_retry_tests.rs)：
   采样与远程压缩在 1009 时直接返回，不消耗重试预算、不触发传输回退。
 - Rust 编译和回归在 GitHub Actions 执行；本机仅做格式与轻量检查。
@@ -43,6 +44,3 @@ Ping/Pong 沿用底层 tungstenite 的自动响应。
 `doctor` 网络诊断保留关闭码，隐藏服务端原始关闭原因，遵循上游诊断脱敏规则。
 不能将所有 WebSocket 关闭一律设为不可重试，也不能把本地接收容量错误当作服务端拒绝请求。
 若 pump 读写模型变化，继续验证上传中收到关闭帧、Ping/Pong 与正常完成后的连接行为。
-
-从 `0.169.0-alpha.10` 起，上游的大请求分帧发送 helper 同样用于分离后的 writer，
-保留 1 MiB 帧大小与逐帧背压；读端仍在上传期间处理关闭帧，不能退回整条消息一次写入。
