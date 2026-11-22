@@ -162,6 +162,7 @@ impl Transport {
                     return false;
                 }
             }
+            ApiError::WebSocketClosed { code, .. } => *code != 1009,
             ApiError::Retryable { .. }
             | ApiError::RateLimitExceeded { .. }
             | ApiError::Stream(_)
