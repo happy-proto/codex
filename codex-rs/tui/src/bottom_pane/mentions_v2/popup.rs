@@ -183,7 +183,6 @@ mod tests {
             title: "Review migration".into(),
             label_style: crate::thread_label::ThreadLabelStyle::Plain,
             cwd: "/workspace/project".into(),
-            snippet: "database schema".into(),
         }];
         let candidates = super::super::search_catalog::build_search_catalog(None, None, &tasks);
         let expected = candidates[0].selection.clone();
@@ -192,12 +191,12 @@ mod tests {
         assert_eq!(popup.search_mode, SearchMode::Sessions);
         assert_eq!(popup.selected(), Some(expected.clone()));
 
-        for query in ["migration", "project", "schema"] {
+        popup.set_query("migration");
+        assert_eq!(popup.selected(), Some(expected.clone()));
+        for query in ["project", "unrelated"] {
             popup.set_query(query);
-            assert_eq!(popup.selected(), Some(expected.clone()));
+            assert_eq!(popup.selected(), None);
         }
-        popup.set_query("unrelated");
-        assert_eq!(popup.selected(), None);
         popup.set_query("");
         assert_eq!(popup.selected(), Some(expected.clone()));
         popup.previous_search_mode();

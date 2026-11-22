@@ -7,8 +7,8 @@
 左右键在 All Results、Filesystem Only、Plugins、Sessions 之间循环。
 Plugins 的名称和包含插件、skill 的行为保持不变。
 
-Sessions 沿用已有的标题、工作目录和摘要搜索，以及 `thread://` 引用绑定；
-不改变会话来源、排序、引用上限或提交协议。
+Sessions 沿用上游的标题搜索和 `thread://` 引用绑定。上游自 `0.173.0-alpha.4`
+起按显示标题匹配，工作目录仅用于展示。
 
 ## 实现与验证
 
