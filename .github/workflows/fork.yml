@@ -74,15 +74,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [aarch64-apple-darwin, x86_64-unknown-linux-gnu]
-    runs-on: ubuntu-24.04
+        include:
+          - target: aarch64-apple-darwin
+            runner: runnerdock-codex-macos-arm64
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     env:
       CODEX_FORK_VERSION: ${{ needs.scripts.outputs.version }}
       CARGO_BUILD_JOBS: '3'
       CARGO_INCREMENTAL: '0'
       RUSTC_WRAPPER: sccache
-      SCCACHE_GHA_ENABLED: 'true'
+      SCCACHE_GHA_ENABLED: ${{ matrix.target == 'x86_64-unknown-linux-gnu' && 'true' || 'false' }}
       SCCACHE_GHA_VERSION: fork-v1
       SCCACHE_GHA_RW_MODE: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && 'READ_WRITE' || 'READ_ONLY' }}
       SCCACHE_IDLE_TIMEOUT: '0'
@@ -93,6 +97,7 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: '14.0'
     steps:
       - name: 释放未使用 SDK 的磁盘空间
+        if: runner.os == 'Linux'
         run: |
           df -h /
           sudo rm -rf -- /usr/local/lib/android /usr/share/dotnet
@@ -110,6 +115,17 @@ jobs:
           version: '0.13.5'
           python-version: '3.15'
           enable-cache: false
+      - name: 验证 macOS 原生构建环境
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          test "$RUNNER_OS" = macOS
+          test "$RUNNER_ARCH" = ARM64
+          test -n "${SCCACHE_DIR:-}" && test -d "$SCCACHE_DIR" && test -w "$SCCACHE_DIR"
+          xcrun --show-sdk-version
+          sccache --version
+          echo "/opt/homebrew/opt/rustup/bin" >> "$GITHUB_PATH"
+          echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          echo "SCCACHE_CACHE_SIZE=30G" >> "$GITHUB_ENV"
       - name: 安装仓库工具链及目标标准库
         working-directory: codex-rs
         env:
@@ -128,10 +144,16 @@ jobs:
             echo 'SCCACHE_LOG_MILLIS=1'
           } >> "$GITHUB_ENV"
       - uses: mozilla-actions/sccache-action@v0.0.11
+        if: runner.os == 'Linux'
         id: sccache
         with:
           version: v0.18.0
+      - name: 启动本地 sccache
+        if: runner.os == 'macOS'
+        id: local_sccache
+        run: sccache --start-server
       - uses: Swatinem/rust-cache@v2.9.2
+        if: runner.os == 'Linux'
         with:
           workspaces: codex-rs
           shared-key: fork-build-linux-v1-downloads
@@ -139,34 +161,11 @@ jobs:
           cache-bin: false
           save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
       - name: 安装系统构建依赖
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             pkg-config libcap-dev libasound2-dev clang libclang-dev llvm
-      - name: 安装 macOS 交叉编译和签名工具
-        if: matrix.target == 'aarch64-apple-darwin'
-        env:
-          RCODESIGN_SHA256: dbe85cedd8ee4217b64e9a0e4c2aef92ab8bcaaa41f20bde99781ff02e600002
-          SDK_SHA256: beee7212d265a6d2867d0236cc069314b38d5fb3486a6515734e76fa210c784c
-        run: |
-          # 与 cargo-zigbuild 配套的稳定 Mach-O linker；升级时先验证动态库加载与真实运行。
-          uv tool install 'cargo-zigbuild==0.24.0' --with 'ziglang==0.16.0'
-          cross_python="$(uv tool dir)/cargo-zigbuild/bin/python"
-          echo "CARGO_ZIGBUILD_PYTHON_PATH=$cross_python" >> "$GITHUB_ENV"
-          "$cross_python" -m ziglang version
-          curl --fail --location --retry 3 \
-            https://github.com/joseluisq/macosx-sdks/releases/download/26.1/MacOSX26.1.sdk.tar.xz \
-            --output "$RUNNER_TEMP/macos-sdk.tar.xz"
-          echo "$SDK_SHA256  $RUNNER_TEMP/macos-sdk.tar.xz" | sha256sum --check
-          tar -xJf "$RUNNER_TEMP/macos-sdk.tar.xz" -C "$RUNNER_TEMP"
-          echo "SDKROOT=$RUNNER_TEMP/MacOSX26.1.sdk" >> "$GITHUB_ENV"
-          curl --fail --location --retry 3 \
-            https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign/0.29.0/apple-codesign-0.29.0-x86_64-unknown-linux-musl.tar.gz \
-            --output "$RUNNER_TEMP/rcodesign.tar.gz"
-          echo "$RCODESIGN_SHA256  $RUNNER_TEMP/rcodesign.tar.gz" | sha256sum --check
-          mkdir -p "$RUNNER_TEMP/rcodesign"
-          tar -xzf "$RUNNER_TEMP/rcodesign.tar.gz" --strip-components=1 -C "$RUNNER_TEMP/rcodesign"
-          echo "$RUNNER_TEMP/rcodesign" >> "$GITHUB_PATH"
       - name: 构建、验证并归档平台包
         id: package
         env:
@@ -185,14 +184,14 @@ jobs:
           path: codex-rs/target/cargo-timings/
           if-no-files-found: ignore
       - name: 保存构建缓存统计
-        if: always() && steps.sccache.outcome == 'success'
+        if: always() && (steps.sccache.outcome == 'success' || steps.local_sccache.outcome == 'success')
         run: |
           mkdir -p fork-sccache
           sccache --show-stats --stats-format=json > fork-sccache/build.json
           scripts/fork/cache_diagnostics.py --log "$SCCACHE_ERROR_LOG" --cwd codex-rs --output fork-sccache/diagnostics.json
           scripts/fork/build_report.py --directory fork-sccache --stats build.json --timings codex-rs/target/cargo-timings
       - name: 上传构建缓存统计
-        if: always() && steps.sccache.outcome == 'success'
+        if: always() && (steps.sccache.outcome == 'success' || steps.local_sccache.outcome == 'success')
         uses: actions/upload-artifact@v7.0.0
         with:
           name: fork-build-sccache-${{ matrix.target }}-${{ github.sha }}

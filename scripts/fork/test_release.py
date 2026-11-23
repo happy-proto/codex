@@ -508,6 +508,7 @@ class PackageBuildTests(unittest.TestCase):
             with (
                 mock.patch.object(release, "ROOT", root),
                 mock.patch.object(release, "plan", return_value=metadata),
+                mock.patch.object(release.sys, "platform", "linux"),
                 mock.patch.object(release, "smoke") as native_smoke,
                 mock.patch.object(release, "archive_package", return_value=archive),
                 mock.patch.object(release, "run") as command,
@@ -542,6 +543,45 @@ class PackageBuildTests(unittest.TestCase):
                 str(dist / "package/bin/codex-exec-server"),
             )
 
+    def test_native_macos_build_signs_and_smokes_with_apple_tools(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "package.tar.xz"
+            archive.write_bytes(b"package")
+            entitlements = root / ".github/scripts/macos-signing/codex.entitlements.plist"
+            entitlements.parent.mkdir(parents=True)
+            entitlements.write_text("entitlements")
+            with (
+                mock.patch.object(release, "ROOT", root),
+                mock.patch.object(release.sys, "platform", "darwin"),
+                mock.patch.object(
+                    release,
+                    "plan",
+                    return_value={"source_commit": "a" * 40, "version": "1.0.0"},
+                ),
+                mock.patch.object(release, "run") as command,
+                mock.patch.object(release, "smoke") as native_smoke,
+                mock.patch.object(release, "archive_package", return_value=archive),
+                mock.patch.dict(os.environ),
+            ):
+                release.build(release.TARGET)
+            package = root / "fork-dist/package"
+            builder = command.call_args_list[0].args
+            self.assertIn(str(root / "scripts/fork/cargo-timed.sh"), builder)
+            self.assertNotIn("--strip-tool", builder)
+            command.assert_any_call(
+                "codesign",
+                "--force",
+                "--sign",
+                "-",
+                "--options",
+                "runtime",
+                "--entitlements",
+                str(entitlements),
+                str(package / "bin/codex"),
+            )
+            native_smoke.assert_called_once_with(package)
+
     def test_macos_signing_failure_does_not_produce_a_distribution_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -552,6 +592,7 @@ class PackageBuildTests(unittest.TestCase):
 
             with (
                 mock.patch.object(release, "ROOT", root),
+                mock.patch.object(release.sys, "platform", "linux"),
                 mock.patch.object(
                     release,
                     "plan",

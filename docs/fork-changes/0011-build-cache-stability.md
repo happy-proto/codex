@@ -22,9 +22,12 @@
   原有 sandbox 参数类型和函数继续由库根导出，命令行参数、退出状态及初始化顺序不变。
 - Cargo 与 sccache 继续校验源码、依赖、工具链、目标和编译参数。
   固定内部版本只消除分发修订造成的失效，不绕过真实输入变化的重编译。
-- 构建和测试共用 sccache 后端命名空间，由编译缓存键区分输入；关闭 incremental。
-  Cargo 下载缓存独立维护，不缓存整个 target、bin 或每个 job 的编译对象闭包。
-  两类缓存只允许默认分支写入，其它分支的手动验证只读。
+- Linux 构建和测试共用 GitHub Actions sccache 后端命名空间，由编译缓存键区分输入。Cargo
+  下载缓存独立维护。两类缓存只允许默认分支写入，其它分支的手动验证只读。
+- macOS ARM 包使用 RunnerDock 原生构建。从受限 Runner Group 接单后，使用镜像内的 Apple SDK
+  和 sccache，把编译对象保存在宿主专用目录。该构建跳过远端 sccache 和 Rust 下载缓存，
+  使用 Apple codesign 完成 ad-hoc 签名后执行 CLI 和 app-server 验收。
+- 两个平台都关闭 incremental。
 - 通过 `SCCACHE_SKIP_CACHE_CHECK=true` 跳过远端缓存启动探测，直接采用分支明确设置的
   读写模式。sccache 0.18.0 的探测写入若遇到限流，会将整个进程降为只读，见
   [上游问题](https://github.com/mozilla/sccache/issues/2593)。这不重试实际对象写入，
