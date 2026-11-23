@@ -132,7 +132,7 @@ def archive_package(package, dist):
 
 def smoke(package):
     version = json.loads((package / "codex-package.json").read_text())["version"]
-    with tempfile.TemporaryDirectory() as home:
+    with tempfile.TemporaryDirectory(dir="/tmp") as home:
         env = {**os.environ, "CODEX_HOME": home}
         cli = package / "bin/codex"
         actual = run(str(cli), "--version", env=env, capture_output=True, text=True)
@@ -251,7 +251,7 @@ def initialize_app_server(cli, env, expected_version):
                 stream.close()
 
 
-def sign_macos(package):
+def sign_macos(package, *, native=False):
     """使用 ad-hoc 签名，保留 hardened runtime 和上游 entitlements。"""
     for relative in [
         "bin/codex",
@@ -266,11 +266,14 @@ def sign_macos(package):
             "--code-signature-flags",
             "runtime",
         ]
+        if native:
+            args = ["codesign", "--force", "--sign", "-", "--options", "runtime"]
         entitlements = (
             ROOT / ".github/scripts/macos-signing" / f"{binary.name}.entitlements.plist"
         )
         if entitlements.exists():
-            args.extend(["--entitlements-xml-path", str(entitlements)])
+            flag = "--entitlements" if native else "--entitlements-xml-path"
+            args.extend([flag, str(entitlements)])
         run(*args, str(binary))
 
 
@@ -282,7 +285,9 @@ def build(target=TARGET):
     # 发布版本写入包清单；保留内部 Cargo 版本，避免每个 fork 序号使缓存失效。
     os.environ["STABLE_GIT_COMMIT"] = metadata["source_commit"]
     macos = target.endswith("apple-darwin")
-    cargo = "cargo-cross.sh" if macos else "cargo-timed.sh"
+    native_macos = macos and sys.platform == "darwin"
+    cross_macos = macos and not native_macos
+    cargo = "cargo-cross.sh" if cross_macos else "cargo-timed.sh"
     run(
         sys.executable,
         "scripts/build_codex_package.py",
@@ -290,7 +295,7 @@ def build(target=TARGET):
         target,
         "--cargo",
         str(ROOT / "scripts/fork" / cargo),
-        *(["--strip-tool", "llvm-strip"] if macos else []),
+        *(["--strip-tool", "llvm-strip"] if cross_macos else []),
         "--cargo-profile",
         "release",
         "--package-version",
@@ -312,8 +317,8 @@ def build(target=TARGET):
                 )
             ),
         )
-        sign_macos(package)
-    else:
+        sign_macos(package, native=native_macos)
+    if not cross_macos:
         smoke(package)
     archive = archive_package(package, dist)
     metadata["sha256"] = sha256(archive)
