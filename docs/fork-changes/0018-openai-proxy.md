@@ -26,6 +26,7 @@ openai_proxy_url = "http://127.0.0.1:7897"
 - `http-client/src/outbound_proxy.rs`：工厂实例级的显式路由，保留网络策略和 Cookie，代理地址从调试输出中脱敏。
 - `login/src/auth/default_client.rs` 与 `http-client/src/route_aware_client_pool.rs`：显式路由不进入旧的默认代理或自定义 CA 回退分支。
 - `cli/src/doctor.rs`：Responses WebSocket 检查使用同一模型网络工厂；普通 HTTP 可达性检查仍遵循普通网络配置。
+- `thread-manager-sample/src/main.rs`：示例手动构造 `Config` 时将 `openai_proxy_url` 设为 `None`，沿用示例的系统代理设置。
 
 模型请求及 WebSocket 诊断将模型网络工厂传入上游的 provider 请求解析流程，
 保留运行时认证、账户路由和禁止重定向策略；不绕过解析流程直接构造传输。
