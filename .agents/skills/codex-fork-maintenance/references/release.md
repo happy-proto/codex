@@ -21,24 +21,25 @@ macOS 使用无需证书的 ad-hoc 签名，保留上游 entitlements；不配�
 测试与产物构建并行；测试保留 release 条件编译及关闭 debug assertions，禁用测试优化以控制编译成本。
 Core 集成测试沿用上游 `ci-test` profile，保留测试所需的 debug assertions；
 skill 集成测试串行运行，避免线程本地 tracing 捕获受并行用例干扰。
-通用脚本检查、Rust 测试和完整包构建全部使用 Linux x64 runner，两个平台包通过 matrix 并行构建。
-Linux 包原生构建并执行安装、CLI 与 app-server 验收；macOS ARM 包使用 cargo-zigbuild、Zig 和 SDK
-交叉编译，检查架构与重复动态库依赖，再用 rcodesign 添加 ad-hoc 签名和上游 entitlements。
-macOS 包的真实运行验收需在 Mac 执行，工具链或 SDK 升级后验证完整主路径；静态校验不等于运行通过。
+通用脚本检查、Rust 测试、Linux 包和发布使用 GitHub 托管 Linux runner。macOS ARM 包由受限的
+RunnerDock pool 原生构建。它使用镜像中的 Apple SDK，检查架构与重复动态库依赖，再用 Apple
+codesign 添加保留上游 entitlements 的 ad-hoc 签名，并运行 CLI 与 app-server 验收。两个平台通过
+matrix 并行构建。
 分析耗时时读取各 job 的日志和 `fork-build-timings-*`、`fork-test-timings-*` artifact，
 用 Cargo 报告区分 crate 编译和并发等待，不把日志末尾的整段耗时直接归为链接。
 
-Rust 编译由 Cargo 执行，通过 `RUSTC_WRAPPER=sccache` 接入 sccache 0.18.0，
-使用 GitHub Actions 远端缓存，按编译结果独立保存，不归档整个 target 或对象库。
+Rust 编译由 Cargo 执行，通过 `RUSTC_WRAPPER=sccache` 接入编译缓存。Linux 构建及测试使用
+sccache 0.18.0 和 GitHub Actions 缓存。macOS 构建使用镜像预装的 sccache 和 RunnerDock 挂载的
+专用目录，容量上限 30 GB。两类后端均按编译结果独立保存。
 关闭 Cargo incremental，避免编译请求不可缓存；沿用上游 package builder 和 workspace target 路径。
-构建与测试共用 `SCCACHE_GHA_VERSION=fork-v1` 命名空间，
+Linux 构建与测试共用 `SCCACHE_GHA_VERSION=fork-v1` 命名空间，
 由 sccache 按编译器及编译输入区分缓存，允许相同输入复用，不再为每个 job 导出独立闭包。
 仅默认分支使用 `READ_WRITE`；其它分支设置 `SCCACHE_GHA_RW_MODE=READ_ONLY`。
-Cargo registry 和 Git 依赖下载继续由独立 rust-cache 保存，关闭 target 和 bin 缓存。
+Linux 的 Cargo registry 和 Git 依赖下载继续由独立 rust-cache 保存，关闭 target 和 bin 缓存。
 V8、rg 继续由上游下载器校验和获取，不额外缓存下载资源。
 链接、bin、proc-macro 等不受 sccache Rust 缓存支持的请求仍正常编译；
 不能将这些请求算作可缓存任务的 miss，具体限制见 [sccache Rust 文档](https://github.com/mozilla/sccache/blob/main/docs/Rust.md)。
-Action 在 job summary 输出统计，同时保存 `fork-*-sccache-*` JSON artifact，核对 hits、misses、
+构建与测试保存 `fork-*-sccache-*` JSON artifact，核对 hits、misses、
 不可缓存原因和缓存读写错误。保持服务运行到 job 结束，避免长时间链接或测试后统计因空闲退出而丢失。
 
 在默认分支 `main` 预热和保存正式缓存。
