@@ -243,7 +243,7 @@ impl ClipboardWorker {
                         format,
                         || setup.begin_delivery(),
                         |text| {
-                            let target = if std::env::var_os("TMUX").is_some() {
+                            let target = if super::is_tmux_session() {
                                 super::Osc52Target::Tmux
                             } else if std::env::var_os("STY").is_some() {
                                 super::Osc52Target::Screen

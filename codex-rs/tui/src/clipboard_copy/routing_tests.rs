@@ -10,134 +10,70 @@ use super::OSC52_MAX_RAW_BYTES;
 use super::copy_to_clipboard_with;
 use codex_terminal_detection::TerminalName;
 use pretty_assertions::assert_eq;
-use std::cell::RefCell;
 
 #[test]
-fn local_tmux_preserves_native_html_when_terminal_silently_rejects_copy() {
-    let calls = RefCell::new(Vec::new());
-    let result = copy_to_clipboard_with(
-        "**hello**",
-        CopyFormat::Markdown,
-        CopyEnvironment {
-            terminal_copy: ClipboardCopyMode::Tmux,
-            forwarded_x11: false,
-            wsl_session: false,
-        },
-        |_| {
-            // Like default xterm: the command succeeds without delivery.
-            calls.borrow_mut().push("tmux");
-            Ok(())
-        },
-        |_| panic!("tmux send succeeded"),
-        |text, html| {
-            assert_eq!(
-                (text, html),
-                ("**hello**", Some("<p><strong>hello</strong></p>\n"))
+fn osc52_mode_requests_terminal_copy_on_every_copy_without_native_writes() {
+    for wsl_session in [false, true] {
+        let native_calls = std::cell::Cell::new(0);
+        let terminal_calls = std::cell::Cell::new(0);
+        // No client inventory is consulted: the same process can gain remote clients later.
+        for text in ["local client", "remote client joined", "mixed clients"] {
+            let result = copy_to_clipboard_with(
+                text,
+                CopyFormat::Markdown,
+                CopyEnvironment {
+                    terminal_copy: ClipboardCopyMode::Osc52,
+                    wsl_session,
+                },
+                |actual| {
+                    assert_eq!(actual, text);
+                    terminal_calls.set(terminal_calls.get() + 1);
+                    Ok(())
+                },
+                |_, _| {
+                    native_calls.set(native_calls.get() + 1);
+                    Ok(Some(ClipboardLease::test()))
+                },
+                |_| panic!("OSC 52 mode must not write to the Windows clipboard"),
             );
-            calls.borrow_mut().push("native");
-            Ok(Some(ClipboardLease::test()))
-        },
-        |_| panic!("native copy succeeded"),
-    );
-    assert!(matches!(result, Ok(CopyOutcome::Copied(Some(_)))));
-    assert_eq!(calls.into_inner(), vec!["native", "tmux"]);
-}
-
-#[test]
-fn copy_uses_osc52_when_tmux_fails_even_if_native_copy_succeeds() {
-    let calls = RefCell::new(Vec::new());
-    let result = copy_to_clipboard_with(
-        "hello",
-        CopyFormat::PlainText,
-        CopyEnvironment {
-            terminal_copy: ClipboardCopyMode::Tmux,
-            forwarded_x11: false,
-            wsl_session: false,
-        },
-        |_| {
-            calls.borrow_mut().push("tmux");
-            Err("tmux unavailable".into())
-        },
-        |_| {
-            calls.borrow_mut().push("osc52");
-            Ok(())
-        },
-        |text, html| {
-            assert_eq!((text, html), ("hello", None));
-            calls.borrow_mut().push("native");
-            Ok(Some(ClipboardLease::test()))
-        },
-        |_| panic!("native copy succeeded"),
-    );
-    assert!(matches!(result, Ok(CopyOutcome::Copied(Some(_)))));
-    assert_eq!(calls.into_inner(), vec!["native", "tmux", "osc52"]);
-}
-
-fn local_tmux_environment() -> CopyEnvironment {
-    CopyEnvironment {
-        terminal_copy: ClipboardCopyMode::Tmux,
-        forwarded_x11: false,
-        wsl_session: false,
+            assert!(matches!(result, Ok(CopyOutcome::Unconfirmed(None))));
+        }
+        assert_eq!(native_calls.get(), 0);
+        assert_eq!(terminal_calls.get(), 3);
     }
 }
 
 #[test]
-fn terminal_only_copy_reports_the_send_result() {
+fn osc52_mode_preserves_payload_limits_empty_errors_and_terminal_failures() {
     let environment = CopyEnvironment {
-        terminal_copy: ClipboardCopyMode::PreferTerminal {
-            tmux: false,
-            native_for_large_copies: false,
-        },
-        forwarded_x11: false,
+        terminal_copy: ClipboardCopyMode::Osc52,
         wsl_session: false,
     };
-    for send in [Ok(()), Err("write failed".to_string())] {
-        let result = copy_to_clipboard_with(
-            "hello",
-            CopyFormat::Markdown,
-            environment,
-            |_| panic!("not in tmux"),
-            |text| {
-                assert_eq!(text, "hello");
-                send.clone()
-            },
-            |_, _| panic!("must not write to the container clipboard"),
-            |_| panic!("must not write to the WSL clipboard"),
-        );
-        assert_eq!(
-            result.map(|outcome| outcome.store(&mut None)),
-            send.map(|()| CopyStatus::Unconfirmed)
-        );
-    }
-}
-
-#[test]
-fn oversized_dev_container_copy_can_keep_native_ownership_without_confirming_delivery() {
-    let environment = CopyEnvironment {
-        terminal_copy: ClipboardCopyMode::PreferTerminal {
-            tmux: true,
-            native_for_large_copies: true,
-        },
-        ..local_tmux_environment()
-    };
-    for size in [OSC52_MAX_RAW_BYTES, OSC52_MAX_RAW_BYTES + 1] {
-        let text = "x".repeat(size);
+    for text in [String::new(), "x".repeat(OSC52_MAX_RAW_BYTES + 1)] {
         let result = copy_to_clipboard_with(
             &text,
             CopyFormat::PlainText,
             environment,
-            |_| Ok(()),
-            |_| panic!("no OSC 52 fallback expected"),
-            |actual, _| {
-                assert_eq!(actual, text);
-                Ok(Some(ClipboardLease::test()))
-            },
-            |_| panic!("must not target the WSL clipboard"),
+            |text| super::osc52_sequence(text, super::Osc52Target::Direct).map(|_| ()),
+            |_, _| panic!("OSC 52 mode must not write to the native clipboard"),
+            |_| panic!("OSC 52 mode must not write to the Windows clipboard"),
         );
-        let mut lease = None;
-        assert_eq!(result.unwrap().store(&mut lease), CopyStatus::Unconfirmed);
-        assert_eq!(lease.is_some(), size > OSC52_MAX_RAW_BYTES);
+        let error = result.err().expect("invalid payload should fail");
+        assert!(error.contains(if text.is_empty() {
+            "empty"
+        } else {
+            "too large"
+        }));
     }
+    let result = copy_to_clipboard_with(
+        "hello",
+        CopyFormat::PlainText,
+        environment,
+        |_| Err("terminal write failed".into()),
+        |_, _| panic!("OSC 52 mode must not write to the native clipboard"),
+        |_| panic!("OSC 52 mode must not write to the Windows clipboard"),
+    );
+    assert_eq!(result.err().as_deref(), Some("terminal write failed"));
 }
 
 #[test]
@@ -149,73 +85,14 @@ fn rex_selects_osc52_without_ssh_or_tmux() {
 }
 
 #[test]
-fn osc52_forwarding_runs_even_when_native_copy_succeeds() {
-    let calls = RefCell::new(Vec::new());
-    let result = copy_to_clipboard_with(
-        "hello",
-        CopyFormat::PlainText,
-        CopyEnvironment {
-            terminal_copy: ClipboardCopyMode::Osc52,
-            forwarded_x11: false,
-            wsl_session: false,
-        },
-        |_| panic!("forwarding should use OSC 52 directly"),
-        |_| {
-            calls.borrow_mut().push("osc52");
-            Ok(())
-        },
-        |text, html| {
-            assert_eq!((text, html), ("hello", None));
-            calls.borrow_mut().push("native");
-            Ok(Some(ClipboardLease::test()))
-        },
-        |_| panic!("native copy succeeded"),
-    );
-
-    assert!(matches!(result, Ok(CopyOutcome::Copied(Some(_)))));
-    assert_eq!(calls.into_inner(), vec!["native", "osc52"]);
-}
-
-#[test]
-fn oversized_tmux_copy_preserves_native_copy() {
-    for (size, expected_calls) in [
-        (OSC52_MAX_RAW_BYTES, vec!["native", "tmux"]),
-        (OSC52_MAX_RAW_BYTES + 1, vec!["native", "osc52"]),
-    ] {
-        let text = "x".repeat(size);
-        let calls = RefCell::new(Vec::new());
-        let result = copy_to_clipboard_with(
-            &text,
-            CopyFormat::PlainText,
-            local_tmux_environment(),
-            |actual| {
-                assert_eq!(actual, text);
-                calls.borrow_mut().push("tmux");
-                Ok(())
-            },
-            |_| {
-                calls.borrow_mut().push("osc52");
-                Err("payload too large".into())
-            },
-            |actual, html| {
-                assert_eq!((actual, html), (text.as_str(), None));
-                calls.borrow_mut().push("native");
-                Ok(Some(ClipboardLease::test()))
-            },
-            |_| panic!("PowerShell fallback should not be needed"),
-        );
-        assert!(matches!(result, Ok(CopyOutcome::Copied(Some(_)))));
-        assert_eq!(calls.into_inner(), expected_calls);
-    }
-}
-
-#[test]
 fn empty_copy_reports_failure_without_touching_clipboards() {
     let result = copy_to_clipboard_with(
         "",
         CopyFormat::PlainText,
-        local_tmux_environment(),
-        |_| panic!("empty input must not reach tmux"),
+        CopyEnvironment {
+            terminal_copy: ClipboardCopyMode::Osc52,
+            wsl_session: false,
+        },
         |_| panic!("empty input must not reach OSC 52"),
         |_, _| panic!("empty input must not reach the native clipboard"),
         |_| panic!("empty input must not reach PowerShell"),
