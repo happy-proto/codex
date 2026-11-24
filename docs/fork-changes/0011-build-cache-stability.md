@@ -27,6 +27,10 @@
 - macOS ARM 包使用 RunnerDock 原生构建。从受限 Runner Group 接单后，使用镜像内的 Apple SDK
   和 sccache，把编译对象保存在宿主专用目录。该构建跳过远端 sccache 和 Rust 下载缓存，
   使用 Apple codesign 完成 ad-hoc 签名后执行 CLI 和 app-server 验收。
+- GitHub 托管的 `scripts` Job 使用 `blob:none` 获取完整提交历史，验证
+  选定上游提交是本次源码的祖先。Linux 和 macOS 打包 Job 浅检出前置任务
+  验证过的同一 SHA，并核对工作区的 SHA、上游 tag 声明和分发版本后生成包清单。
+  本地直接运行发布脚本仍执行 Git 祖先校验。
 - 两个平台都关闭 incremental。
 - 通过 `SCCACHE_SKIP_CACHE_CHECK=true` 跳过远端缓存启动探测，直接采用分支明确设置的
   读写模式。sccache 0.18.0 的探测写入若遇到限流，会将整个进程降为只读，见

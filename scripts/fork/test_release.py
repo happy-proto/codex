@@ -64,6 +64,57 @@ class VersionTests(unittest.TestCase):
                     with self.assertRaises(subprocess.CalledProcessError):
                         release.plan()
 
+    def test_verified_plan_supports_shallow_checkout_and_checks_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            upstream = root / "upstream"
+            upstream.mkdir()
+            tag = "rust-v0.163.0-alpha.11"
+            (upstream / "scripts/fork").mkdir(parents=True)
+            (upstream / "scripts/fork/upstream-tag").write_text(tag + "\n")
+            version = "0.163.0-alpha.11.fork.1"
+            with (
+                mock.patch.object(release, "ROOT", upstream),
+                mock.patch.dict(os.environ, {"CODEX_FORK_VERSION": version}),
+            ):
+                release.run("git", "init", "-b", "main")
+                release.run("git", "config", "user.name", "Test")
+                release.run("git", "config", "user.email", "test@example.com")
+                release.run("git", "add", ".")
+                release.run("git", "commit", "-m", "Upstream baseline")
+                release.run("git", "tag", tag)
+                release.run("git", "commit", "--allow-empty", "-m", "Personal changes")
+                identity = release.plan()
+                identity.pop("target")
+                shallow = root / "shallow"
+                release.run(
+                    "git",
+                    "clone",
+                    "--depth=1",
+                    "--no-tags",
+                    upstream.as_uri(),
+                    str(shallow),
+                )
+                with mock.patch.object(release, "ROOT", shallow):
+                    self.assertEqual(
+                        release.output("git", "rev-parse", "--is-shallow-repository"),
+                        "true",
+                    )
+                    for target in release.TARGETS:
+                        self.assertEqual(
+                            release.plan(target, json.dumps(identity)),
+                            {**identity, "target": target},
+                        )
+                    for field in (
+                        "source_commit", "upstream_tag", "version", "upstream_commit"
+                    ):
+                        with self.subTest(field=field), self.assertRaises(ValueError):
+                            release.plan(
+                                release.TARGET, json.dumps({**identity, field: "wrong"})
+                            )
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        release.plan()
+
     def test_xz_package_preserves_binary_contents_and_executable_mode(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
