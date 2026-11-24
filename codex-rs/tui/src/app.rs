@@ -284,16 +284,16 @@ mod session_picker;
 mod side;
 mod side_focus;
 mod side_pane;
-mod sidebar_model_documents;
-#[cfg(all(test, not(windows)))]
-#[path = "app/sidebar_open_in_codex_tests.rs"]
-mod sidebar_open_in_codex_tests;
 mod side_projection;
 mod sidebar;
 mod sidebar_close;
 mod sidebar_document;
 mod sidebar_files;
 pub(crate) mod sidebar_loading;
+mod sidebar_model_documents;
+#[cfg(all(test, not(windows)))]
+#[path = "app/sidebar_open_in_codex_tests.rs"]
+mod sidebar_open_in_codex_tests;
 mod sidebar_subagents;
 mod startup;
 pub(crate) mod startup_bootstrap;
@@ -1254,7 +1254,8 @@ impl App {
         {
             // A hidden, resized or replaced pane can still be in the last painted frame.
             let size = tui.prepare_draw_size()?;
-            if let Some(current) = side_pane::layout(self, tui, self.workspace_chat_area(size.into()))
+            if let Some(current) =
+                side_pane::layout(self, tui, self.workspace_chat_area(size.into()))
                 && current.passive_thread == painted.passive_thread
                 && let Some(peer) = self.current_displayed_thread_id()
                 && painted == &current
