@@ -46,6 +46,8 @@ mod summary_shimmer;
 use summary_shimmer::summary_shimmer;
 
 pub(crate) const STATUS_DETAILS_DEFAULT_MAX_LINES: usize = 3;
+pub(crate) const SERVER_BUSY_RECONNECTING: &str = "Server is busy, reconnecting";
+const RECONNECTING: &str = "Reconnecting...";
 const DETAILS_PREFIX: &str = "  └ ";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -185,29 +187,46 @@ impl StatusIndicatorWidget {
 
     // Reuse the existing retry notification text without extending the wire protocol.
     // Count down from receipt; the core continues to own the actual retry deadline.
-    fn retry_wait(&self) -> Option<(&str, Duration)> {
-        let message = self.header.strip_prefix("Reconnecting...")?;
+    fn retry_wait(&self) -> Option<(&str, &str, Duration)> {
+        let prefix = if self.header.starts_with(SERVER_BUSY_RECONNECTING) {
+            SERVER_BUSY_RECONNECTING
+        } else {
+            RECONNECTING
+        };
+        let message = self.header.strip_prefix(prefix)?;
         let (attempt, wait) = message.rsplit_once(" (retrying in ")?;
         let seconds = wait.strip_suffix("s)")?.parse::<u64>().ok()?;
-        Some((attempt.trim(), Duration::from_secs(seconds)))
+        Some((prefix, attempt.trim(), Duration::from_secs(seconds)))
     }
 
     pub(crate) fn header_at(&self, now: Instant) -> Cow<'_, str> {
-        let Some((attempt, wait)) = self.retry_wait() else {
+        let Some((prefix, attempt, wait)) = self.retry_wait() else {
             return Cow::Borrowed(&self.header);
         };
         let remaining = wait.saturating_sub(now.saturating_duration_since(self.header_started_at));
+        let seconds = remaining
+            .as_secs()
+            .saturating_add(u64::from(remaining.subsec_nanos() > 0));
+        if prefix == SERVER_BUSY_RECONNECTING {
+            let status = if attempt.is_empty() {
+                prefix.to_string()
+            } else {
+                format!("{prefix} {attempt}")
+            };
+            return Cow::Owned(if seconds == 0 {
+                status
+            } else {
+                format!("{status} (retrying in {})", fmt_elapsed_compact(seconds))
+            });
+        }
         let attempt = if attempt.is_empty() {
             String::new()
         } else {
             format!(" ({attempt})")
         };
-        if remaining.is_zero() {
-            return Cow::Owned(format!("Reconnecting...{attempt}"));
+        if seconds == 0 {
+            return Cow::Owned(format!("{prefix}{attempt}"));
         }
-        let seconds = remaining
-            .as_secs()
-            .saturating_add(u64::from(remaining.subsec_nanos() > 0));
         Cow::Owned(format!(
             "Retrying in {}{attempt}",
             fmt_elapsed_compact(seconds),
@@ -562,7 +581,16 @@ mod tests {
             false,
             Default::default(),
         );
-        row.update_header("Reconnecting... 1/5 (retrying in 10s)".into());
+        row.update_header(format!("{SERVER_BUSY_RECONNECTING} 1/5 (retrying in 10s)"));
+        let started = row.header_started_at;
+        assert_eq!(
+            row.header_at(started + Duration::from_secs(1)),
+            "Server is busy, reconnecting 1/5 (retrying in 9s)",
+        );
+        assert_eq!(
+            row.header_at(started + Duration::from_secs(10)),
+            "Server is busy, reconnecting 1/5",
+        );
         let timer = StatusTimer::default();
         let area = Rect::new(0, 0, 100, 1);
         row.with_timer(&timer)

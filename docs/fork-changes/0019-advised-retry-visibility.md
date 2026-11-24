@@ -16,7 +16,8 @@ WebSocket 回退至 HTTPS 时同样先提示再等待。
 
 TUI 在输入框上方原有状态行显示 `Retrying in 1m 55s (1/100)`，每秒更新剩余时间，
 到期后显示 `Reconnecting...`，后续通知到达后恢复原有状态。关闭动画时仍刷新倒计时，保留中断快捷键。
-倒计时使用现有 `Reconnecting... (retrying in Ns)` 通知文本，从接收时刻计时；
+倒计时使用现有 `Reconnecting... (retrying in Ns)` 通知文本，从接收时刻计时。
+HTTP 429 保留 `Server is busy, reconnecting` 提示语，并同样刷新剩余秒数。
 显示精度为秒，不新增协议字段，也不延后、截短或重置 core 实际等待的期限。
 重新显示同一状态时保留计时起点，只有新的重试通知才重新计时，即使通知文本与上次相同。
 
