@@ -161,12 +161,7 @@ pub(crate) fn scrollback_strategy(terminal: &TerminalInfo) -> ScrollbackStrategy
 pub(crate) enum ClipboardCopyMode {
     FallbackOsc52,
     Osc52,
-    ClientBuffer,
-    /// The native clipboard may belong to a private desktop.
-    PreferTerminal {
-        native_for_large_copies: bool,
-        client_buffer: bool,
-    },
+    PreferTerminal { native_for_large_copies: bool },
 }
 
 impl ClipboardCopyMode {
@@ -181,30 +176,27 @@ impl ClipboardCopyMode {
 
 pub(crate) struct ClipboardCapabilities {
     pub(crate) copy_mode: ClipboardCopyMode,
-    pub(crate) forwarded_x11: bool,
 }
 
 impl ClipboardCapabilities {
     pub(crate) fn detect() -> Self {
         let terminal = terminal_info();
-        let ssh = is_ssh_session();
-        let tmux = is_tmux_session();
         Self {
-            copy_mode: if terminal.is_vscode_dev_container() {
+            copy_mode: if is_tmux_session()
+                || is_ssh_session()
+                || terminal.name == TerminalName::Rex
+                || std::env::var("HERDR_ENV").is_ok_and(|value| value == "1")
+            {
+                ClipboardCopyMode::Osc52
+            } else if terminal.is_vscode_dev_container() {
                 ClipboardCopyMode::PreferTerminal {
                     native_for_large_copies: cfg!(target_os = "linux")
                         && std::env::var_os("WAYLAND_DISPLAY")
                             .is_some_and(|display| !display.is_empty()),
-                    client_buffer: tmux,
                 }
-            } else if tmux {
-                ClipboardCopyMode::ClientBuffer
-            } else if ssh || std::env::var("HERDR_ENV").is_ok_and(|value| value == "1") {
-                ClipboardCopyMode::Osc52
             } else {
                 ClipboardCopyMode::for_terminal(terminal.name)
             },
-            forwarded_x11: ssh && std::env::var("DISPLAY").is_ok_and(|display| !display.is_empty()),
         }
     }
 }
