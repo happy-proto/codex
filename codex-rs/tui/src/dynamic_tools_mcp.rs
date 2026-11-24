@@ -57,6 +57,10 @@ pub(crate) enum ThreadToolTransport {
 }
 
 impl ThreadToolTransport {
+    pub(crate) fn uses_task_mcp(&self) -> bool {
+        matches!(self, Self::Mcp(server) if server.task_tools_enabled)
+    }
+
     /// Never shadow an existing server when adding the client-owned task tools.
     pub(crate) async fn check_namespace(
         &self,
@@ -82,8 +86,12 @@ impl ThreadToolTransport {
             Self::Dynamic => {
                 params.dynamic_tools = Some(dynamic_tools::non_delegation_tool_specs());
             }
-            Self::Mcp(_) => {
-                params.dynamic_tools = None;
+            Self::Mcp(server) => {
+                params.dynamic_tools = if server.task_tools_enabled {
+                    None
+                } else {
+                    Some(dynamic_tools::non_delegation_tool_specs())
+                };
                 self.configure_mcp(&mut params.config);
             }
         }
@@ -105,6 +113,7 @@ pub(crate) struct DynamicToolMcpServer {
     connection: ToolConnection,
     config: Value,
     task: JoinHandle<()>,
+    task_tools_enabled: bool,
 }
 
 impl DynamicToolMcpServer {
@@ -130,6 +139,7 @@ impl DynamicToolMcpServer {
         status_updates: broadcast::Sender<ThreadStatusChangedNotification>,
         worktrees: Option<crate::managed_worktree_tools::ManagedWorktreeTools>,
         sidebar_backend: Option<crate::backend_id::BackendId>,
+        task_tools_enabled: bool,
     ) -> std::io::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let address = listener.local_addr()?;
@@ -157,6 +167,7 @@ impl DynamicToolMcpServer {
             server_config: server_config.clone(),
             worktrees,
             sidebar_backend,
+            task_tools_enabled,
             sidebar_pending_slots: Arc::new(Semaphore::new(open_in_codex::MAX_PENDING_DOCUMENTS)),
         };
         let service = StreamableHttpService::new(
@@ -180,6 +191,7 @@ impl DynamicToolMcpServer {
             connection,
             config: server_config,
             task,
+            task_tools_enabled,
         })
     }
 }
@@ -216,6 +228,7 @@ struct DynamicToolMcpHandler {
     worktrees: Option<crate::managed_worktree_tools::ManagedWorktreeTools>,
     sidebar_backend: Option<crate::backend_id::BackendId>,
     sidebar_pending_slots: Arc<Semaphore>,
+    task_tools_enabled: bool,
 }
 
 impl ServerHandler for DynamicToolMcpHandler {
@@ -231,6 +244,9 @@ impl ServerHandler for DynamicToolMcpHandler {
         let mut tools = Vec::new();
         if self.sidebar_backend.is_some() {
             tools.push(open_in_codex::tool());
+        }
+        if !self.task_tools_enabled {
+            return Ok(ListToolsResult::with_all_items(tools));
         }
         let mut specs = dynamic_tools::tool_specs();
         if self.worktrees.is_some() {
@@ -330,6 +346,12 @@ impl ServerHandler for DynamicToolMcpHandler {
             )
             .await
             .map(Into::into);
+        }
+        if !self.task_tools_enabled {
+            return Err(McpError::invalid_params(
+                "TUI task MCP tools are disabled",
+                None,
+            ));
         }
         let response = if matches!(
             params.tool.as_str(),

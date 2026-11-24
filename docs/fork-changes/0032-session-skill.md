@@ -8,6 +8,9 @@ app-server RPC 执行，TUI 可以独立退出或重新连接。
 模型使用内置 `codex-session` skill 和 `codex task`。依赖旧工具的调用者
 可在启动 fork TUI 时使用 `-c features.tui_task_mcp=true`。
 该兼容开关启用原有客户端托管实现。
+支持文件预览的本地 TUI 可单独提供上游 `open_in_codex`，由调用会话所属的 TUI
+排队显示文件。只启用预览时，MCP 工具列表和调用分发均只允许预览，
+跨会话委派与 managed worktree 继续使用 `codex task`。
 
 `codex task` 默认连接当前 `CODEX_HOME` 的常驻 app-server，
 也支持显式选择 `--remote`。每条命令复用一条连接，不启动另一个 app-server。
@@ -32,3 +35,6 @@ app-server RPC 执行，TUI 可以独立退出或重新连接。
 `codex task send` 发送并读取目标回合，检查回合内容及来源，并核对
 CLI 未创建 MCP 注册或其它 app-server 实例。等待和读回均使用同一 daemon。
 CI 还验证两种 worktree 创建命令的参数，以及实际 checkout、任务附件登记、权限与重新连接后的读取。
+
+TUI 文件预览集成测试在任务工具关闭时验证模型调用、调用会话路由、
+后台排队和读取权限。
