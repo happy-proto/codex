@@ -319,6 +319,7 @@ supports_websockets = true
             /*output_schema*/ None,
             /*cyber_access_program*/ None,
             /*cloud_selection*/ None,
+            /*additional_context*/ None,
         )
         .await?;
     let first = tokio::time::timeout(
