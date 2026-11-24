@@ -5,7 +5,7 @@
 ## 动机与行为
 
 Rex 会话可在 Codex 启动后接入其它电脑的客户端，启动时的客户端探测无法决定后续复制目标。
-检测到 `REX_SESSION` 时，TUI 每次复制都只发送 OSC 52，不初始化或写入宿主机原生剪贴板，
+检测到 `REX_SESSION` 或识别出 Rex 终端时，TUI 每次复制都只发送 OSC 52，不初始化或写入宿主机原生剪贴板，
 也不调用 Rex CLI 或探测客户端列表。本地、远程和混合连接采用相同规则。
 
 该判断独立于 SSH，不伪造 `SSH_TTY`，不改变 SSH 检测、粘贴、登录或本地文件链接。
@@ -19,9 +19,10 @@ OSC 52 只携带纯文本，即使复制 Markdown 也不向宿主机写入 HTML�
 
 ## 入口与验证
 
-- `codex-rs/tui/src/clipboard_copy.rs`：独立 Rex 状态、原生初始化跳过与终端优先路由。
+- `codex-rs/tui/src/terminal_capabilities.rs` 识别 Rex 并选择专用策略。
+- `codex-rs/tui/src/clipboard_copy.rs` 按该策略跳过原生初始化，直接发送 OSC 52。
 - `codex-rs/tui/src/clipboard_copy/routing_tests.rs`：隔离后端验证重复复制、无 SSH 标记、
-  原生剪贴板可用仍不写入、WSL/tmux 组合、空内容、大小限制和终端错误；原有非 Rex 回归继续运行。
+  原生剪贴板可用仍不写入、WSL、空内容、大小限制和终端错误；原有非 Rex 回归继续运行。
 - `.github/workflows/fork.yml`：持续运行 `clipboard_copy` 测试组。
 
 真实验收需区分 OSC 52 发送与客户端实际交付，并覆盖本地启动后远程客户端再接入。
