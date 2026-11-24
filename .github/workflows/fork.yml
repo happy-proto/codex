@@ -41,10 +41,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
-      version: ${{ steps.version.outputs.version }}
+      version: ${{ steps.identity.outputs.version }}
+      source_commit: ${{ steps.identity.outputs.source_commit }}
+      verified_plan: ${{ steps.identity.outputs.verified_plan }}
     steps:
       - uses: actions/checkout@v6.0.2
         with:
+          fetch-depth: 0
+          filter: blob:none
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.2
         with:
@@ -55,11 +59,20 @@ jobs:
         run: scripts/fork/run_tests.py
       - name: 校验内置第三方 skill 快照
         run: scripts/fork/sync_skills.py check
-      - name: 为构建和测试选择同一版本
-        id: version
+      - name: 校验上游祖先关系并确定构建身份
+        id: identity
         env:
           GH_TOKEN: ${{ github.token }}
-        run: echo "version=$(scripts/fork/release.py version)" >> "$GITHUB_OUTPUT"
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          tag=$(cat scripts/fork/upstream-tag)
+          git fetch --no-tags --filter=blob:none https://github.com/openai/codex.git "refs/tags/$tag:refs/tags/$tag"
+          plan=$(scripts/fork/release.py plan)
+          {
+            echo "version=$(jq -er .version <<< "$plan")"
+            echo "source_commit=$(jq -er .source_commit <<< "$plan")"
+            echo "verified_plan=$(jq -ce 'del(.target)' <<< "$plan")"
+          } >> "$GITHUB_OUTPUT"
       - name: 检查 Shell 语法
         run: |
           sh -n scripts/fork/install.sh
@@ -101,12 +114,9 @@ jobs:
           df -h /
       - uses: actions/checkout@v6.0.2
         with:
-          fetch-depth: 0
+          ref: ${{ needs.scripts.outputs.source_commit }}
+          fetch-depth: 1
           persist-credentials: false
-      - name: 获取选定上游 tag
-        run: |
-          tag=$(cat scripts/fork/upstream-tag)
-          git fetch --no-tags https://github.com/openai/codex.git "refs/tags/$tag:refs/tags/$tag"
       - uses: astral-sh/setup-uv@v10.3.2
         with:
           version: '0.13.5'
@@ -175,7 +185,10 @@ jobs:
         id: package
         env:
           PACKAGE_TARGET: ${{ matrix.target }}
-        run: scripts/fork/build_observer.py --output fork-sccache/progress.ndjson -- scripts/fork/release.py build --target "$PACKAGE_TARGET"
+          VERIFIED_PLAN: ${{ needs.scripts.outputs.verified_plan }}
+        run: |
+          scripts/fork/build_observer.py --output fork-sccache/progress.ndjson -- \
+            scripts/fork/release.py build --target "$PACKAGE_TARGET" --verified-plan "$VERIFIED_PLAN"
       - name: 验证 Linux CLI 目录与发布版本
         if: matrix.target == 'x86_64-unknown-linux-gnu'
         env:

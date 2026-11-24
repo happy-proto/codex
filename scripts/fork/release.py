@@ -91,14 +91,33 @@ def selected_version():
     return next_version(upstream_tag, existing)
 
 
-def plan(target=TARGET):
+def plan(target=TARGET, verified_plan=None):
     if target not in TARGETS:
         raise ValueError(f"Unsupported fork target: {target}")
     upstream_tag = (ROOT / "scripts/fork/upstream-tag").read_text().strip()
     version = selected_version()
-    upstream_commit = output("git", "rev-parse", f"{upstream_tag}^{{commit}}")
     source_commit = output("git", "rev-parse", "HEAD")
-    run("git", "merge-base", "--is-ancestor", upstream_commit, source_commit)
+    if verified_plan is None:
+        upstream_commit = output("git", "rev-parse", f"{upstream_tag}^{{commit}}")
+        run("git", "merge-base", "--is-ancestor", upstream_commit, source_commit)
+    else:
+        identity = json.loads(verified_plan)
+        if not isinstance(identity, dict) or any(
+            identity.get(key) != value
+            for key, value in {
+                "schema_version": 1,
+                "source_commit": source_commit,
+                "upstream_tag": upstream_tag,
+                "version": version,
+                "tag": f"fork-v{version}",
+            }.items()
+        ):
+            raise ValueError("Verified release plan does not match this checkout")
+        upstream_commit = identity.get("upstream_commit")
+        if not isinstance(upstream_commit, str) or not re.fullmatch(
+            r"[0-9a-f]{40}", upstream_commit
+        ):
+            raise ValueError("Verified release plan has an invalid upstream commit")
     return {
         "schema_version": 1,
         "version": version,
@@ -277,8 +296,8 @@ def sign_macos(package, *, native=False):
         run(*args, str(binary))
 
 
-def build(target=TARGET):
-    metadata = plan(target)
+def build(target=TARGET, verified_plan=None):
+    metadata = plan(target, verified_plan)
     dist = ROOT / "fork-dist"
     package = dist / "package"
     dist.mkdir(exist_ok=True)
@@ -604,9 +623,12 @@ def build_command(
     target: Annotated[
         Target, typer.Option("--target", help="发布包目标；macOS 在 Linux 上交叉编译")
     ] = Target.macos,
+    verified_plan: Annotated[
+        str | None, typer.Option("--verified-plan", help="同一工作流前置任务校验过的构建身份")
+    ] = None,
 ) -> None:
-    """在 Linux 构建、校验并归档平台发布包。"""
-    build(target.value)
+    """构建、校验并归档平台发布包。"""
+    build(target.value, verified_plan)
 
 
 @app.command("publish")
