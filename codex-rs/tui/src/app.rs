@@ -1239,8 +1239,7 @@ impl App {
         {
             // A hidden, resized or replaced pane can still be in the last painted frame.
             let size = tui.prepare_draw_size()?;
-            if let Some(current) =
-                side_pane::layout(self, tui, self.workspace_chat_area(size.into()))
+            if let Some(current) = side_pane::layout(self, tui, size.into())
                 && current.passive_thread == painted.passive_thread
                 && let Some(peer) = self.current_displayed_thread_id()
                 && painted == &current
