@@ -563,25 +563,23 @@ impl App {
                 .cloud_config_bundle(cloud_config_bundle.clone()),
         ));
         let dynamic_tool_status_updates = tokio::sync::broadcast::channel(/*capacity*/ 64).0;
-        if config.features.enabled(Feature::TuiTaskMcp)
-            && matches!(
-                &app_server_target,
-                AppServerTarget::LocalDaemon { .. } | AppServerTarget::Embedded
+        if matches!(
+            &app_server_target,
+            AppServerTarget::LocalDaemon { .. } | AppServerTarget::Embedded
+        ) && !crate::uses_remote_workspace_or_environment(
+            &app_server_target,
+            environment_manager.as_ref(),
+        ) && let Err(error) = app_server
+            .start_dynamic_tool_mcp(
+                config.clone(),
+                local_settings.workspace_enabled(&config),
+                config.features.enabled(Feature::TuiTaskMcp),
+                app_event_tx.clone(),
+                dynamic_tool_status_updates.clone(),
             )
-            && !crate::uses_remote_workspace_or_environment(
-                &app_server_target,
-                environment_manager.as_ref(),
-            )
-            && let Err(error) = app_server
-                .start_dynamic_tool_mcp(
-                    config.clone(),
-                    local_settings.workspace_enabled(&config),
-                    app_event_tx.clone(),
-                    dynamic_tool_status_updates.clone(),
-                )
-                .await
+            .await
         {
-            tracing::warn!(%error, "TUI task delegation is unavailable without its MCP server");
+            tracing::warn!(%error, "TUI MCP tools are unavailable");
         }
         let mut provider_writes = HashMap::new();
         let model_catalog = Arc::new(

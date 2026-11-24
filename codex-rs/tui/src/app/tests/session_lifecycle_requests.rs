@@ -3473,6 +3473,7 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths_sc
     Box::pin(app_server.start_dynamic_tool_mcp(
         app.config.clone(),
         /*workspace_enabled*/ false,
+        /*task_tools_enabled*/ true,
         app.app_event_tx.clone(),
         app.dynamic_tool_status_updates.clone(),
     ))
@@ -3795,6 +3796,7 @@ async fn local_mcp_respects_configured_servers_and_managed_requirements() -> Res
             .start_dynamic_tool_mcp(
                 app.config.clone(),
                 /*workspace_enabled*/ false,
+                /*task_tools_enabled*/ true,
                 app.app_event_tx.clone(),
                 app.dynamic_tool_status_updates.clone(),
             )
