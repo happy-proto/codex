@@ -343,6 +343,7 @@ jobs:
             exit 0
           fi
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib terminal_palette
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib retry_countdown
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates_cache::tests
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib updates::tests
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib update_action::tests
@@ -351,11 +352,12 @@ jobs:
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib mention_codec::tests
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib bottom_pane::mentions_v2::
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib thread_title -- --test-threads=1
-      - name: 验证内置会话工具与 managed worktree
+      - name: 验证内置会话工具、侧栏预览与 managed worktree
         if: ${{ matrix.profile == 'release' && !inputs.tui_test_filter && !inputs.core_test_filter }}
         working-directory: codex-rs
         run: |
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib session_task_commands
+          ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib open_in_codex_reveals_a_file_when_the_calling_thread_returns -- --test-threads=1
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-tui --lib managed_worktree_tools -- --test-threads=1
           ../scripts/fork/cargo-observed.sh test --release --timings --target x86_64-unknown-linux-gnu -p codex-cli --test app_server_daemon task_worktrees_survive_cli_disconnect_on_shared_daemon
       - name: Verify fork update presentation

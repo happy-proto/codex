@@ -246,7 +246,10 @@ impl ChatWidget {
                                 && let Some(attempt) =
                                     error.message.strip_prefix("Reconnecting... ")
                             {
-                                format!("Server is busy, reconnecting {attempt}")
+                                format!(
+                                    "{} {attempt}",
+                                    crate::status_indicator_widget::SERVER_BUSY_RECONNECTING
+                                )
                             } else {
                                 error.message
                             };
