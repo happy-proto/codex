@@ -222,7 +222,6 @@ impl ChatWidget {
     pub(crate) fn prepare_side_composer(&mut self) -> Box<crate::bottom_pane::BottomPane> {
         self.flush_completed_tool_activity();
         self.set_queue_autosend_suppressed(true);
-        self.stop_rate_limit_poller();
         self.bottom_pane.take_for_side()
     }
 
@@ -232,7 +231,6 @@ impl ChatWidget {
     ) {
         let _ = self.app_event_tx.side_projection.set(route);
         self.set_queue_autosend_suppressed(true);
-        self.stop_rate_limit_poller();
     }
 
     pub(crate) fn side_projection_route(
