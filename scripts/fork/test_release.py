@@ -985,6 +985,11 @@ if os.environ.get("CORRUPT_AXEL") == "1":
         self.assertEqual(self.selected(), old)
 
     def test_same_version_update_selects_new_build_and_preserves_old_package(self):
+        if sys.platform == "darwin":
+            self.executable(
+                self.tools / "mv",
+                '#!/bin/sh\n[ "$1" != -fh ] || exit 1\nexec /bin/mv "$@"\n',
+            )
         first = self.prepare_build("a")
         self.install()
         old = self.selected()
