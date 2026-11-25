@@ -77,6 +77,40 @@ fn osc52_mode_preserves_payload_limits_empty_errors_and_terminal_failures() {
 }
 
 #[test]
+fn dev_container_uses_native_only_for_oversized_copies_with_shared_wayland() {
+    let oversized = "x".repeat(OSC52_MAX_RAW_BYTES + 1);
+    for (text, shared_wayland, expect_native) in [
+        ("small", true, false),
+        (oversized.as_str(), false, false),
+        (oversized.as_str(), true, true),
+    ] {
+        let result = copy_to_clipboard_with(
+            text,
+            CopyFormat::PlainText,
+            CopyEnvironment {
+                terminal_copy: ClipboardCopyMode::PreferTerminal {
+                    native_for_large_copies: shared_wayland,
+                },
+                wsl_session: false,
+            },
+            |_| {
+                assert!(!expect_native);
+                Ok(())
+            },
+            |_, _| {
+                assert!(expect_native);
+                Ok(Some(ClipboardLease::test()))
+            },
+            |_| panic!("dev-container routing must not write to the Windows clipboard"),
+        );
+        let CopyOutcome::Unconfirmed(lease) = result.unwrap() else {
+            panic!("host delivery cannot be confirmed");
+        };
+        assert_eq!(lease.is_some(), expect_native);
+    }
+}
+
+#[test]
 fn rex_selects_osc52_without_ssh_or_tmux() {
     assert_eq!(
         ClipboardCopyMode::for_terminal(TerminalName::Rex),

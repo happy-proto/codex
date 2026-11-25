@@ -41,7 +41,11 @@ pub(crate) fn effective_stdout_color_level() -> StdoutColorLevel {
         return StdoutColorLevel::TrueColor;
     }
 
-    codex_terminal_detection::terminal_color_level()
+    let level = codex_terminal_detection::terminal_color_level();
+    #[cfg(unix)]
+    return terminfo_color::supplement(level);
+    #[cfg(not(unix))]
+    level
 }
 
 fn best_color_for_color_level(target: (u8, u8, u8), color_level: StdoutColorLevel) -> Color {
