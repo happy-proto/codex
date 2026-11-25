@@ -108,7 +108,7 @@ PYJSON
 }
 link() {
   ln -s "$1" "$2.tmp.$$"
-  if [ "$platform" = Darwin ]; then mv -fh "$2.tmp.$$" "$2"
+  if [ "$platform" = Darwin ]; then /bin/mv -fh "$2.tmp.$$" "$2"
   else mv -fT "$2.tmp.$$" "$2"; fi
 }
 select_package() {

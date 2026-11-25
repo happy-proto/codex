@@ -51,6 +51,7 @@ draft 不占名额；清理遗留 draft 和没有 Release 的孤立 fork tag，�
 内部 crate 保留所选上游 alpha 的版本，不随 `.fork.N` 重写；源码、依赖和编译参数仍参与缓存校验。
 版本解析、commit 注入及防回退约束见 [发布版本与编译缓存分离](0011-build-cache-stability.md)。
 安装器校验下载、保留上一包供回退；用系统文件锁避免崩溃遗留锁阻断更新。
+macOS 安装器使用系统的 `/bin/mv -fh` 原子切换符号链接，兼容 GNU `mv` 优先的 `PATH`。
 启动检查只显示一次后台提示，不自动安装；`codex update` 主动更新，daemon 默认关闭自动升级。
 更新命令先确认安装脚本下载成功，再运行脚本；下载或安装失败均返回非零状态。
 Rust 编译由 Cargo 通过 sccache 的 GitHub Actions 后端缓存，按编译结果独立保存，关闭 incremental；
