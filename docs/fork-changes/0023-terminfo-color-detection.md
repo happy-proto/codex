@@ -10,7 +10,7 @@ SSH 通常只随伪终端请求传递 `TERM`，不转发 `COLORTERM`。
 
 ## 实现
 
-Unix TUI 在环境变量检测不足时，用纯 Rust `terminfo` 库读取本机数据库，遵循该库的
+Unix TUI 在上游标准输出或终端颜色检测不足时，用纯 Rust `terminfo` 库读取本机数据库，遵循该库的
 `TERMINFO`、用户目录、`TERMINFO_DIRS` 和系统目录查找规则，不调用外部命令或链接 ncurses。
 `Tc`、布尔或正整数 `RGB`、成对且非空的 `setrgbf` / `setrgbb`，以及至少 2²⁴ 色的声明
 作为真彩色依据；普通 `colors#256` 只提升到 256 色，不推断真彩色。

@@ -11,6 +11,9 @@ use terminfo::capability::MaxColors;
 use terminfo::capability::Value;
 
 pub(super) fn supplement(level: StdoutColorLevel) -> StdoutColorLevel {
+    if level == StdoutColorLevel::TrueColor {
+        return level;
+    }
     // Match supports-color's process-wide cache; rendering must not repeatedly read the
     // database, inspect environment variables, or issue isatty syscalls for each styled span.
     static COLOR_LEVEL: OnceLock<StdoutColorLevel> = OnceLock::new();
@@ -19,8 +22,7 @@ pub(super) fn supplement(level: StdoutColorLevel) -> StdoutColorLevel {
 
 fn detect(level: StdoutColorLevel) -> StdoutColorLevel {
     // Keep explicit color controls and redirected output under supports-color's policy.
-    if level == StdoutColorLevel::TrueColor
-        || !std::io::stdout().is_terminal()
+    if !std::io::stdout().is_terminal()
         || ["FORCE_COLOR", "CLICOLOR_FORCE", "NO_COLOR"]
             .iter()
             .any(|name| std::env::var_os(name).is_some())

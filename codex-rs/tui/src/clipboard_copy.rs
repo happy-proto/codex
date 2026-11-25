@@ -101,8 +101,7 @@ fn copy_to_clipboard(
     #[cfg(not(target_os = "android"))]
     let native_copy = {
         // Bound WSL native setup: even initialization can block forever.
-        let clipboard = (!environment.wsl_session
-            && environment.uses_native(text))
+        let clipboard = (!environment.wsl_session && environment.uses_native(text))
             .then(arboard::Clipboard::new);
         move |text: &str, html: Option<&str>| {
             let clipboard = match clipboard {
@@ -166,9 +165,9 @@ impl CopyEnvironment {
         match self.terminal_copy {
             ClipboardCopyMode::FallbackOsc52 => true,
             ClipboardCopyMode::Osc52 => false,
-            ClipboardCopyMode::PreferTerminal { native_for_large_copies } => {
-                native_for_large_copies && text.len() > OSC52_MAX_RAW_BYTES
-            }
+            ClipboardCopyMode::PreferTerminal {
+                native_for_large_copies,
+            } => native_for_large_copies && text.len() > OSC52_MAX_RAW_BYTES,
         }
     }
 }
@@ -199,7 +198,10 @@ fn copy_to_clipboard_with(
         };
         arboard_copy_fn(text, html.as_deref()).map_err(|error| format!("native clipboard: {error}"))
     };
-    if matches!(environment.terminal_copy, ClipboardCopyMode::PreferTerminal { .. }) {
+    if matches!(
+        environment.terminal_copy,
+        ClipboardCopyMode::PreferTerminal { .. }
+    ) {
         return native_copy().map(CopyOutcome::Unconfirmed);
     }
     let native_result = if environment.wsl_session {

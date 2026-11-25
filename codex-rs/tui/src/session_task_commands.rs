@@ -220,6 +220,7 @@ impl TaskClient<'_> {
         crate::dynamic_tools::execute_inner(
             self.handle(),
             DynamicToolCallParams {
+                supported_result_format: None,
                 thread_id: std::env::var("CODEX_THREAD_ID").unwrap_or_default(),
                 turn_id: String::new(),
                 call_id: Uuid::new_v4().to_string(),
