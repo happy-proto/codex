@@ -1643,22 +1643,22 @@ fn tool_groups_expand_independently_inside_a_completed_turn() {
     view.sync_turn_details(&cells, /*enabled*/ true, /*active*/ None);
     assert!(turn_screen(&mut view, &cells).contains("Checking stderr."));
     cells.push(Arc::new(crate::history_cell::FinalMessageSeparator::new(
-        /*elapsed_seconds*/ None, /*runtime_metrics*/ None,
+        Some(2),
+        /*runtime_metrics*/ None,
     )));
     view.sync_turn_details(&cells, /*enabled*/ true, /*active*/ None);
-    insta::assert_snapshot!(turn_screen(&mut view, &cells).trim(), @r"
-    › Check why the service writes a diagnostic to
-      stderr each time it starts.
+    let collapsed = turn_screen(&mut view, &cells);
+    let answer = collapsed
+        .find("The fixture is missing.")
+        .expect("final answer");
+    let disclosure = collapsed
+        .find("▸ Worked for 2s")
+        .expect("completion control");
+    assert!(answer < disclosure, "{collapsed}");
+    assert!(!collapsed.contains("Checking stderr."));
+    assert!(collapsed.contains("The path is valid."));
 
-
-    ▸ 3 previous messages
-
-    • The path is valid.
-
-    • The fixture is missing.
-    ");
-
-    // The wrapped prompt is taller than this viewport. Keyboard expansion keeps its control visible.
+    // Keyboard expansion keeps the completion control visible in a short viewport.
     let narrow = |view: &mut TranscriptView| {
         text(&render(view, &cells, /*width*/ 25, /*height*/ 3))
     };
@@ -1666,11 +1666,11 @@ fn tool_groups_expand_independently_inside_a_completed_turn() {
     view.handle_key(KeyCode::F(4).into(), &cells);
     narrow(&mut view);
     view.handle_key(KeyCode::Enter.into(), &cells);
-    assert!(narrow(&mut view).contains("▾ 3 previous messages"));
+    assert!(narrow(&mut view).contains("▾ Worked for 2s"));
     let expanded = turn_screen(&mut view, &cells);
     assert!(expanded.contains("Checking stderr.") && expanded.contains("▸ Ran 2 commands"));
     assert!(!expanded.contains("Ran echo hello"));
-    view.handle_key(KeyCode::Down.into(), &cells);
+    view.handle_key(KeyCode::Up.into(), &cells);
     view.handle_key(KeyCode::Enter.into(), &cells);
     let expanded = turn_screen(&mut view, &cells);
     assert!(expanded.contains("▾ Ran 2 commands"));
@@ -1695,7 +1695,7 @@ fn tool_groups_expand_independently_inside_a_completed_turn() {
         row("Checking stderr."),
         /*clicks*/ 2,
     );
-    assert!(view.toggle_disclosure_at(&cells, /*column*/ 0, row("previous messages")));
+    assert!(view.toggle_disclosure_at(&cells, /*column*/ 0, row("Worked for 2s")));
     let collapsed = turn_screen(&mut view, &cells);
     assert!(!collapsed.contains("Checking stderr.") && !collapsed.contains("Ran 2 commands"));
     assert!(collapsed.contains("The fixture is missing."));
@@ -1803,6 +1803,20 @@ fn legacy_progress_stays_visible_until_a_final_answer() {
     assert!(screen.contains("▸ Worked for 2s"), "{screen}");
     assert!(screen.contains("Fixture verified") && screen.contains("Review complete"));
     assert!(!screen.contains("Intermediate progress"));
+    assert!(screen.find("Fixture verified") < screen.find("▸ Worked for 2s"));
+
+    cells.extend([
+        prompt("Summarize"),
+        assistant_message("All done", Some(FinalAnswer)),
+        Arc::new(crate::history_cell::FinalMessageSeparator::new(
+            Some(1),
+            /*runtime_metrics*/ None,
+        )),
+    ]);
+    view.sync_turn_details(&cells, /*enabled*/ true, /*active*/ None);
+    let screen = turn_screen(&mut view, &cells);
+    assert!(screen.find("All done").unwrap() < screen.find("Worked for 1s").unwrap());
+    assert!(!screen.contains("▸ Worked for 1s"));
 }
 
 #[test]

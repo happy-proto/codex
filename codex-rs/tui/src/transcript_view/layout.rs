@@ -262,15 +262,17 @@ impl TranscriptView {
         }
         let mode = self.mode;
         let mut presentation = self.content_presentation(cell.as_ref(), full_content, mode);
-        let mut turn_header = None;
         if !full_content && let Some(row) = self.turn_row(cells, index) {
             let ids = row.ids();
             presentation.expanded = self.disclosure.is_expanded(ids);
             presentation.summarized = true;
             match &row {
-                turn_details::TurnRow::Prompt { label, .. } => {
+                turn_details::TurnRow::Completion { label, .. } => {
                     let arrow = if presentation.expanded { "▾" } else { "▸" };
-                    turn_header = Some(format!("{arrow} {label}"));
+                    return Some(self.cache.get(cell, width, presentation, || {
+                        TextLayout::new(Vec::new(), width)
+                            .with_turn_disclosure(format!("{arrow} {label}"))
+                    }));
                 }
                 turn_details::TurnRow::Tools(_) => {
                     if presentation.expanded {
@@ -325,9 +327,6 @@ impl TranscriptView {
             let mut layout = cell_content_layout(cell, width, mode, presentation, shortcut);
             if shares_prompt_background {
                 layout = layout.without_leading_blank_row();
-            }
-            if let Some(label) = turn_header {
-                layout = layout.with_turn_disclosure(label);
             }
             layout
         }))

@@ -362,7 +362,7 @@ impl TranscriptView {
         let ids = self.activity_ids(cells, index);
         let row = if matches!(
             self.turn_row(cells, index),
-            Some(turn_details::TurnRow::Prompt { .. })
+            Some(turn_details::TurnRow::Completion { .. })
         ) {
             control
         } else {
@@ -426,11 +426,11 @@ impl TranscriptView {
             .and_then(|(key, top_ids, offset, row_bias)| {
                 let unchanged = cells.iter().position(|cell| EntryKey::cell(cell) == key);
                 let top = unchanged.or_else(|| self.canonical_activity_index(cells, &top_ids))?;
-                let prompt = matches!(
+                let completion = matches!(
                     self.turn_row(cells, top),
-                    Some(turn_details::TurnRow::Prompt { .. })
+                    Some(turn_details::TurnRow::Completion { .. })
                 );
-                let preserve_offset = unchanged.is_some() && (top != index || prompt);
+                let preserve_offset = unchanged.is_some() && (top != index || completion);
                 Some(Anchor {
                     key: cells.get(top).map_or(EntryKey::Live, EntryKey::cell),
                     index: top,

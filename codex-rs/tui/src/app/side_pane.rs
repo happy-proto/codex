@@ -585,7 +585,18 @@ impl SidePaneLayout {
             cell.as_any()
                 .downcast_ref::<crate::history_cell::FinalMessageSeparator>()
         });
-        let hide_completion = companion.bottom.set_workspace_completion(completion);
+        if completion.is_some() {
+            companion.view.sync_turn_details(
+                &companion.cells,
+                collapse_turn_details,
+                /*active*/ None,
+            );
+        }
+        let has_disclosure = companion.view.has_completion_disclosure(&companion.cells);
+        let hide_completion = companion
+            .bottom
+            .set_workspace_completion(completion, has_disclosure)
+            && !watch_only;
         companion
             .view
             .set_workspace_completion(&companion.cells, hide_completion);

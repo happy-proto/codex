@@ -244,8 +244,10 @@ impl ChatWidget {
     pub(crate) fn set_workspace_completion(
         &mut self,
         completion: Option<&history_cell::FinalMessageSeparator>,
+        has_disclosure: bool,
     ) -> bool {
-        self.bottom_pane.set_workspace_completion(completion)
+        self.bottom_pane
+            .set_workspace_completion(completion, has_disclosure)
     }
 
     pub(crate) fn has_side_stream(&self) -> bool {

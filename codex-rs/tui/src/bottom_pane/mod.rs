@@ -343,6 +343,7 @@ pub(crate) struct BottomPane {
     status_timer: crate::status_indicator_widget::StatusTimer,
     workspace_status: workspace_status::WorkspaceStatus,
     workspace_completion_line: Option<Line<'static>>,
+    workspace_completion_in_transcript: bool,
     workspace_indicator: StatusIndicatorWidget,
     /// Unified exec session summary source.
     ///
@@ -447,6 +448,7 @@ impl BottomPane {
             status_timer: crate::status_indicator_widget::StatusTimer::default(),
             workspace_status: Default::default(),
             workspace_completion_line: None,
+            workspace_completion_in_transcript: false,
             unified_exec_footer: UnifiedExecFooter::new(),
             pending_input_preview: PendingInputPreview::new(),
             pending_thread_approvals: PendingThreadApprovals::new(),
@@ -499,6 +501,7 @@ impl BottomPane {
             || status.phase != workspace_status::WorkspacePhase::Completed
         {
             self.workspace_completion_line = None;
+            self.workspace_completion_in_transcript = false;
         }
         if status.generation_observed_at != self.workspace_status.generation_observed_at
             || status.phase != workspace_status::WorkspacePhase::Working
@@ -530,6 +533,7 @@ impl BottomPane {
     pub(crate) fn set_workspace_completion(
         &mut self,
         completion: Option<&crate::history_cell::FinalMessageSeparator>,
+        has_disclosure: bool,
     ) -> bool {
         let terminal = matches!(
             self.workspace_status.phase,
@@ -540,7 +544,10 @@ impl BottomPane {
         self.workspace_completion_line = completion
             .filter(|_| self.workspace_status.phase == workspace_status::WorkspacePhase::Completed)
             .and_then(crate::history_cell::FinalMessageSeparator::status_line);
-        terminal && completion.is_some()
+        self.workspace_completion_in_transcript = self.workspace_status.phase
+            == workspace_status::WorkspacePhase::Completed
+            && has_disclosure;
+        terminal && completion.is_some() && !self.workspace_completion_in_transcript
     }
 
     pub(crate) fn parked_renderable<'a>(
@@ -2743,7 +2750,7 @@ impl BottomPane {
                             !options.passive,
                         ))),
                     );
-                } else {
+                } else if !self.workspace_completion_in_transcript {
                     flex.push(
                         0,
                         RenderableItem::Owned(Box::new(
@@ -3059,7 +3066,7 @@ mod tests {
                 crate::clock_format::ClockFormat::TwentyFourHour,
             )
             .with_generation_speed(Some(22.0));
-        assert!(pane.set_workspace_completion(Some(&completion)));
+        assert!(pane.set_workspace_completion(Some(&completion), /*has_disclosure*/ false));
         let options = ComposerRenderOptions {
             shared_footer: Some(Rect::default()),
             separate_status_line: true,
@@ -3107,10 +3114,15 @@ mod tests {
                 0
             );
         }
+        assert!(!pane.set_workspace_completion(Some(&completion), /*has_disclosure*/ true));
+        let renderable = pane.as_renderable_with_options(options);
+        let text = render_snapshot(&renderable, Rect::new(0, 0, 100, 12));
+        assert!(!text.contains("Worked for"), "{text}");
+
         let mut next = workspace_status::WorkspaceStatus::default();
         next.start("next", Duration::ZERO);
         pane.set_workspace_status(next);
-        assert!(!pane.set_workspace_completion(Some(&completion)));
+        assert!(!pane.set_workspace_completion(Some(&completion), /*has_disclosure*/ false));
         assert!(pane.workspace_completion_line.is_none());
     }
 

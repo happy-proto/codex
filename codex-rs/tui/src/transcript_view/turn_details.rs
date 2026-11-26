@@ -13,7 +13,7 @@ use codex_protocol::models::MessagePhase;
 
 #[derive(Clone)]
 pub(crate) enum TurnRow {
-    Prompt { id: String, label: String },
+    Completion { id: String, label: String },
     Tools(Arc<ToolGroup>),
     Hidden,
 }
@@ -21,7 +21,7 @@ pub(crate) enum TurnRow {
 impl TurnRow {
     pub(crate) fn ids(&self) -> &[String] {
         match self {
-            Self::Prompt { id, .. } => std::slice::from_ref(id),
+            Self::Completion { id, .. } => std::slice::from_ref(id),
             Self::Tools(group) => &group.ids,
             Self::Hidden => &[],
         }
@@ -193,10 +193,10 @@ impl TurnDetails {
         if latest && !self.live.0.is_empty() {
             group.push(rows, cells.len(), self.live.1.clone(), self.live.0.clone());
         }
-        let mut completion = None;
+        let mut completions = Vec::new();
         let mut separator = None;
         let mut fold = false;
-        let mut hidden_count = 0;
+
         let mut searches = std::collections::HashSet::new();
         for (index, cell) in cells.iter().enumerate().rev() {
             if crate::thread_transcript::is_hidden_activity_detail(cell) {
@@ -246,11 +246,16 @@ impl TurnDetails {
                     || any.is::<AgentMessageCell>()
                     || any.is::<ReasoningSummaryCell>())
             {
-                rows[index].parent = Some(start);
-                hidden_count += calls.len().max(1);
-                if let Some((at, done)) = separator.take() {
-                    rows[at].row = Some(TurnRow::Hidden);
-                    completion.get_or_insert(done);
+                if let Some((at, done)) = separator {
+                    rows[index].parent = Some(start + at);
+                    if let Some((_, _, count)) = completions
+                        .last_mut()
+                        .filter(|(previous, _, _)| *previous == at)
+                    {
+                        *count += calls.len().max(1);
+                    } else {
+                        completions.push((at, done, calls.len().max(1)));
+                    }
                 }
             }
             if let Some(tool) = any.downcast_ref::<DynamicToolCallCell>()
@@ -308,15 +313,15 @@ impl TurnDetails {
         if !latest {
             self.prior_activity_counts.extend(counts);
         }
-        if hidden_count > 0 {
+        for (at, completion, hidden_count) in completions {
             let label = completion
-                .and_then(FinalMessageSeparator::display_label)
+                .display_label()
                 .unwrap_or_else(|| match hidden_count {
                     1 => "1 previous message".into(),
                     count => format!("{count} previous messages"),
                 });
-            rows[0].row = Some(TurnRow::Prompt {
-                id: format!("turn:{:?}", rows[0].key),
+            rows[at].row = Some(TurnRow::Completion {
+                id: format!("turn:{:?}", rows[at].key),
                 label,
             });
         }
@@ -425,6 +430,15 @@ impl TranscriptView {
         self.cache.clear_summaries();
     }
 
+    pub(crate) fn has_completion_disclosure(&self, cells: &[Arc<dyn HistoryCell>]) -> bool {
+        cells.len().checked_sub(1).is_some_and(|index| {
+            matches!(
+                self.turn_row(cells, index),
+                Some(TurnRow::Completion { .. })
+            )
+        })
+    }
+
     pub(crate) fn turn_row(&self, cells: &[Arc<dyn HistoryCell>], index: usize) -> Option<TurnRow> {
         if self.detailed || self.mode != HistoryRenderMode::Rich {
             return None;
@@ -433,7 +447,7 @@ impl TranscriptView {
         let key = cells.get(index).map_or(EntryKey::Live, EntryKey::cell);
         let entry = details.rows.get(index).filter(|entry| entry.key == key)?;
         if let Some(parent) = entry.parent
-            && let Some(TurnRow::Prompt { id, .. }) = &details.rows[parent].row
+            && let Some(TurnRow::Completion { id, .. }) = &details.rows[parent].row
             && !self.disclosure.expanded.contains(id)
         {
             return Some(TurnRow::Hidden);
