@@ -89,6 +89,7 @@ impl App {
             self.chat_widget.fork_in_progress = false;
         }
         if self.reconnect.offline && matches!(event, AppEvent::Exit(ExitMode::ShutdownFirst)) {
+            tui.update_program_resume(None);
             return Ok(AppRunControl::Exit(ExitReason::UserRequested));
         }
         if self.reconnect.offline && matches!(event, AppEvent::OpenFeedback) {
@@ -314,6 +315,7 @@ impl App {
                     self.chat_widget.add_error_message(error.to_string());
                     return Ok(AppRunControl::Continue);
                 }
+                tui.update_program_resume(None);
                 self.pending_update_action = Some(UpdateAction::Daemon(source));
                 return Ok(self.handle_exit_mode(app_server, ExitMode::Immediate).await);
             }
@@ -1414,6 +1416,7 @@ impl App {
                 });
             }
             AppEvent::Exit(mode) | AppEvent::ConfirmedEmbeddedExit(mode) => {
+                tui.update_program_resume(None);
                 if matches!(mode, ExitMode::ShutdownFirst | ExitMode::ShutdownAfterInterrupt) {
                     self.show_shutdown_feedback(tui)?;
                 }
@@ -1421,6 +1424,7 @@ impl App {
             }
             AppEvent::RunningTaskExit { action, thread_id } => match action {
                 RunningTaskExitAction::RunInBackground => {
+                    tui.update_program_resume(None);
                     return Ok(self.handle_exit_mode(app_server, ExitMode::Immediate).await);
                 }
                 RunningTaskExitAction::CancelTask => {
@@ -1476,6 +1480,7 @@ impl App {
             },
             AppEvent::Logout => match app_server.logout_account().await {
                 Ok(()) => {
+                    tui.update_program_resume(None);
                     self.show_shutdown_feedback(tui)?;
                     return Ok(self
                         .handle_exit_mode(app_server, ExitMode::ShutdownFirst)

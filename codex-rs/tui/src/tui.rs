@@ -728,6 +728,7 @@ pub struct Tui {
     pub(super) event_broker: Arc<EventBroker>,
     pub(crate) terminal_size_tags: crate::terminal_size_telemetry::LaunchTags,
     pub(crate) terminal: Terminal,
+    pub(crate) program_resume: Option<crate::program_resume::Reporter>,
     pending_history_lines: Vec<PendingHistoryLines>,
     clear_on_draw: Option<DeferredClear>,
     screen_size: ScreenSizePolicy,
@@ -813,6 +814,7 @@ impl Tui {
             terminal,
             pending_history_lines: vec![],
             clear_on_draw: None,
+            program_resume: None,
             screen_size: ScreenSizePolicy::default(),
             ambient_pet_image_state: crate::pets::PetImageRenderState::default(),
             pet_picker_preview_image_state: crate::pets::PetImageRenderState::default(),
@@ -1150,6 +1152,14 @@ impl Tui {
         self.resume_events();
         self.schedule_screen_size_recheck(Duration::ZERO);
         output
+    }
+
+    pub(crate) fn update_program_resume(&mut self, target: Option<crate::program_resume::Target>) {
+        if let Some(reporter) = self.program_resume.as_mut()
+            && let Err(error) = reporter.update(self.terminal.backend_mut(), target)
+        {
+            tracing::debug!(%error, "failed to write terminal resume report");
+        }
     }
 
     /// Emit a desktop notification now if the terminal is unfocused.

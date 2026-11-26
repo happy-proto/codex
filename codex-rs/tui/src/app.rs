@@ -554,6 +554,44 @@ fn resumable_thread(
     })
 }
 
+impl App {
+    fn program_resume_target(&self) -> Option<crate::program_resume::Target> {
+        let session = self.primary_session_configured.as_ref()?;
+        if self.primary_thread_id != Some(session.thread_id)
+            || session.read_only_history
+            || self
+                .thread_event_channels
+                .get(&session.thread_id)
+                .is_some_and(|channel| channel.archived)
+        {
+            return None;
+        }
+        if crate::uses_remote_workspace_or_environment(
+            &self.app_server_target,
+            &self.environment_manager,
+        ) || session
+            .primary_environment_cwd
+            .as_ref()
+            .is_some_and(|cwd| !cwd.is_server_local)
+        {
+            return None;
+        }
+        let path = session.rollout_path.as_deref()?;
+        if !rollout_path_is_resumable(path)
+            && !(path.extension().is_some_and(|ext| ext == "jsonl")
+                && rollout_path_is_resumable(&path.with_extension("jsonl.zst")))
+        {
+            return None;
+        }
+        let cwd = session.cwd.to_abs_path().ok()?;
+        let cwd = cwd.as_path().to_str()?.to_string();
+        Some(crate::program_resume::Target {
+            thread_id: session.thread_id.to_string(),
+            cwd,
+        })
+    }
+}
+
 fn rollout_path_is_resumable(rollout_path: &Path) -> bool {
     std::fs::metadata(rollout_path).is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
 }
@@ -1133,6 +1171,7 @@ impl App {
                         && self.chat_widget.composer_is_empty()
                         && self.chat_widget.no_modal_or_popup_active()))
             {
+                tui.update_program_resume(None);
                 return Ok(AppRunControl::Exit(ExitReason::UserRequested));
             }
             if crate::key_hint::ctrl(KeyCode::Char('r')).is_press(*key)

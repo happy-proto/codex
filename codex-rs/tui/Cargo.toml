@@ -140,6 +140,7 @@ vtparse = { workspace = true }
 url = { workspace = true }
 urlencoding = { workspace = true }
 webbrowser = { workspace = true }
+which = { workspace = true }
 uuid = { workspace = true }
 
 codex-windows-sandbox = { workspace = true }
@@ -164,7 +165,6 @@ zbus = "4.4.0"
 [target.'cfg(windows)'.dependencies]
 clipboard-win = "5.4.3"
 image = { workspace = true, features = ["bmp"] }
-which = { workspace = true }
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Globalization",

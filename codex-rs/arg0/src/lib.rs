@@ -272,7 +272,7 @@ const ILLEGAL_ENV_VAR_PREFIX: &str = "CODEX_";
 /// Load env vars from ~/.codex/.env.
 ///
 /// Security: Do not allow `.env` files to create or modify any variables
-/// with names starting with `CODEX_`.
+/// with names starting with `CODEX_` or the terminal resume token.
 fn load_dotenv() {
     if let Ok(codex_home) = find_codex_home()
         && let dotenv_path = codex_home.join(".env")
@@ -283,7 +283,7 @@ fn load_dotenv() {
     }
 }
 
-/// Helper to set vars from a dotenvy iterator while filtering out `CODEX_` keys.
+/// Set dotenv variables while filtering out reserved launch context.
 fn set_filtered<I>(iter: I)
 where
     I: IntoIterator<Item = Result<(String, String), dotenvy::Error>>,
@@ -295,7 +295,9 @@ where
             Err(dotenvy::Error::Io(err)) if err.kind() != std::io::ErrorKind::InvalidData => break,
             Err(_) => continue,
         };
-        if !key.to_ascii_uppercase().starts_with(ILLEGAL_ENV_VAR_PREFIX) {
+        if !key.to_ascii_uppercase().starts_with(ILLEGAL_ENV_VAR_PREFIX)
+            && !key.eq_ignore_ascii_case("OSC7577_TOKEN")
+        {
             // It is safe to call set_var() because our process is
             // single-threaded at this point in its execution.
             unsafe { std::env::set_var(&key, &value) };
