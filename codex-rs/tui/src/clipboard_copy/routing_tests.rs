@@ -148,7 +148,7 @@ fn confirmed_copy_without_new_lease_preserves_native_ownership() {
 #[test]
 fn screen_forwards_one_complete_osc52_across_bounded_passthrough_strings() {
     for text in ["hello", &"世界".repeat(500)] {
-        let sequence = super::osc52_sequence(text, super::Osc52Target::Screen).unwrap();
+        let sequence = super::osc52_sequence(text, super::Osc52Target::ChunkedDcs).unwrap();
         let chunks = sequence
             .strip_prefix("\x1bP")
             .unwrap()

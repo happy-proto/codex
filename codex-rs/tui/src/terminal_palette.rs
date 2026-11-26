@@ -41,6 +41,10 @@ pub(crate) fn effective_stdout_color_level() -> StdoutColorLevel {
         return StdoutColorLevel::TrueColor;
     }
 
+    crate::terminal_capabilities::terminal_color_level()
+}
+
+pub(crate) fn terminal_color_level() -> StdoutColorLevel {
     let level = codex_terminal_detection::terminal_color_level();
     #[cfg(unix)]
     return terminfo_color::supplement(level);

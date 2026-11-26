@@ -18,9 +18,9 @@ Rex 等持久会话可在 Codex 启动后接入其他客户端。先写宿主机
 
 ## 入口与验证
 
-- `codex-rs/tui/src/terminal_capabilities.rs` 将 tmux、SSH、Herdr 和 Rex 映射到同一复制策略。
+- `codex-rs/tui/src/terminal_capabilities.rs` 将 tmux、SSH、Herdr 和 Rex 映射到同一复制策略，并提供上游透传目标检测。
 - `codex-rs/tui/src/clipboard_copy.rs` 跳过 OSC 52 直发路径的原生初始化和写入。
-- `codex-rs/tui/src/clipboard_copy/worker.rs` 根据 tmux 或 GNU screen 环境封装 OSC 52。
+- `codex-rs/tui/src/clipboard_copy/worker.rs` 读取透传目标并安排 OSC 52 写入。
 - `codex-rs/tui/src/clipboard_copy/routing_tests.rs` 验证重复发送、跳过原生及 WSL 写入、空内容、
   大小限制和终端错误。`.github/workflows/fork.yml` 持续运行 `clipboard_copy` 测试组。
 

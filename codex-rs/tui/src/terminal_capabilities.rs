@@ -9,7 +9,6 @@ mod resize_reflow_cap;
 mod terminal_identity;
 pub(crate) mod terminal_probe;
 mod tmux;
-mod tmux_clipboard;
 
 use codex_terminal_detection::Multiplexer;
 use codex_terminal_detection::TerminalBackend;
@@ -18,16 +17,15 @@ use codex_terminal_detection::TerminalName;
 use codex_terminal_detection::terminal_info;
 use std::io::IsTerminal;
 
+pub use crate::terminal_palette::stdout_color_level;
+pub(crate) use crate::terminal_palette::terminal_color_level;
 pub use codex_terminal_detection::StdoutColorLevel;
-pub use codex_terminal_detection::stdout_color_level;
-pub(crate) use codex_terminal_detection::terminal_color_level;
 pub(crate) use codex_terminal_detection::user_agent;
 pub(crate) use resize_reflow_cap::resize_reflow_max_rows;
 #[cfg(unix)]
 pub(crate) use terminal_identity::requires_inline_screen;
 pub(crate) use tmux::MouseCapture;
 pub(crate) use tmux::sample_mouse;
-pub(crate) use tmux_clipboard::copy as copy_to_client_buffer;
 
 #[cfg(target_os = "linux")]
 pub(crate) fn is_wsl_session() -> bool {

@@ -23,7 +23,8 @@ Unix TUI 在上游标准输出或终端颜色检测不足时，用纯 Rust `term
 
 ## 代码入口
 
-- [颜色级别公共入口](../../codex-rs/tui/src/terminal_palette.rs)
+- [TUI 终端能力入口](../../codex-rs/tui/src/terminal_capabilities.rs)统一提供颜色级别，CLI 的退出提示也使用该入口。
+- [颜色级别与回退](../../codex-rs/tui/src/terminal_palette.rs)
 - [terminfo 检测](../../codex-rs/tui/src/terminal_palette/terminfo_color.rs)
 - [子进程与伪终端回归测试](../../codex-rs/tui/src/terminal_palette/terminfo_tests.rs)
 - [fork CI](../../.github/workflows/fork.yml)

@@ -21,8 +21,8 @@ mod wsl;
 
 use crate::terminal_capabilities::ClipboardCapabilities;
 use crate::terminal_capabilities::ClipboardCopyMode;
+use crate::terminal_capabilities::Osc52Target;
 pub(crate) use crate::terminal_capabilities::is_ssh_session;
-use crate::terminal_capabilities::is_tmux_session;
 use base64::Engine;
 use std::io::Write;
 use std::sync::Arc;
@@ -287,12 +287,6 @@ fn write_osc52_to_writer(mut writer: impl Write, sequence: &str) -> Result<(), S
         .map_err(|e| format!("failed to flush OSC 52: {e}"))
 }
 
-enum Osc52Target {
-    Direct,
-    Tmux,
-    Screen,
-}
-
 fn osc52_sequence(text: &str, target: Osc52Target) -> Result<String, String> {
     let raw_bytes = text.len();
     if raw_bytes > OSC52_MAX_RAW_BYTES {
@@ -305,8 +299,8 @@ fn osc52_sequence(text: &str, target: Osc52Target) -> Result<String, String> {
     let osc = format!("\x1b]52;c;{encoded}\x07");
     Ok(match target {
         Osc52Target::Direct => osc,
-        Osc52Target::Tmux => format!("\x1bPtmux;\x1b{osc}\x1b\\"),
-        Osc52Target::Screen => {
+        Osc52Target::EscapedDcs => format!("\x1bPtmux;\x1b{osc}\x1b\\"),
+        Osc52Target::ChunkedDcs => {
             // Screen buffers each DCS separately. Stay below even its older 256-byte
             // string limit while forwarding one continuous OSC 52 to the outer terminal.
             const CHUNK_SIZE: usize = 252;
@@ -381,7 +375,7 @@ mod tests {
     #[test]
     fn osc52_wraps_tmux_passthrough() {
         assert_eq!(
-            osc52_sequence("hello", Osc52Target::Tmux),
+            osc52_sequence("hello", Osc52Target::EscapedDcs),
             Ok("\u{1b}Ptmux;\u{1b}\u{1b}]52;c;aGVsbG8=\u{7}\u{1b}\\".to_string())
         );
     }
