@@ -3115,8 +3115,10 @@ mod tests {
             );
         }
         assert!(!pane.set_workspace_completion(Some(&completion), /*has_disclosure*/ true));
-        let renderable = pane.as_renderable_with_options(options);
-        let text = render_snapshot(&renderable, Rect::new(0, 0, 100, 12));
+        let text = render_snapshot(
+            &pane.as_renderable_with_options(options),
+            Rect::new(0, 0, 100, 12),
+        );
         assert!(!text.contains("Worked for"), "{text}");
 
         let mut next = workspace_status::WorkspaceStatus::default();
