@@ -541,3 +541,63 @@ fn prose_after_a_table_is_previewed_until_another_table_starts() {
     controller.push("partial row");
     assert_eq!(controller.current_tail_lines(), tail);
 }
+
+#[test]
+fn uniform_list_spacing_updates_before_finalization() {
+    const INTRO: &str = "Start.\n\n";
+    const SHORT_ITEMS: &str = "- First item\n- Second item\n";
+    const LONG_ITEM: &str = "- Third item with enough words to wrap onto multiple rows\n";
+    const OUTRO: &str = "\nEnd.\n";
+    let cwd = std::env::temp_dir();
+    let width = Some(32);
+    let mut controller = StreamController::new(width, &cwd, HistoryRenderMode::Rich)
+        .with_list_spacing(ListSpacing::Uniform);
+    let text =
+        |lines: Vec<Line<'static>>| lines.iter().map(ToString::to_string).collect::<Vec<_>>();
+    let expected = |source: &str| {
+        text(visible_lines(render_source_with_list_spacing(
+            source,
+            width,
+            &cwd,
+            HistoryRenderMode::Rich,
+            /*inline_visualization_context*/ None,
+            ListSpacing::Uniform,
+        )))
+    };
+
+    controller.push(INTRO);
+    controller.push(SHORT_ITEMS);
+    let (prefix, _) = controller.on_commit_tick_batch(usize::MAX);
+    let mut committed = prefix.unwrap().raw_lines();
+    assert_eq!(committed.len(), 1);
+    let streaming = |committed: &[Line<'static>], controller: &StreamController| {
+        let mut lines = committed.to_vec();
+        lines.extend(visible_lines(controller.current_tail_lines()));
+        text(lines)
+    };
+    assert_eq!(
+        streaming(&committed, &controller),
+        expected(&format!("{INTRO}{SHORT_ITEMS}")),
+    );
+
+    let partial_item = LONG_ITEM.strip_suffix('\n').unwrap();
+    controller.push(partial_item);
+    assert_eq!(
+        streaming(&committed, &controller),
+        expected(&format!("{INTRO}{SHORT_ITEMS}{partial_item}")),
+    );
+
+    controller.push("\n");
+    assert_eq!(
+        streaming(&committed, &controller),
+        expected(&format!("{INTRO}{SHORT_ITEMS}{LONG_ITEM}")),
+    );
+
+    controller.push(OUTRO);
+    let (released_list, _) = controller.on_commit_tick_batch(usize::MAX);
+    committed.extend(released_list.unwrap().raw_lines());
+    assert!(!controller.has_live_tail());
+    let (remaining, source) = controller.finalize();
+    assert!(remaining.is_none());
+    assert_eq!(text(committed), expected(source.as_deref().unwrap()));
+}

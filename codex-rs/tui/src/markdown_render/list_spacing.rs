@@ -1,5 +1,4 @@
-//! List spacing is a layout policy, not a streaming boundary. Completed redrawable lists use
-//! uniform sibling separators; streaming lists stay compact until source-backed consolidation.
+//! Uniform sibling spacing in redrawable lists depends on the height of all items.
 
 use crate::terminal_hyperlinks::HyperlinkLine;
 
@@ -8,7 +7,8 @@ pub(crate) enum ListSpacing {
     /// Preserve the historical spacing for terminal-owned scrollback.
     #[default]
     AfterMultiline,
-    /// Do not add separators between siblings while an owned transcript streams.
+    /// Do not add separators between siblings.
+    #[cfg(test)]
     Compact,
     /// Separate every sibling if any item occupies multiple rendered rows.
     Uniform,

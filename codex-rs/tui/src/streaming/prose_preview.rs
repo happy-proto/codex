@@ -5,8 +5,10 @@
 //! Cropped previews skip completed directives atomically so their prompt text stays hidden.
 
 use super::render::render_source;
+use super::render::render_source_with_list_spacing;
 use crate::history_cell::HistoryRenderMode;
 use crate::inline_visualization::InlineVisualizationContext;
+use crate::markdown_render::ListSpacing;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::lines_with_sources_eq;
 use ratatui::text::Line;
@@ -21,10 +23,17 @@ pub(super) enum PreviewMode {
     Math,
 }
 
+pub(super) struct BlockPreview<'a> {
+    pub(super) committed_source: &'a str,
+    pub(super) replaces_from: usize,
+    pub(super) retained_lines: &'a [HyperlinkLine],
+}
+
 /// Tracks one append-only incomplete line; reset when a newline is committed.
 #[derive(Default)]
 pub(super) struct ProsePreview {
     pub(super) lines: Vec<HyperlinkLine>,
+    pub(super) replaces_from: Option<usize>,
     scanned_len: usize,
     safe_len: usize,
     rich_safe_len: usize,
@@ -39,6 +48,7 @@ impl ProsePreview {
         width: Option<usize>,
         cwd: &Path,
         mode: PreviewMode,
+        context: Option<BlockPreview<'_>>,
         inline_visualization_context: Option<&InlineVisualizationContext>,
     ) -> bool {
         // Only scan newly arrived bytes, including on very long single-line responses.
@@ -101,7 +111,38 @@ impl ProsePreview {
         {
             start = range.end;
         }
+        // Lay out the partial line in its Markdown block context, within the preview budget.
+        let context = context.filter(|context| {
+            !source.is_empty() && context.committed_source.len() + source.len() <= MAX_PREVIEW_BYTES
+        });
+        let contextual_lines = context.and_then(|context| {
+            let mut lines = render_source_with_list_spacing(
+                &format!("{}{source}", context.committed_source),
+                width,
+                cwd,
+                HistoryRenderMode::Rich,
+                inline_visualization_context,
+                ListSpacing::Uniform,
+            );
+            let prefix_len = context.retained_lines.len();
+            // The preceding block may already be in history. Only append to it when its
+            // rows still match; otherwise leave reinterpretation to newline commitment.
+            if !lines
+                .get(..prefix_len)
+                .is_some_and(|prefix| lines_with_sources_eq(prefix, context.retained_lines))
+            {
+                return None;
+            }
+            lines.drain(..prefix_len);
+            Some((context.replaces_from, lines))
+        });
+        let replaces_from = contextual_lines.as_ref().map(|(start, _)| *start);
         let mut lines = match mode {
+            PreviewMode::Prose(HistoryRenderMode::Rich)
+                if let Some((_, lines)) = contextual_lines =>
+            {
+                lines
+            }
             PreviewMode::Prose(render_mode) => render_source(
                 &source[start..],
                 width,
@@ -117,10 +158,11 @@ impl ProsePreview {
         if start > 0 {
             lines.insert(0, HyperlinkLine::new(Line::from("…")));
         }
-        if lines_with_sources_eq(&self.lines, &lines) {
+        if self.replaces_from == replaces_from && lines_with_sources_eq(&self.lines, &lines) {
             return false;
         }
         self.lines = lines;
+        self.replaces_from = replaces_from;
         true
     }
 }

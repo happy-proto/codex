@@ -26,6 +26,7 @@ pub(super) struct StreamingRender {
     pub(super) lines: Vec<HyperlinkLine>,
     pub(super) pending_math_start: Option<usize>,
     pub(super) mutable_fence_start: Option<usize>,
+    pub(super) mutable_list_start: Option<usize>,
     /// Source boundary before the final top-level block, including after full re-renders.
     pub(super) completed_source_len: usize,
     /// Source prefix containing only completed top-level markdown blocks.
@@ -47,6 +48,7 @@ impl StreamingRender {
             lines: Vec::with_capacity(64),
             pending_math_start: None,
             mutable_fence_start: None,
+            mutable_list_start: None,
             completed_source_len: 0,
             stable_source_len: 0,
             stable_rendered_len: 0,
@@ -60,6 +62,7 @@ impl StreamingRender {
         self.lines.clear();
         self.pending_math_start = None;
         self.mutable_fence_start = None;
+        self.mutable_list_start = None;
         self.completed_source_len = 0;
         self.stable_source_len = 0;
         self.stable_rendered_len = 0;
@@ -83,6 +86,7 @@ impl StreamingRender {
         self.open_code_fence = None;
         self.pending_math_start = None;
         self.mutable_fence_start = None;
+        self.mutable_list_start = None;
         self.completed_source_len = 0;
         self.has_inline_visualization_directive = contains_inline_visualization(source);
         self.lines = match (render_mode, inline_visualization_context) {
@@ -97,6 +101,7 @@ impl StreamingRender {
                 self.completed_source_len = rendered.last_top_level_block_start.unwrap_or(0);
                 self.pending_math_start = rendered.pending_math_start;
                 self.mutable_fence_start = rendered.mutable_fence_start;
+                self.mutable_list_start = rendered.mutable_list_start;
                 rendered.lines
             }
             _ => {
@@ -112,6 +117,7 @@ impl StreamingRender {
                     self.completed_source_len = rendered.last_top_level_block_start.unwrap_or(0);
                     self.pending_math_start = rendered.pending_math_start;
                     self.mutable_fence_start = rendered.mutable_fence_start;
+                    self.mutable_list_start = rendered.mutable_list_start;
                 }
                 render_source_with_list_spacing(
                     source,
@@ -194,6 +200,9 @@ impl StreamingRender {
             .map(|start| self.stable_source_len + start);
         self.mutable_fence_start = pending
             .mutable_fence_start
+            .map(|start| self.stable_source_len + start);
+        self.mutable_list_start = pending
+            .mutable_list_start
             .map(|start| self.stable_source_len + start);
         if pending.has_reference_link_definition {
             self.has_reference_link_definition = true;

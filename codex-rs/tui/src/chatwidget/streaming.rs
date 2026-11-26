@@ -407,7 +407,7 @@ impl ChatWidget {
                 )
                 .with_list_spacing(
                     if self.local_settings.transcript_mode.is_owned() {
-                        ListSpacing::Compact
+                        ListSpacing::Uniform
                     } else {
                         ListSpacing::AfterMultiline
                     },
@@ -946,7 +946,7 @@ impl ChatWidget {
                 )
                 .with_list_spacing(
                     if self.local_settings.transcript_mode.is_owned() {
-                        ListSpacing::Compact
+                        ListSpacing::Uniform
                     } else {
                         ListSpacing::AfterMultiline
                     },
