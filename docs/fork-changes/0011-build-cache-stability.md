@@ -24,9 +24,10 @@
   固定内部版本只消除分发修订造成的失效，不绕过真实输入变化的重编译。
 - Linux 构建和测试共用 GitHub Actions sccache 后端命名空间，由编译缓存键区分输入。Cargo
   下载缓存独立维护。两类缓存只允许默认分支写入，其它分支的手动验证只读。
-- macOS ARM 包使用 RunnerDock 原生构建。从受限 Runner Group 接单后，使用镜像内的 Apple SDK
-  和 sccache，把编译对象保存在宿主专用目录。该构建跳过远端 sccache 和 Rust 下载缓存，
-  使用 Apple codesign 完成 ad-hoc 签名后执行 CLI 和 app-server 验收。
+- macOS ARM 包由受限 Runner Group 中的 RunnerDock 原生构建。sccache 编译对象和 Cargo 下载使用
+  Actions Cache v2，经 RunnerDock 接入宿主缓存服务，并与 GitHub 托管 Linux 的缓存分别保存。
+  macOS 使用独立下载缓存键，仅默认分支写入。打包使用 Apple codesign 完成 ad-hoc 签名，
+  然后执行 CLI 和 app-server 验收。
 - GitHub 托管的 `scripts` Job 使用 `blob:none` 获取完整提交历史，验证
   选定上游提交是本次源码的祖先。Linux 和 macOS 打包 Job 浅检出前置任务
   验证过的同一 SHA，并核对工作区的 SHA、上游 tag 声明和分发版本后生成包清单。

@@ -127,12 +127,9 @@ jobs:
         run: |
           test "$RUNNER_OS" = macOS
           test "$RUNNER_ARCH" = ARM64
-          test -n "${SCCACHE_DIR:-}" && test -d "$SCCACHE_DIR" && test -w "$SCCACHE_DIR"
           xcrun --show-sdk-version
-          sccache --version
           echo "/opt/homebrew/opt/rustup/bin" >> "$GITHUB_PATH"
           echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
-          echo "SCCACHE_CACHE_SIZE=30G" >> "$GITHUB_ENV"
       - name: 安装仓库工具链及目标标准库
         working-directory: codex-rs
         env:
@@ -150,28 +147,21 @@ jobs:
             echo "SCCACHE_ERROR_LOG=$RUNNER_TEMP/fork-sccache/daemon.log"
             echo 'SCCACHE_LOG_MILLIS=1'
           } >> "$GITHUB_ENV"
-      - name: 配置 Linux 远端编译缓存
-        if: runner.os == 'Linux'
+      - name: 配置编译缓存
         run: |
           {
             echo 'SCCACHE_GHA_ENABLED=true'
             echo 'SCCACHE_GHA_VERSION=fork-v1'
-            echo 'SCCACHE_GHA_RW_MODE=READ_WRITE'
+            echo 'SCCACHE_GHA_RW_MODE=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) && 'READ_WRITE' || 'READ_ONLY' }}'
           } >> "$GITHUB_ENV"
       - uses: mozilla-actions/sccache-action@v0.0.11
-        if: runner.os == 'Linux'
         id: sccache
         with:
           version: v0.18.0
-      - name: 启动本地 sccache
-        if: runner.os == 'macOS'
-        id: local_sccache
-        run: sccache --start-server
       - uses: Swatinem/rust-cache@v2.9.2
-        if: runner.os == 'Linux'
         with:
           workspaces: codex-rs
-          shared-key: fork-build-linux-v1-downloads
+          shared-key: fork-build-${{ runner.os == 'macOS' && 'macos-arm64' || 'linux' }}-v1-downloads
           cache-targets: false
           cache-bin: false
           save-if: ${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
@@ -202,14 +192,14 @@ jobs:
           path: codex-rs/target/cargo-timings/
           if-no-files-found: ignore
       - name: 保存构建缓存统计
-        if: always() && (steps.sccache.outcome == 'success' || steps.local_sccache.outcome == 'success')
+        if: always() && steps.sccache.outcome == 'success'
         run: |
           mkdir -p fork-sccache
           sccache --show-stats --stats-format=json > fork-sccache/build.json
           scripts/fork/cache_diagnostics.py --log "$SCCACHE_ERROR_LOG" --cwd codex-rs --output fork-sccache/diagnostics.json
           scripts/fork/build_report.py --directory fork-sccache --stats build.json --timings codex-rs/target/cargo-timings
       - name: 上传构建缓存统计
-        if: always() && (steps.sccache.outcome == 'success' || steps.local_sccache.outcome == 'success')
+        if: always() && steps.sccache.outcome == 'success'
         uses: actions/upload-artifact@v7.0.0
         with:
           name: fork-build-sccache-${{ matrix.target }}-${{ github.sha }}
