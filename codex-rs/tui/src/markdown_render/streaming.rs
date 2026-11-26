@@ -28,6 +28,8 @@ pub(crate) struct StreamingMarkdownRender {
     pub(crate) has_reference_link_definition: bool,
     /// Whether the first block is raw HTML, which joins a retained prefix without a separator.
     pub(crate) first_top_level_block_is_html: bool,
+    /// Source start of the final block if it contains a list whose spacing can still change.
+    pub(crate) mutable_list_start: Option<usize>,
     /// Transformable fences in the final block stay mutable, including within a list or quote.
     pub(crate) mutable_fence_start: Option<usize>,
 }
@@ -88,6 +90,7 @@ pub(crate) fn render_with_copy_sources(
         last_start: 0,
         first_is_html: false,
         mutable_fence_start: None,
+        mutable_list_start: None,
     };
     let mut writer = Writer::new(input, width, cwd, is_hidden_link_destination);
     // Drop the consumed parser before the rendering state, including on unwind.
@@ -110,6 +113,9 @@ pub(crate) fn render_with_copy_sources(
         has_reference_link_definition,
         first_top_level_block_is_html: parser.first_is_html,
         mutable_fence_start: parser.mutable_fence_start,
+        mutable_list_start: parser
+            .mutable_list_start
+            .filter(|_| list_spacing == ListSpacing::Uniform),
     }
 }
 
@@ -121,6 +127,7 @@ struct TopLevelBlockTracker<I> {
     last_start: usize,
     first_is_html: bool,
     mutable_fence_start: Option<usize>,
+    mutable_list_start: Option<usize>,
 }
 
 impl<'a, I> Iterator for TopLevelBlockTracker<I>
@@ -133,12 +140,16 @@ where
         let (event, range) = self.iter.next()?;
         if self.depth == 0 && matches!(&event, Event::Start(_) | Event::Rule | Event::Html(_)) {
             self.mutable_fence_start = None;
+            self.mutable_list_start = None;
             self.block_count += 1;
             self.last_start = range.start;
             if self.block_count == 1 {
                 self.first_is_html =
                     matches!(&event, Event::Start(Tag::HtmlBlock) | Event::Html(_));
             }
+        }
+        if matches!(&event, Event::Start(Tag::List(_))) {
+            self.mutable_list_start = Some(self.last_start);
         }
         if let Event::Start(Tag::CodeBlock(pulldown_cmark::CodeBlockKind::Fenced(info))) = &event
             && (super::preferences::current().mermaid

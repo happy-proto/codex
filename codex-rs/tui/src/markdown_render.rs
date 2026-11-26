@@ -6,8 +6,7 @@
 //! `markdown.rs`. Launch-time `tui.rendering` preferences preserve disabled features as source.
 //!
 //! Local file-link parsing and display policy live in [`local_links`].
-//! List spacing stays a renderer policy: compact while streaming in an owned viewport, uniform
-//! after source-backed consolidation, and historical spacing for native scrollback.
+//! List spacing is uniform in an owned viewport and uses historical spacing for native scrollback.
 //!
 //! ## Table rendering pipeline
 //!
@@ -1138,6 +1137,7 @@ impl<'a, 'policy> Writer<'a, 'policy> {
         self.flush_current_line();
         let separate = match self.list_spacing {
             ListSpacing::AfterMultiline => after_multiline,
+            #[cfg(test)]
             ListSpacing::Compact => false,
             ListSpacing::Uniform => self.uniform_lists.last().is_some_and(|list| list.has_item),
         };
