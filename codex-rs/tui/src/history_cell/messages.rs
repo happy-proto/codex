@@ -559,6 +559,17 @@ impl HistoryCell for AgentMessageCell {
         wrapped
     }
 
+    fn retained_hyperlink_lines(&self, width: u16, _detailed: bool) -> Vec<HyperlinkLine> {
+        if self
+            .lines
+            .iter()
+            .all(|line| line.line.width() + 2 <= usize::from(width))
+        {
+            return prefix_agent_stream_lines(self.lines.clone(), self.is_first_line);
+        }
+        self.display_hyperlink_lines(width)
+    }
+
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
         self.display_hyperlink_lines(width)
     }
@@ -846,15 +857,7 @@ impl HistoryCell for StreamingAgentTailCell {
     fn display_hyperlink_lines(&self, _width: u16) -> Vec<HyperlinkLine> {
         // Tail lines are already rendered at the controller's current stream width.
         // Re-wrapping them here can split table borders and produce malformed in-flight rows.
-        normalize_whitespace_only_hyperlink_lines(prefix_hyperlink_lines(
-            self.lines.clone(),
-            if self.is_first_line {
-                "• ".dim()
-            } else {
-                "  ".into()
-            },
-            "  ".into(),
-        ))
+        prefix_agent_stream_lines(self.lines.clone(), self.is_first_line)
     }
 
     fn transcript_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
@@ -869,6 +872,18 @@ impl HistoryCell for StreamingAgentTailCell {
         !self.is_first_line
     }
 }
+fn prefix_agent_stream_lines(lines: Vec<HyperlinkLine>, is_first_line: bool) -> Vec<HyperlinkLine> {
+    normalize_whitespace_only_hyperlink_lines(prefix_hyperlink_lines(
+        lines,
+        if is_first_line {
+            "• ".dim()
+        } else {
+            "  ".into()
+        },
+        "  ".into(),
+    ))
+}
+
 pub(crate) fn new_user_prompt(
     message: String,
     text_elements: Vec<TextElement>,

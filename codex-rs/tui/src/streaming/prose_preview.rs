@@ -5,8 +5,10 @@
 //! Cropped previews skip completed directives atomically so their prompt text stays hidden.
 
 use super::render::render_source;
+use super::render::render_source_with_list_spacing;
 use crate::history_cell::HistoryRenderMode;
 use crate::inline_visualization::InlineVisualizationContext;
+use crate::markdown_render::ListSpacing;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::terminal_hyperlinks::lines_with_sources_eq;
 use ratatui::text::Line;
@@ -21,10 +23,16 @@ pub(super) enum PreviewMode {
     Math,
 }
 
+pub(super) struct ListPreview<'a> {
+    pub(super) committed_source: &'a str,
+    pub(super) replaces_from: usize,
+}
+
 /// Tracks one append-only incomplete line; reset when a newline is committed.
 #[derive(Default)]
 pub(super) struct ProsePreview {
     pub(super) lines: Vec<HyperlinkLine>,
+    pub(super) replaces_from: Option<usize>,
     scanned_len: usize,
     safe_len: usize,
     rich_safe_len: usize,
@@ -39,6 +47,7 @@ impl ProsePreview {
         width: Option<usize>,
         cwd: &Path,
         mode: PreviewMode,
+        list: Option<ListPreview<'_>>,
         inline_visualization_context: Option<&InlineVisualizationContext>,
     ) -> bool {
         // Only scan newly arrived bytes, including on very long single-line responses.
@@ -101,7 +110,23 @@ impl ProsePreview {
         {
             start = range.end;
         }
+        // Include the open list when previewing a partial item so its height can affect
+        // sibling spacing immediately. Keep the extra render within the preview byte budget.
+        let list = list.filter(|list| {
+            !source.is_empty() && list.committed_source.len() + source.len() <= MAX_PREVIEW_BYTES
+        });
+        let replaces_from = list.as_ref().map(|list| list.replaces_from);
         let mut lines = match mode {
+            PreviewMode::Prose(HistoryRenderMode::Rich) if let Some(list) = list => {
+                render_source_with_list_spacing(
+                    &format!("{}{source}", list.committed_source),
+                    width,
+                    cwd,
+                    HistoryRenderMode::Rich,
+                    inline_visualization_context,
+                    ListSpacing::Uniform,
+                )
+            }
             PreviewMode::Prose(render_mode) => render_source(
                 &source[start..],
                 width,
@@ -117,10 +142,11 @@ impl ProsePreview {
         if start > 0 {
             lines.insert(0, HyperlinkLine::new(Line::from("…")));
         }
-        if lines_with_sources_eq(&self.lines, &lines) {
+        if self.replaces_from == replaces_from && lines_with_sources_eq(&self.lines, &lines) {
             return false;
         }
         self.lines = lines;
+        self.replaces_from = replaces_from;
         true
     }
 }

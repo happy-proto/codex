@@ -59,6 +59,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use super::StreamState;
+use super::prose_preview::ListPreview;
 use super::prose_preview::PreviewMode;
 use super::prose_preview::ProsePreview;
 use super::render::StreamingRender;
@@ -185,8 +186,27 @@ impl StreamCore {
             && (self.render.pending_math_start.is_some()
                 || prose_preview && (pending.starts_with("$$") || pending.starts_with("\\[")));
         if math || prose_preview {
+            let list_start = if math || pending.is_empty() {
+                None
+            } else {
+                self.render.mutable_list_start
+            };
+            let list = list_start
+                .and_then(|source_start| {
+                    let prefix_len = self.stable_prefix_len_for_source_start(source_start);
+                    let lines = self.render.lines.get(prefix_len..)?;
+                    // Keep the rendered separator between the preceding block and the list.
+                    let separator = lines.first().is_some_and(|line| line.line.width() == 0);
+                    let replaces_from = prefix_len + usize::from(separator);
+                    (replaces_from >= self.enqueued_stable_len)
+                        .then_some((source_start, replaces_from))
+                })
+                .map(|(source_start, replaces_from)| ListPreview {
+                    committed_source: &self.state.collector.committed_source()[source_start..],
+                    replaces_from,
+                });
             self.preview.update(
-                pending,
+                self.state.collector.pending_source(),
                 self.width,
                 &self.cwd,
                 if math {
@@ -194,6 +214,7 @@ impl StreamCore {
                 } else {
                     PreviewMode::Prose(self.render_mode)
                 },
+                list,
                 self.inline_visualization_context.as_ref(),
             )
         } else {
@@ -206,8 +227,7 @@ impl StreamCore {
     ///
     /// This intentionally re-renders from the full raw source instead of
     /// trying to stitch together queued stable lines and the current tail. The
-    /// remaining rows keep the stream's spacing so emitted offsets stay valid. Consolidation
-    /// renders the returned source with the completed cell's spacing policy. Callers that skip
+    /// remaining rows keep the stream's spacing so emitted offsets stay valid. Callers that skip
     /// `reset()` can accidentally replay a finished stream into the next answer.
     fn finalize_remaining(&mut self) -> (Vec<HyperlinkLine>, String) {
         let source = self.state.collector.finalize_and_take_source();
@@ -271,7 +291,11 @@ impl StreamCore {
     #[inline]
     fn current_tail_lines(&self) -> Vec<HyperlinkLine> {
         let start = self.enqueued_stable_len.min(self.render.lines.len());
-        let mut lines = self.render.lines[start..].to_vec();
+        let end = self
+            .preview
+            .replaces_from
+            .unwrap_or(self.render.lines.len());
+        let mut lines = self.render.lines[start..end.max(start)].to_vec();
         lines.extend(self.preview.lines.iter().cloned());
         lines
     }
@@ -307,7 +331,6 @@ impl StreamCore {
         }
 
         self.recompute_render(previous_width, self.render_mode);
-        self.refresh_preview();
         if had_pending_queue
             && self.emitted_stable_len == self.render.lines.len()
             && self.emitted_stable_len > 0
@@ -324,9 +347,11 @@ impl StreamCore {
             // tail to preserve.
             self.emitted_stable_len = self.render.lines.len();
             self.enqueued_stable_len = self.render.lines.len();
+            self.refresh_preview();
             return;
         }
         self.rebuild_stable_queue_from_render();
+        self.refresh_preview();
     }
 
     /// Clear all accumulated state for current stream.
@@ -356,7 +381,6 @@ impl StreamCore {
         }
 
         self.recompute_render(self.width, previous_render_mode);
-        self.refresh_preview();
         if had_pending_queue
             && self.emitted_stable_len == self.render.lines.len()
             && self.emitted_stable_len > 0
@@ -367,9 +391,11 @@ impl StreamCore {
         if self.emitted_stable_len > 0 && !had_pending_queue && !had_live_tail {
             self.emitted_stable_len = self.render.lines.len();
             self.enqueued_stable_len = self.render.lines.len();
+            self.refresh_preview();
             return;
         }
         self.rebuild_stable_queue_from_render();
+        self.refresh_preview();
     }
 
     /// Preserve an emitted source prefix when resizing changes earlier diagrams' heights.
@@ -438,6 +464,7 @@ impl StreamCore {
         [
             table_start,
             self.render.mutable_fence_start,
+            self.render.mutable_list_start,
             self.render.pending_math_start,
             bare_list_marker.then_some(marker_start),
         ]
@@ -506,7 +533,7 @@ impl StreamCore {
     /// column widths. For `PendingHeader`, only content from the speculative
     /// header line onward is kept mutable so earlier prose can continue
     /// streaming. When no table is detected, everything flows directly to
-    /// stable. Unclosed display math also stays mutable until its closing delimiter arrives.
+    /// stable. Unclosed display math and lists with uniform spacing also stay mutable.
     fn active_tail_budget_lines(&mut self) -> usize {
         if self.render_mode == HistoryRenderMode::Raw {
             return 0;

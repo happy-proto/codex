@@ -1,4 +1,4 @@
-//! Exercise compact streaming and source-backed completion without list-specific holdback.
+//! Exercise list spacing across streaming, source-backed completion, and interruption.
 
 use super::*;
 use crate::local_settings::LocalSettings;
@@ -6,7 +6,7 @@ use codex_config::types::AltScreenMode;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
-async fn list_spacing_streams_compact_then_reflows_on_completion_or_interruption() {
+async fn list_spacing_matches_completion_or_interruption_in_owned_transcript() {
     let source = "1. One\n2. This item has enough words to wrap\n3. Three\n4. Four";
     let mut stages = Vec::new();
     for (enabled, alternate_screen) in [
@@ -36,21 +36,32 @@ async fn list_spacing_streams_compact_then_reflows_on_completion_or_interruption
                 }
                 drain_insert_history(&mut rx);
                 let mut live = Vec::new();
+                let mut live_tail = Vec::new();
                 for chunk in source.split_inclusive('\n') {
                     let (cell, tail) = if plan {
                         chat.on_plan_delta(chunk.into());
                         let controller = chat.plan_stream_controller.as_mut().unwrap();
                         (
                             controller.on_commit_tick_batch(usize::MAX).0,
-                            controller.current_tail_display_lines(),
+                            crate::terminal_hyperlinks::visible_lines(
+                                controller.current_tail_display_lines(),
+                            ),
                         )
                     } else {
                         chat.on_agent_message_delta(chunk.into());
                         let controller = chat.stream_controller.as_mut().unwrap();
-                        (
-                            controller.on_commit_tick_batch(usize::MAX).0,
-                            controller.current_tail_lines(),
-                        )
+                        let cell = controller.on_commit_tick_batch(usize::MAX).0;
+                        let lines = controller.current_tail_lines();
+                        let tail = if lines.is_empty() {
+                            Vec::new()
+                        } else {
+                            history_cell::StreamingAgentTailCell::new(
+                                lines,
+                                controller.tail_starts_stream(),
+                            )
+                            .display_lines(width)
+                        };
+                        (cell, tail)
                     };
                     live.extend(
                         drain_insert_history_with(&mut rx, |cell| cell.display_lines(width))
@@ -61,9 +72,11 @@ async fn list_spacing_streams_compact_then_reflows_on_completion_or_interruption
                         live.extend(cell.display_lines(width));
                     }
                     if chunk.ends_with('\n') {
-                        assert!(tail.is_empty(), "completed list rows must not be held back");
+                        assert_eq!(tail.is_empty(), !owned);
                     }
+                    live_tail = tail;
                 }
+                live.extend(live_tail);
                 if interrupted {
                     chat.flush_answer_and_plan_streams();
                 } else if plan {
@@ -74,16 +87,17 @@ async fn list_spacing_streams_compact_then_reflows_on_completion_or_interruption
                 let mut completed = None;
                 while let Ok(event) = rx.try_recv() {
                     match event {
-                        AppEvent::InsertHistoryCell(cell) => live.extend(cell.display_lines(width)),
+                        AppEvent::InsertHistoryCell(cell)
+                            if cell.as_any().is::<history_cell::ProposedPlanCell>() =>
+                        {
+                            assert_eq!(cell.copy_source().unwrap().trim_end(), source);
+                            completed = Some(cell);
+                        }
                         AppEvent::ConsolidateAgentMessage {
                             source: final_source,
                             cwd,
-                            deferred_history_cell,
                             ..
                         } => {
-                            if let Some(cell) = deferred_history_cell {
-                                live.extend(cell.display_lines(width));
-                            }
                             assert_eq!(final_source.trim_end(), source);
                             completed = Some(Box::new(history_cell::AgentMarkdownCell::new(
                                 final_source,
@@ -109,6 +123,8 @@ async fn list_spacing_streams_compact_then_reflows_on_completion_or_interruption
                         .map(|line| line.to_string().trim_end().to_owned())
                         .collect::<Vec<_>>()
                         .join("\n")
+                        .trim_end()
+                        .to_owned()
                 };
                 let render = |width| {
                     if owned {
@@ -129,10 +145,14 @@ async fn list_spacing_streams_compact_then_reflows_on_completion_or_interruption
                     "width and spacing must both key the render cache"
                 );
                 let live = text(live);
-                assert_eq!(live.contains("wrap\n\n"), !owned);
+                let narrow = text(crate::terminal_hyperlinks::visible_lines(narrow));
+                if owned {
+                    assert_eq!(live, narrow);
+                } else {
+                    assert!(narrow.contains("wrap\n\n"));
+                }
                 let stage = format!(
-                    "owned={owned}, plan={plan}\nStreaming:\n{live}\nCompleted:\n{}\nWide:\n{}",
-                    text(crate::terminal_hyperlinks::visible_lines(narrow)),
+                    "owned={owned}, plan={plan}\nStreaming:\n{live}\nCompleted:\n{narrow}\nWide:\n{}",
                     text(crate::terminal_hyperlinks::visible_lines(wide))
                 );
                 if enabled && alternate_screen == AltScreenMode::Always {

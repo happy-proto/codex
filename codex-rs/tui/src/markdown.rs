@@ -196,6 +196,11 @@ pub(crate) fn render_streaming_markdown_agent_with_links_and_cwd(
                 .strip_suffix(&normalized[boundary..])
                 .map_or(0, str::len)
         });
+        rendered.mutable_list_start = rendered.mutable_list_start.map(|boundary| {
+            markdown_source
+                .strip_suffix(&normalized[boundary..])
+                .map_or(0, str::len)
+        });
     }
     rendered
 }
