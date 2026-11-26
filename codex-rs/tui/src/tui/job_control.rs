@@ -207,6 +207,12 @@ impl PreparedResumeAction {
                 terminal.clear()?;
             }
         }
+        // Both the main TUI and nested pickers draw through this resume action.
+        if let Some(reporter) = tui.program_resume.as_mut()
+            && let Err(error) = reporter.refresh(tui.terminal.backend_mut())
+        {
+            tracing::debug!(%error, "failed to refresh terminal resume report");
+        }
         Ok(())
     }
 }

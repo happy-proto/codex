@@ -1408,6 +1408,9 @@ See the Codex keymap documentation for supported actions and examples."
 
         let mut parked_side_completions = HashMap::<_, Vec<AppEvent>>::new();
         let exit_reason_result = loop {
+            if tui.program_resume.is_some() && !app.reconnect.offline {
+                tui.update_program_resume(app.program_resume_target());
+            }
             let displayed_session = backends.displayed;
             let displayed_owner = backends.displayed_owner();
             if let Some(events) = parked_side_completions.remove(&displayed_owner) {

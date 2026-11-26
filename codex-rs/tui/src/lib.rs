@@ -26,6 +26,9 @@ pub use crate::startup_error::LocalStateDbStartupError;
 use additional_dirs::add_dir_warning_message;
 use app::App;
 pub use app::AppExitInfo;
+pub use program_resume::set_program_resume_token;
+
+mod program_resume;
 pub use app::DisconnectInfo;
 pub use app::ExitReason;
 pub use app::ResumableThread;
