@@ -387,6 +387,11 @@ impl TranscriptView {
         if ids.is_empty() {
             return;
         }
+        // Expanding the newest footer inserts rows above it. Follow the bottom so
+        // those rows can fill the viewport without pushing the footer off-screen.
+        let follow_completion = self.is_following()
+            && index + 1 == cells.len()
+            && self.has_completion_disclosure(cells);
         let key = cells.get(index).map_or(EntryKey::Live, EntryKey::cell);
         let matched = self.is_search_expanded(key);
         self.disclosure.anchor_control = None;
@@ -452,7 +457,11 @@ impl TranscriptView {
         }
         self.disclosure.clamp_after_collapse = collapsing;
         self.disclosure.focused = Some((key, ids));
-        self.position = Position::Reading(anchor);
+        self.position = if follow_completion {
+            Position::Latest
+        } else {
+            Position::Reading(anchor)
+        };
         self.cache.clear();
         self.live_key = None;
         self.live_separated = None;
