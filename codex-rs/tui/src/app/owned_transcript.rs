@@ -214,16 +214,9 @@ impl App {
     }
 
     pub(super) fn sync_owned_transcript(&mut self, width: u16) -> bool {
-        let completion = self.transcript_cells.last().and_then(|cell| {
-            cell.as_any()
-                .downcast_ref::<history_cell::FinalMessageSeparator>()
-        });
-        let hide_completion = self.chat_widget.set_workspace_completion(completion)
-            && self.conversation_frame.shared_footer.is_some();
         let chat_widget = &self.chat_widget;
         let transcript_width = chat_widget.history_wrap_width(width);
         let view = &mut self.transcript_view;
-        view.set_workspace_completion(&self.transcript_cells, hide_completion);
         view.mouse_scroll_speed = self.local_settings.tui.mouse_scroll_speed.unwrap_or(1.0);
         view.primary_selection = self.right_click_paste_environment.primary;
         view.copy_on_select = self.local_settings.copy_on_select();
@@ -238,6 +231,17 @@ impl App {
             active,
         );
         let active_key = chat_widget.active_cell_transcript_key();
+        let completion = self.transcript_cells.last().and_then(|cell| {
+            cell.as_any()
+                .downcast_ref::<history_cell::FinalMessageSeparator>()
+        });
+        let has_disclosure = view.has_completion_disclosure(&self.transcript_cells);
+        let hide_completion = self
+            .chat_widget
+            .set_workspace_completion(completion, has_disclosure)
+            && self.conversation_frame.shared_footer.is_some();
+        view.set_workspace_completion(&self.transcript_cells, hide_completion);
+        let chat_widget = &self.chat_widget;
         let detailed = view.is_detailed();
         let search_changed = view.sync_search_live_tail(transcript_width, active_key, |width| {
             chat_widget.active_cell_transcript_hyperlink_lines(width)
