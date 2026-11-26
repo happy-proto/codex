@@ -37,6 +37,7 @@
 | 0029 | [@ 菜单的会话筛选](0029-at-session-filter.md) |
 | 0030 | [终端剪贴板路由](0030-rex-clipboard.md) |
 | 0031 | [内置会话管理 skill](0031-session-skill.md) |
+| 0032 | [Rex 终端程序恢复](0032-rex-program-resume.md) |
 
 维护规则见 [AGENTS.md](../../AGENTS.md)，操作方法见 [维护 skill](../../.agents/skills/codex-fork-maintenance/SKILL.md)。
 同步上游按 [同步与发布](../../.agents/skills/codex-fork-maintenance/references/upstream-sync.md) 执行。

@@ -989,6 +989,47 @@ pub(super) async fn run_main_inner(
         tracing::warn!("Could not save screen-reader detection: {err}");
     }
 
+    if let Some(reporter) = crate::program_resume::Reporter::new(
+        cli.dangerously_bypass_approvals_and_sandbox,
+        cli.no_alt_screen,
+        cli.model.as_deref(),
+    ) && implicit_connection
+        && !workload_identity_selected
+        && !cli.no_daemon
+        && !cli.strict_config
+        && match &app_server_target {
+            AppServerTarget::Embedded => true,
+            AppServerTarget::LocalDaemon {
+                endpoint: RemoteAppServerEndpoint::UnixSocket { socket_path },
+                ..
+            } => {
+                managed_daemon
+                    || codex_app_server_client::verified_local_daemon_socket(socket_path.as_path())
+                        .is_ok_and(|path| path.is_some())
+            }
+            _ => false,
+        }
+        && std::env::var_os("CODEX_HOME").is_none()
+        && std::env::var_os(codex_exec_server::CODEX_EXEC_SERVER_URL_ENV_VAR).is_none()
+        && cli.config_overrides.raw_overrides.is_empty()
+        && cli.config_profile_v2.is_none()
+        && cli.resume_approval_preset.is_none()
+        && !cli.oss
+        && !cli.bypass_hook_trust
+        && cli.sandbox_mode.is_none()
+        && cli.approval_policy.is_none()
+        && cli.add_dir.is_empty()
+        && arg0_paths.codex_self_exe.as_ref().is_some_and(|current| {
+            which::which("codex")
+                .ok()
+                .and_then(|path| path.canonicalize().ok())
+                .zip(current.canonicalize().ok())
+                .is_some_and(|(found, current)| found == current)
+        })
+    {
+        startup_draft.tui_mut().program_resume = Some(reporter);
+    }
+
     // Keep the large app future off the enclosing CLI startup stack during transitions.
     let app_result = crate::boxed_future!(run_ratatui_app(
         cli,
