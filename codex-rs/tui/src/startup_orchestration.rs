@@ -989,13 +989,14 @@ pub(super) async fn run_main_inner(
         tracing::warn!("Could not save screen-reader detection: {err}");
     }
 
-    if let Some(reporter) = crate::program_resume::Reporter::new()
-        && implicit_connection
+    if let Some(reporter) = crate::program_resume::Reporter::new(
+        cli.dangerously_bypass_approvals_and_sandbox,
+        cli.no_alt_screen,
+        cli.model.as_deref(),
+    ) && implicit_connection
         && !workload_identity_selected
         && !cli.no_daemon
         && !cli.strict_config
-        && !cli.no_alt_screen
-        && cli.model.is_none()
         && match &app_server_target {
             AppServerTarget::Embedded => true,
             AppServerTarget::LocalDaemon {
@@ -1015,7 +1016,6 @@ pub(super) async fn run_main_inner(
         && cli.resume_approval_preset.is_none()
         && !cli.oss
         && !cli.bypass_hook_trust
-        && !cli.dangerously_bypass_approvals_and_sandbox
         && cli.sandbox_mode.is_none()
         && cli.approval_policy.is_none()
         && cli.add_dir.is_empty()

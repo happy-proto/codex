@@ -5,7 +5,15 @@ Rex 可以在重启服务器后以 `codex resume <UUID>` 恢复 pane 的主会�
 
 - CLI 在创建线程前取走 `OSC7577_TOKEN`，仅在进程内交给 TUI。子进程环境、日志以及 OSC 报文均不携带 token。
 - TUI 在主会话已有本机 rollout 时上报恢复命令和目录。切换到不可恢复的目标会撤销旧记录。用户明确退出时撤销记录，PTY 输入断开和终止信号保留记录。从 job control 挂起回到前台时重发。
-- 上报形状符合 Rex 内置规则，命令以裸名称 `codex` 启动，目录由独立的 `cwd` 字段提供。只在当前 PATH 的 `codex` 指向当前运行的 CLI 时登记。恢复时按新 shell 的 PATH 查找 `codex`，并采用正常的本机后端选择。自定义 `CODEX_HOME`、显式后端、远端与 Cloud 会话以及无法重建的启动配置暂不登记。
+- 命令以裸名称 `codex` 启动，目录由独立的 `cwd` 字段提供。只在当前 PATH 的 `codex` 指向当前运行的 CLI 时登记。恢复时按新 shell 的 PATH 查找可执行文件，并采用正常的本机后端选择。自定义 `CODEX_HOME`、显式后端、远端与 Cloud 会话以及无法重建的启动配置暂不登记。
+- 普通启动上报 `codex resume <UUID>`，符合 Rex 内置规则。显式使用 YOLO、`--no-alt-screen` 或 `--model`（`-m`）时，将对应参数按原顺序附在 UUID 后，保留启动行为。Fish 函数等包装器追加的参数由 Codex 解析后上报。Rex 需要在其 `init.lua` 中为要自动恢复的参数配置对应的信任规则。
+
+```lua
+rex.set("resume.trust.codex.flags.--dangerously-bypass-approvals-and-sandbox", "keep")
+rex.set("resume.trust.codex.flags.--no-alt-screen", "keep")
+rex.set("resume.trust.codex.flags.--model", { "keep", values = 1 })
+rex.set("resume.trust.codex.flags.-m", { "keep", values = 1 })
+```
 
 实现入口是 `codex-rs/cli/src/main.rs`、`codex-rs/tui/src/program_resume.rs` 和 TUI 主事件循环。
 保持会话格式和现有 resume CLI 兼容。发布 CI 运行 `program_resume` 模块测试。更新时检查参数逐项编码、超限后撤销旧记录、主动退出和 PTY 断开的区别。
