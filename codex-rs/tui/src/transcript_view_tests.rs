@@ -1803,7 +1803,7 @@ fn legacy_progress_stays_visible_until_a_final_answer() {
     assert!(screen.contains("▸ Worked for 2s"), "{screen}");
     assert!(screen.contains("Fixture verified") && screen.contains("Review complete"));
     assert!(!screen.contains("Intermediate progress"));
-    assert!(screen.find("Fixture verified") < screen.find("▸ Worked for 2s"));
+    assert!(screen.find("Fixture verified").unwrap() < screen.find("▸ Worked for 2s").unwrap());
 
     cells.extend([
         prompt("Summarize"),
