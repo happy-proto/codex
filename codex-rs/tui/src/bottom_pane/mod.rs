@@ -523,7 +523,7 @@ impl BottomPane {
         if let Some(status) = source.status_widget() {
             self.workspace_indicator = status.clone();
         } else {
-            self.workspace_indicator.update_header("Working".into());
+            self.workspace_indicator.update_header("Working".to_owned());
         }
         self.workspace_indicator
             .set_recent_generation_speed(self.recent_generation_speed.clone());
@@ -3251,7 +3251,7 @@ mod tests {
         pane.set_workspace_status(status.clone());
         pane.set_recent_generation_speed(Some(23.8));
         pane.update_status(
-            "Thinking".into(),
+            "Thinking".to_owned(),
             Some("Details that must not add rows in the split layout".into()),
             StatusDetailsCapitalization::Preserve,
             3,

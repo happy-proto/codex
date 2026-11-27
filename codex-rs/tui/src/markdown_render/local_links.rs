@@ -212,7 +212,7 @@ pub(super) fn local_link_url(dest_url: &str, cwd: Option<&Path>) -> Option<Url> 
     if dest_url.chars().any(char::is_control) {
         return None;
     }
-    let (path, _) = parse_local_link_target(dest_url)?;
+    let (path, _) = parse_local_link_target(dest_url, /*for_navigation*/ true)?;
     if path.chars().any(char::is_control)
         || cfg!(unix)
             && (path.starts_with("//")

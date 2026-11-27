@@ -540,7 +540,7 @@ mod tests {
             false,
             Default::default(),
         );
-        row.update_header("Reconnecting... 1/100 (retrying in 115s)".into());
+        row.update_header("Reconnecting... 1/100 (retrying in 115s)".to_owned());
         let started = row.header_started_at;
         assert_eq!(row.header_at(started), "Retrying in 1m 55s (1/100)");
         assert_eq!(
@@ -555,7 +555,7 @@ mod tests {
             row.header_at(started + Duration::from_secs(120)),
             "Reconnecting... (1/100)",
         );
-        row.update_header("Working".into());
+        row.update_header("Working".to_owned());
         assert_eq!(row.header_at(Instant::now()), "Working");
         assert!(row.retry_wait().is_none());
     }
@@ -569,7 +569,7 @@ mod tests {
             false,
             Default::default(),
         );
-        row.update_header("Reconnecting... 2/100 (retrying in 449s)".into());
+        row.update_header("Reconnecting... 2/100 (retrying in 449s)".to_owned());
         let timer = StatusTimer::default();
         let indicator = StatusIndicator {
             row: &row,
@@ -596,12 +596,12 @@ mod tests {
             Default::default(),
         );
         let header = "Reconnecting... 1/5 (retrying in 183s)";
-        row.update_header(header.into());
+        row.update_header(header.to_owned());
         row.header_started_at = Instant::now() - Duration::from_secs(2);
         let started = row.header_started_at;
 
         // Restoring the current status after stream idle is not a new retry.
-        row.update_header(header.into());
+        row.update_header(header.to_owned());
         let timer = StatusTimer::default();
         let rendered = StatusIndicator {
             row: &row,
@@ -626,10 +626,10 @@ mod tests {
             Default::default(),
         );
         let header = "Reconnecting... (retrying in 60s)";
-        row.update_header(header.into());
+        row.update_header(header.to_owned());
         row.header_started_at = Instant::now() - Duration::from_secs(60);
         assert_eq!(row.header_at(Instant::now()), "Reconnecting...");
-        row.update_header(header.into());
+        row.update_header(header.to_owned());
         row.restart_retry_countdown();
         assert_eq!(row.header_at(row.header_started_at), "Retrying in 1m 00s");
     }

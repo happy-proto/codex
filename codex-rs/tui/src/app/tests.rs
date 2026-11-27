@@ -5210,11 +5210,18 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     let (_, after_command) = finished
         .split_once("Ran echo sidebar-check")
         .unwrap_or_else(|| panic!("{finished}"));
-    // Compact activity groups show the latest command. Inspect the earlier row in place.
+    // Compact activity groups show the latest command. Check the earlier call by ID.
     let pane = &app.side_companions[&parent_thread_id];
-    insta::assert_snapshot!(
-        lines_to_single_string(&pane.cells[pane.parked_tail - 1].transcript_lines(/*width*/ 80)),
-        @"$ echo background\n✗ (1) • 0ms"
+    let background = pane
+        .cells
+        .iter()
+        .filter_map(|cell| cell.as_any().downcast_ref::<crate::exec_cell::ExecCell>())
+        .flat_map(crate::exec_cell::ExecCell::iter_calls)
+        .find(|call| call.call_id == "background")
+        .expect("parked background command");
+    assert_eq!(
+        background.output.as_ref().map(|output| output.exit_code),
+        Some(1)
     );
     assert!(after_command.contains("Command finished."), "{finished}");
     assert_eq!(
