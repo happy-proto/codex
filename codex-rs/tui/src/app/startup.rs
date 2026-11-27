@@ -1222,13 +1222,9 @@ See the Codex keymap documentation for supported actions and examples."
         if !tui.is_terminal_focused() {
             app.recap.note_focus_lost(Instant::now());
         }
-        let _ =
-            app.initialize_server_version_notice(cli_version(), app_server.server_version());
+        let _ = app.initialize_server_version_notice(cli_version(), app_server.server_version());
         if initial_server_version_notice.is_none() {
-            app.update_server_version_overview_notice(
-                cli_version(),
-                /*server_version*/ None,
-            );
+            app.update_server_version_overview_notice(cli_version(), /*server_version*/ None);
         }
         app.backend_registry.connect(&app_server);
         if let Some(thread_id) = app.current_displayed_thread_id() {
@@ -1481,8 +1477,7 @@ See the Codex keymap documentation for supported actions and examples."
                 app.reconnect.cloud_resume = None;
             }
             // Process archive completions before the picker can list or mutate those threads.
-            if app.pending_open_resume_picker && app.agents_overview.pending_archives.is_empty()
-            {
+            if app.pending_open_resume_picker && app.agents_overview.pending_archives.is_empty() {
                 app.pending_open_resume_picker = false;
                 match Box::pin(app.open_resume_picker_for_backends(tui, &mut backends)).await {
                     Ok(AppRunControl::Continue) => {}
@@ -1590,8 +1585,7 @@ See the Codex keymap documentation for supported actions and examples."
                 (!matches!(app.app_server_target, AppServerTarget::Embedded)
                     && has_pending_app_events)
                     || initial_session_header_pending
-                    || (pending_startup_draft.is_some()
-                        || app.startup_protected_input_boundary)
+                    || (pending_startup_draft.is_some() || app.startup_protected_input_boundary)
                         && has_pending_app_events
                     || (!waiting_for_initial_session_configured
                         && app.has_queued_startup_protected_request());
@@ -1604,8 +1598,7 @@ See the Codex keymap documentation for supported actions and examples."
                 pending_resize = None;
                 settled_size_tags = crate::terminal_size_telemetry::tags(size);
             } else if size != last_screen_size {
-                pending_resize =
-                    Some((size, Instant::now() + Duration::from_secs(/*secs*/ 15)));
+                pending_resize = Some((size, Instant::now() + Duration::from_secs(/*secs*/ 15)));
             }
             last_screen_size = size;
             let rate_limit_poll_deadline = app

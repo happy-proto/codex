@@ -107,6 +107,19 @@ impl App {
                 }
                 companion.cells.push(Arc::from(cell));
             }
+            AppEvent::CompleteBackgroundCommand(mut completed) => {
+                let call_id = &completed.group.calls[0].call_id;
+                if let Some((index, member, mut group)) =
+                    super::activity_groups::pending_command_group(&companion.cells, call_id)
+                {
+                    group.group.calls[member] = completed.group.calls.remove(0);
+                    let cell: Arc<dyn HistoryCell> = Arc::new(group);
+                    companion
+                        .view
+                        .replace_group(&companion.cells, index..index + 1, &cell);
+                    companion.cells[index] = cell;
+                }
+            }
             AppEvent::SideCommandCompleted(ThreadItemPayload::CommandExecution {
                 id,
                 status,

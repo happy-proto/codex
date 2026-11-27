@@ -52,6 +52,7 @@ impl AppEventSender {
             if matches!(
                 &event,
                 AppEvent::InsertHistoryCell(_)
+                    | AppEvent::CompleteBackgroundCommand(_)
                     | AppEvent::ConsolidateAgentMessage { .. }
                     | AppEvent::ConsolidateProposedPlan(_)
                     | AppEvent::StartCommitAnimation
